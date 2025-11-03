@@ -135,6 +135,83 @@ def is_face_not_occluded(det: Dict, **kwargs) -> bool:
     return True
 
 
+def compute_iou(bbox1: List[float], bbox2: List[float]) -> float:
+    """Compute Intersection over Union (IoU) between two bounding boxes."""
+    x1_min, y1_min, x1_max, y1_max = bbox1
+    x2_min, y2_min, x2_max, y2_max = bbox2
+    
+    # Compute intersection area
+    inter_x_min = max(x1_min, x2_min)
+    inter_y_min = max(y1_min, y2_min)
+    inter_x_max = min(x1_max, x2_max)
+    inter_y_max = min(y1_max, y2_max)
+    
+    if inter_x_max < inter_x_min or inter_y_max < inter_y_min:
+        return 0.0
+    
+    inter_area = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min)
+    
+    # Compute union area
+    area1 = (x1_max - x1_min) * (y1_max - y1_min)
+    area2 = (x2_max - x2_min) * (y2_max - y2_min)
+    union_area = area1 + area2 - inter_area
+    
+    return inter_area / union_area if union_area > 0 else 0.0
+
+
+def remove_overlapping_faces_per_frame(detections: List[Dict], iou_threshold: float = 0.5) -> List[Dict]:
+    """
+    Remove overlapping face detections within each frame, keeping the larger bbox.
+    
+    Args:
+        detections: List of detection dictionaries with 'bbox' and 'frame_id' keys
+        iou_threshold: IoU threshold above which detections are considered overlapping
+        
+    Returns:
+        Filtered list of detections with overlaps removed per frame
+    """
+    if len(detections) == 0:
+        return detections
+    
+    # Group detections by frame_id
+    from collections import defaultdict
+    frames = defaultdict(list)
+    for det in detections:
+        frames[det['frame_id']].append(det)
+    
+    # Process each frame independently
+    all_kept = []
+    for frame_id, frame_detections in frames.items():
+        # Sort detections by area (largest first) within this frame
+        detections_with_area = []
+        for det in frame_detections:
+            bbox = det["bbox"]
+            area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+            detections_with_area.append((det, area))
+        
+        detections_with_area.sort(key=lambda x: x[1], reverse=True)
+        
+        # Keep track of which detections to keep for this frame
+        keep = []
+        
+        for det_i, _ in detections_with_area:
+            should_keep = True
+            
+            # Check against all already kept detections in this frame
+            for kept_det in keep:
+                iou = compute_iou(det_i["bbox"], kept_det["bbox"])
+                if iou > iou_threshold:
+                    should_keep = False
+                    break
+            
+            if should_keep:
+                keep.append(det_i)
+        
+        all_kept.extend(keep)
+    
+    return all_kept
+
+
 def filter_detections_poster(detections: list[dict], total_area: float, min_area: float, min_conf: float) -> list[dict]: 
     # Filter detections for poster
     filters = DetectionFilter(
@@ -150,7 +227,7 @@ def filter_detections_poster(detections: list[dict], total_area: float, min_area
     return filtered_detections
 
 
-def filter_detections_clustering(detections: list[dict], effective_area: float, min_area: float, max_area: float, min_conf: float) -> list[dict]:
+def filter_detections_clustering(detections: list[dict], effective_area: float, min_area: float, max_area: float, min_conf: float, remove_overlaps: bool = True, iou_threshold: float = 0.5) -> list[dict]:
     # Filter detections
     filters = DetectionFilter(
         simple_filters=[validates_area_filter,
@@ -163,11 +240,15 @@ def filter_detections_clustering(detections: list[dict], effective_area: float, 
         min_conf=min_conf
     )
     filtered_detections = filters.apply(detections)
+    
+    # Remove overlapping faces within each frame
+    if remove_overlaps:
+        filtered_detections = remove_overlapping_faces_per_frame(filtered_detections, iou_threshold)
 
     return filtered_detections
 
 
-def filter_detections_classifications(detections: list[dict], effective_area: float, min_conf: float, min_sharpness: float, max_z: float, min_mouth_opening: float, movie_id: int | str=None, mode: str="infer") -> list[dict]:
+def filter_detections_classifications(detections: list[dict], effective_area: float, min_conf: float, min_sharpness: float, max_z: float, min_mouth_opening: float, movie_id: int | str=None, mode: str="infer", remove_overlaps: bool = True, iou_threshold: float = 0.5) -> list[dict]:
     # Filter detections
     filters = DetectionFilter(
         simple_filters=[validates_confidence_filter],
@@ -180,6 +261,10 @@ def filter_detections_classifications(detections: list[dict], effective_area: fl
         min_mouth_opening=min_mouth_opening
     )    
     filtered_detections = filters.apply(detections, mode = "classification")
+    
+    # Remove overlapping faces within each frame
+    if remove_overlaps:
+        filtered_detections = remove_overlapping_faces_per_frame(filtered_detections, iou_threshold)
 
     if mode == "evaluate":
         filters.visualize_detection_parameters(movie_id=movie_id, detections=detections, storage_folder='visualize_parameters')
