@@ -7,6 +7,7 @@ import pickle as pkl
 import requests
 
 from bs4 import BeautifulSoup
+from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 from loguru import logger
@@ -245,7 +246,7 @@ def gather_and_save_predictions(source:pd.DataFrame, path_to_outputs: str, final
             data = pkl.load(infile)
         infile.close()
         logger.debug(f'la tête du path des prédictions: {prediction}')
-        visa_number = int(prediction.split('\\')[-1].split('_')[0]) #FIXME: To make more robust to the OS used -> using the Path library
+        visa_number = int(Path(prediction).stem.split('_')[0])
         logger.debug(f'Le numéro de visa récupéré dans le path: {visa_number}')
         allocine_id = int(source[source.visa_number == visa_number].iloc[0]['allocine_id'])
         for char in data :
@@ -258,7 +259,7 @@ def gather_and_save_predictions(source:pd.DataFrame, path_to_outputs: str, final
             logger.debug(f'Gathering predictions from {prediction}')
             data = pkl.load(infile)
         infile.close()
-        visa_number = int(prediction.split('\\')[-1].split('_')[0])
+        visa_number = int(Path(prediction).stem.split('_')[0])
         allocine_id = int(source[source.visa_number == visa_number].iloc[0]['allocine_id'])
         for char in data :
             dict_trailer_predictions = format_prediction_results('trailer', char, allocine_id, visa_number, dict_trailer_predictions)
