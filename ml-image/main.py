@@ -86,5 +86,7 @@ if __name__ == '__main__':
                         help="Row index from which to start dataframe analysis")
     parser.add_argument("--istop", type=int, default=1e9,
                         help="Row index on which to stop dataframe analysis")
+    parser.add_argument("--device", type=str, default="auto",
+                        help="Device to use for inference: 'cuda', 'cpu', or 'auto' (default: auto)")
 
     main(parser)
