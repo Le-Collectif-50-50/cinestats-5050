@@ -3,6 +3,9 @@ import os
 
 from scripts import pipelines
 
+# Set PyTorch CUDA memory allocation configuration to reduce fragmentation
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 PREDICTIONS_FOLDER = os.environ.get('PREDICTIONS_FOLDER', 'stored_predictions')
 DOWNLOADED_MEDIA_FOLDER =  os.environ.get('DOWNLOADED_MEDIA_FOLDER', 'downloaded_media')
 TEMP_FOLDER = os.environ.get('TEMP_FOLDER', 'tmp')
