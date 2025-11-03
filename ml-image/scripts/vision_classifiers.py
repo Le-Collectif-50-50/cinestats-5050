@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms, models
+from torch.cuda.amp import autocast
 
 from .utils import ImageDataset
 
@@ -58,15 +59,23 @@ class VisionClassifier:
         ])
 
         transformed_faces = ImageDataset(faces, inference_transform)
+        # Use pin_memory for faster GPU transfer
+        pin_mem = self.device.type == 'cuda'
         dataloader = DataLoader(
-            transformed_faces, batch_size=batch_size, shuffle=False, num_workers=0)
+            transformed_faces, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_mem)
 
         ages, genders, ethnicities = [], [], []
         age_confidences, gender_confidences, ethnicity_confidences = [], [], []
+        use_amp = self.device.type == 'cuda'  # Use mixed precision on CUDA
+        
         with torch.no_grad():
             for batch in dataloader:
-                batch = batch.to(self.device)
-                outputs = self.model_fair_7(batch)
+                batch = batch.to(self.device, non_blocking=True)
+                
+                # Use automatic mixed precision for memory efficiency
+                with autocast(enabled=use_amp):
+                    outputs = self.model_fair_7(batch)
+                
                 outputs_cpu = outputs.detach().cpu()
 
                 age_outputs = outputs_cpu[:, 9:18]
@@ -99,6 +108,13 @@ class VisionClassifier:
                     gender_confidences.extend(gender_results.values.tolist())
                     ethnicity_confidences.extend(
                         ethnicity_results.values.tolist())
+                
+                # Clear intermediate variables
+                del batch, outputs, outputs_cpu
+        
+        # Clear cache after classification
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         ages = [age_labels[age] for age in ages]
         genders = [gender_labels[gender] for gender in genders]

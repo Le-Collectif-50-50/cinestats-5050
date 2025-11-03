@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from ultralytics import YOLO
+from torch.cuda.amp import autocast
 
 from .utils import ImageDataset
 
@@ -58,25 +59,38 @@ class VisionDetection:
 
         # Load frames in the dataloader
         dataset = ImageDataset(images, frames_transform)
+        # Use pin_memory for faster GPU transfer
+        pin_mem = self.device.type == 'cuda'
         dataloader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+            dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_mem)
 
         # Detect faces in all frames of the trailer
         results = []
+        use_amp = self.device.type == 'cuda'  # Use mixed precision on CUDA
+        
         with torch.no_grad():
             if area_type == "face":
                 for batch in dataloader:
-                    batch = batch.to(self.device)
+                    batch = batch.to(self.device, non_blocking=True)
                     batch = torch.clamp(batch, 0, 1)  # Ensure values are in [0, 1] range
-                    detections = self.yolo_model_face(batch, verbose=False)
+                    with autocast(enabled=use_amp):
+                        detections = self.yolo_model_face(batch, verbose=False)
                     results.extend(detections)
+                    # Clear batch from memory
+                    del batch
             else:
                 for batch in dataloader:
-                    batch = batch.to(self.device)
+                    batch = batch.to(self.device, non_blocking=True)
                     batch = torch.clamp(batch, 0, 1)  # Ensure values are in [0, 1] range
-                    detections = self.yolo_model_person(batch, verbose=False, classes=[
-                                                        0])
+                    with autocast(enabled=use_amp):
+                        detections = self.yolo_model_person(batch, verbose=False, classes=[0])
                     results.extend(detections)
+                    # Clear batch from memory
+                    del batch
+        
+        # Clear cache after detection
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return results
 

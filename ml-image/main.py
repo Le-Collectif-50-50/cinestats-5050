@@ -88,5 +88,7 @@ if __name__ == '__main__':
                         help="Row index on which to stop dataframe analysis")
     parser.add_argument("--device", type=str, default="auto",
                         help="Device to use for inference: 'cuda', 'cpu', or 'auto' (default: auto)")
+    parser.add_argument("--profile_memory", action=argparse.BooleanOptionalAction,
+                        default=False, help="Enable GPU memory profiling and logging")
 
     main(parser)

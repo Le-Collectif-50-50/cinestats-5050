@@ -5,6 +5,7 @@ from dlib import chinese_whispers_clustering, vector
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from torch.cuda.amp import autocast
 
 from .utils import ImageDataset
 
@@ -36,15 +37,28 @@ class EmbeddingModel:
                 raise ValueError("Model not supported")
 
         dataset = ImageDataset(detected_faces, face_transform)
-        dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=0)
+        # Use pin_memory for faster GPU transfer
+        pin_mem = self.device.type == 'cuda'
+        dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=0, pin_memory=pin_mem)
 
         embeddings = []
+        use_amp = self.device.type == 'cuda'  # Use mixed precision on CUDA
 
         with torch.no_grad():
             for batch in dataloader:
-                batch = batch.to(self.device)
-                emb = self.model(batch)
+                batch = batch.to(self.device, non_blocking=True)
+                
+                # Use automatic mixed precision for memory efficiency
+                with autocast(enabled=use_amp):
+                    emb = self.model(batch)
+                
                 embeddings.append(emb.cpu())
+                # Clear batch from memory
+                del batch
+        
+        # Clear cache after embedding
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         if len(embeddings) == 0:
             return np.array([])
