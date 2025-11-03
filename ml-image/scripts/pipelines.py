@@ -55,6 +55,11 @@ def infer_on_trailer(trailer_path: str, cluster_model: str, cluster_threshold: f
     if store_visuals :
         utils.store_predictions_on_video(
             frames, aggregated_estimations, classified_faces, fps=fps, output_name=movie_id)
+    
+    # Clear intermediate tensors from memory
+    del detections, filtered_detections, classified_faces, flattened_faces
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return aggregated_estimations, embedded_faces
 
@@ -81,6 +86,11 @@ def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, aggregated_e
 
     # Step 2: Filter embedded_faces to keep only the embeddings corresponding to the collected indexes
     embedded_faces = [(i, embedding) for i, embedding in enumerate(embedded_faces) if i in all_indexes]
+    
+    # Clear intermediate tensors from memory
+    del detections
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return embedded_faces_poster, embedded_faces, filtered_detections, total_area
 
@@ -235,9 +245,17 @@ def infer_pipeline(args, to_predict_df, paths):
             
                 os.remove(poster_path)
                 os.remove(trailer_path)
+                
+                # Clear CUDA cache to free GPU memory
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
 
             except Exception as e:
                 logger.info(f"Row {i}, id {row[args.column_identifier]} : {repr(e)}")
+                # Clear CUDA cache even on error
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 continue
         logger.success(f"All films from {args.source} have been analyzed.")
 
