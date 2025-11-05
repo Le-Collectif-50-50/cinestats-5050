@@ -90,5 +90,7 @@ if __name__ == '__main__':
                         help="Device to use for inference: 'cuda', 'cpu', or 'auto' (default: auto)")
     parser.add_argument("--profile_memory", action=argparse.BooleanOptionalAction,
                         default=False, help="Enable GPU memory profiling and logging")
+    parser.add_argument("--bbox_expand_factor", type=float, default=0,
+                        help="Factor to expand face bounding boxes (e.g., 0.3 = 30%% expansion to include hair)")
 
     main(parser)

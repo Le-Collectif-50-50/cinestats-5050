@@ -19,7 +19,7 @@ from scripts import evaluation_annotation
 logger.remove(0)
 logger.add(sys.stderr, level="INFO")
 
-def infer_on_trailer(trailer_path: str, cluster_model: str, cluster_threshold: float, agr_method: str, min_area: float, max_area: float, min_conf: float, min_conf_cla: float, min_sharpness_cla: float, max_z_cla: float, min_mouth_opening_cla : float, batch_size: int, device: str, num_cpu: int, store_visuals: bool, movie_id: str | int=None, mode: str='infer') -> tuple[list[dict], np.ndarray]:
+def infer_on_trailer(trailer_path: str, cluster_model: str, cluster_threshold: float, agr_method: str, min_area: float, max_area: float, min_conf: float, min_conf_cla: float, min_sharpness_cla: float, max_z_cla: float, min_mouth_opening_cla : float, batch_size: int, device: str, num_cpu: int, store_visuals: bool, movie_id: str | int=None, mode: str='infer', bbox_expand_factor: float=0.3) -> tuple[list[dict], np.ndarray]:
     """
     Description of the function
     """
@@ -31,7 +31,7 @@ def infer_on_trailer(trailer_path: str, cluster_model: str, cluster_threshold: f
 
     # Detect faces in the video
     detections = vision_detection.detect_faces(frames, H_original, W_original, area_type="face",
-                              batch_size=batch_size, device=device, num_cpu_threads=num_cpu)
+                              batch_size=batch_size, device=device, num_cpu_threads=num_cpu, bbox_expand_factor=bbox_expand_factor)
 
     # Filter detections for classification
     filtered_detections = filter_detections.filter_detections_clustering(
@@ -76,7 +76,7 @@ def infer_on_trailer(trailer_path: str, cluster_model: str, cluster_threshold: f
     return aggregated_estimations, embedded_faces
 
 
-def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, aggregated_estimations: list[dict], min_area: float, min_conf: float, movie_id: str | int, mode: str, batch_size: int, device: str, num_cpu: int) -> tuple[list[dict], list[np.ndarray], list[dict], float]:
+def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, aggregated_estimations: list[dict], min_area: float, min_conf: float, movie_id: str | int, mode: str, batch_size: int, device: str, num_cpu: int, bbox_expand_factor: float=0.3) -> tuple[list[dict], list[np.ndarray], list[dict], float]:
     """
     Description of the function
     """
@@ -85,7 +85,7 @@ def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, aggregated_e
 
     # Detect faces in the poster
     detections = vision_detection.detect_faces(poster, H_original, W_original, area_type="face",
-                              batch_size=1, device=device, num_cpu_threads=num_cpu)
+                              batch_size=1, device=device, num_cpu_threads=num_cpu, bbox_expand_factor=bbox_expand_factor)
 
     # Filter detections
     filtered_detections = filter_detections.filter_detections_poster(detections, total_area, min_area, min_conf)
@@ -156,7 +156,7 @@ def assign_poster(embedded_faces_poster: list[dict], embedded_faces: list[np.nda
 def predict_one_item(
         column_identifier, num_cpu, batch_size, min_area, max_area, min_conf, min_conf_cla, min_sharpness_cla, max_z_cla,
         min_mouth_opening_cla, cluster_model, cluster_threshold, agr_method, store_visuals, downloaded_media_path,
-        poster_path, trailer_path, device_arg='auto', mode='inference', poster_source='None', row=None
+        poster_path, trailer_path, device_arg='auto', mode='inference', poster_source='None', row=None, bbox_expand_factor=0.3
         ) -> None:
     """
     Predict all handled metrics over a selected movie (trailer + poster)
@@ -202,7 +202,8 @@ def predict_one_item(
                                               num_cpu,
                                               store_visuals,
                                               movie_id=movie_id,
-                                              mode=mode)
+                                              mode=mode,
+                                              bbox_expand_factor=bbox_expand_factor)
     
     # Infer on poster
     if poster_source != "None":
@@ -215,7 +216,8 @@ def predict_one_item(
                                                                                                  mode,
                                                                                                  batch_size,
                                                                                                  device,
-                                                                                                 num_cpu)
+                                                                                                 num_cpu,
+                                                                                                 bbox_expand_factor)
         filtered_detections = assign_poster(embedded_faces_poster,
                                             embedded_faces,
                                             aggregated_estimations,
@@ -261,7 +263,7 @@ def infer_pipeline(args, to_predict_df, paths):
                     args.column_identifier, args.num_cpu, args.batch_size, args.min_area, args.max_area, args.min_conf, 
                     args.min_conf_cla, args.min_sharpness_cla, args.max_z_cla, args.min_mouth_opening_cla, args.cluster_model,
                     args.cluster_threshold, args.agr_method, args.store_visuals, paths['dl_media'], poster_path, trailer_path, 
-                    device_arg=args.device, row=row
+                    device_arg=args.device, row=row, bbox_expand_factor=args.bbox_expand_factor
                 )
 
                 # Store poster predictions in .pkl file

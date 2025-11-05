@@ -95,9 +95,13 @@ class VisionDetection:
         return results
 
     def crop_areas_of_interest(
-            self, images: np.ndarray, H_original: int, W_original: int, area_type: str = 'face', batch_size: int = 64) -> list[dict]:
+            self, images: np.ndarray, H_original: int, W_original: int, area_type: str = 'face', batch_size: int = 64, bbox_expand_factor: float = 0) -> list[dict]:
         """
         Create individual subimages for all areas of interest in one image
+        
+        Parameters:
+            bbox_expand_factor: Factor to expand bounding boxes (e.g., 0.3 = 30% expansion on each side)
+                               This helps include more context like hair for face crops
         """
         areas_of_interest = self.get_areas_of_interest(
             images, area_type, batch_size=batch_size)
@@ -113,16 +117,33 @@ class VisionDetection:
                 # Bounding boxes need to be rescaled as we previously changed frames size
                 x1, x2, y1, y2 = int(
                      x1 * scale_x), int(x2 * scale_x), int(y1 * scale_y), int(y2 * scale_y)
+                
+                # Expand bounding box to include more context (e.g., hair)
+                if bbox_expand_factor > 0:
+                    width = x2 - x1
+                    height = y2 - y1
+                    expand_x = int(width * bbox_expand_factor)
+                    expand_y = int(height * bbox_expand_factor)
+                    
+                    # Expand and clip to image boundaries
+                    x1_expanded = max(0, x1 - expand_x)
+                    y1_expanded = max(0, y1 - expand_y)
+                    x2_expanded = min(W_original, x2 + expand_x)
+                    y2_expanded = min(H_original, y2 + expand_y)
+                else:
+                    x1_expanded, y1_expanded = x1, y1
+                    x2_expanded, y2_expanded = x2, y2
+                
                 conf = area.boxes[i].conf.item()
                 match len(images.shape):
                     case 3:
-                        cropped_image = images[y1:y2, x1:x2]
+                        cropped_image = images[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
                     case 4:
-                        cropped_image = images[k][y1:y2, x1:x2]
+                        cropped_image = images[k][y1_expanded:y2_expanded, x1_expanded:x2_expanded]
                     case _:
                         raise ValueError("Input images must have shape [H, W, C] or [N, H, W, C]")
                 detections.append({"bbox": [
-                     x1, y1, x2, y2], "conf": conf, "frame_id": k, "perso_id": i, f"cropped_{area_type}": cropped_image})
+                     x1_expanded, y1_expanded, x2_expanded, y2_expanded], "conf": conf, "frame_id": k, "perso_id": i, f"cropped_{area_type}": cropped_image})
     
         return detections
 
@@ -213,11 +234,18 @@ def compute_I_o_U(face_bbox, body_bbox):
 
 
 def detect_faces(
-        frames: np.array, H_original: int, W_original: int, area_type: str, batch_size: int, device: str, num_cpu_threads: int) -> list[dict]:
+        frames: np.array, H_original: int, W_original: int, area_type: str, batch_size: int, device: str, num_cpu_threads: int, bbox_expand_factor: float = 0) -> list[dict]:
+    """
+    Detect faces in the video
+    
+    Parameters:
+        bbox_expand_factor: Factor to expand bounding boxes (default 0 = no expansion)
+                           Set higher (e.g., 0.5) to include more hair/context
+    """
     # Detect faces in the video
     vision_detector = VisionDetection(
         device=device, num_cpu_threads=num_cpu_threads)
     detections = vision_detector.crop_areas_of_interest(
-        frames, H_original, W_original, area_type=area_type, batch_size=batch_size)
+        frames, H_original, W_original, area_type=area_type, batch_size=batch_size, bbox_expand_factor=bbox_expand_factor)
 
     return detections
