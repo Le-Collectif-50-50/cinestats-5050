@@ -173,6 +173,8 @@ cython_debug/
 certbot/*
 !certbot/Dockerfile
 !certbot/entrypoint.sh
+!certbot/Dockerfile.dns-ovh
+!certbot/entrypoint-dns.sh
 certbot/conf/*
 certbot/www/*
 certbot/logs/*

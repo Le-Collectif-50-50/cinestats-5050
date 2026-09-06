@@ -40,11 +40,13 @@ export default function RootLayout({
   return (
     <html className="min-h-screen h-full" lang="fr">
       <head>
-        <Script
-          defer
-          src="https://cloud.umami.is/script.js"
-          data-website-id="996668f1-b9bd-4892-974d-b9a0bb145082"
-        />
+        {process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID && (
+          <Script
+            defer
+            src="https://cloud.umami.is/script.js"
+            data-website-id={process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID}
+          />
+        )}
       </head>
       <body
         className={`${geistSans.variable} ${geist.variable} antialiased bg-red min-h-screen h-full`}

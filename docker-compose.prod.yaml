@@ -1,7 +1,7 @@
 services:
   backend:
     restart: unless-stopped
-    image: ${DOCKERHUB_USERNAME:-nicorvl}/ric-backend:latest
+    image: ${IMAGE_PREFIX}/ric-backend:latest
     expose:
       - ${BACKEND_PORT}
     environment:
@@ -16,7 +16,7 @@ services:
 
   frontend:
     restart: unless-stopped
-    image: ${DOCKERHUB_USERNAME:-nicorvl}/ric-frontend:latest
+    image: ${IMAGE_PREFIX}/ric-frontend:latest
     expose:
       - ${FRONTEND_PORT}
     environment:
@@ -29,7 +29,7 @@ services:
       - web
 
   nginx:
-    image: ${DOCKERHUB_USERNAME:-nicorvl}/ric-nginx:latest
+    image: ${IMAGE_PREFIX}/ric-nginx:latest
     build:
       context: ./nginx
     ports:
@@ -46,7 +46,7 @@ services:
       - web
 
   certbot:
-    image: ${DOCKERHUB_USERNAME:-nicorvl}/ric-certbot:latest
+    image: ${IMAGE_PREFIX}/ric-certbot:latest
     build:
       context: ./certbot
     restart: unless-stopped
@@ -58,9 +58,6 @@ services:
       - nginx
     networks:
       - web
-
-volumes:
-  db-data:
 
 networks:
   web:

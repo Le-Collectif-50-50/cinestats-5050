@@ -3,7 +3,7 @@ name: Frontend Checks
 on:
   pull_request:
   push:
-    branches: [main, Webdev]
+    branches: [main, develop]
 
 jobs:
   frontend-checks:
@@ -13,7 +13,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: 8
+          version: 10.25.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v3

@@ -1,8 +1,8 @@
-name: Deploy
+name: Deploy Staging
 
 on:
   push:
-    branches: [main]
+    branches: [develop]
   workflow_dispatch:
 
 env:
@@ -11,7 +11,7 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    environment: production
+    environment: staging
     permissions:
       contents: read
       packages: write
@@ -31,10 +31,12 @@ jobs:
             image: ric-nginx
             context: ./nginx
             file: ./nginx/Dockerfile
-          - name: certbot
-            image: ric-certbot
+          # DNS-01 variant of certbot (certbot/dns-ovh), distinct from the
+          # HTTP-01 image (ric-certbot) used by prod's deploy.yml.
+          - name: certbot-dns
+            image: ric-certbot-dns
             context: ./certbot
-            file: ./certbot/Dockerfile
+            file: ./certbot/Dockerfile.dns-ovh
 
     steps:
       - name: Checkout repository
@@ -56,7 +58,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=staging
             type=sha
 
       - name: Build and push ${{ matrix.name }}
@@ -69,12 +71,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             ${{ matrix.name == 'frontend' && format('NEXT_PUBLIC_API_URL={0}', vars.NEXT_PUBLIC_API_URL) || '' }}
-            ${{ matrix.name == 'frontend' && 'NEXT_PUBLIC_UMAMI_WEBSITE_ID=996668f1-b9bd-4892-974d-b9a0bb145082' || '' }}
 
   deploy:
     runs-on: ubuntu-latest
     needs: build-and-push
-    environment: production
+    environment: staging
     permissions:
       contents: read
       packages: write
@@ -83,32 +84,32 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy docker compose prod file via SSH
-        uses: appleboy/scp-action@master
+      - name: Copy docker compose staging file via SSH
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.prod.yaml"
-          target: ~/cinestats5050
+          source: "docker-compose.staging.yaml"
+          target: ~/cinestats5050-staging
 
       - name: Copy nginx config via SSH
-        uses: appleboy/scp-action@master
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "nginx"
-          target: ~/cinestats5050
+          target: ~/cinestats5050-staging
 
       - name: Copy certbot scaffolding via SSH
-        uses: appleboy/scp-action@master
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "certbot"
-          target: ~/cinestats5050
+          target: ~/cinestats5050-staging
 
       - name: Deploy application via SSH
         uses: appleboy/ssh-action@v1
@@ -117,21 +118,30 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd ~/cinestats5050
+            cd ~/cinestats5050-staging
             mkdir -p certbot/conf certbot/www certbot/logs
             echo "ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}" > .env
             echo "BACKEND_PORT=${{ vars.BACKEND_PORT }}" >> .env
             echo "FRONTEND_PORT=${{ vars.FRONTEND_PORT }}" >> .env
             echo "NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}" >> .env
+            echo "POSTGRES_USER=${{ vars.POSTGRES_USER }}" >> .env
+            echo "POSTGRES_DB=${{ vars.POSTGRES_DB }}" >> .env
+            echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
             echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+            echo "RUN_SEED=${{ vars.RUN_SEED }}" >> .env
             echo "IMAGE_PREFIX=$(echo '${{ env.REGISTRY }}/${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> .env
             echo "METABASE_SITE_URL=${{ secrets.METABASE_SITE_URL }}" >> .env
             echo "METABASE_SECRET_KEY=${{ secrets.METABASE_SECRET_KEY }}" >> .env
             echo "METABASE_DASHBOARD_ID=${{ secrets.METABASE_DASHBOARD_ID }}" >> .env
+            echo "DOMAIN=${{ vars.DOMAIN }}" >> .env
+            echo "API_DOMAIN=${{ vars.API_DOMAIN }}" >> .env
+            echo "CERTBOT_EMAIL=${{ secrets.CERTBOT_EMAIL }}" >> .env
+            echo "OVH_APPLICATION_KEY=${{ secrets.OVH_APPLICATION_KEY }}" >> .env
+            echo "OVH_APPLICATION_SECRET=${{ secrets.OVH_APPLICATION_SECRET }}" >> .env
+            echo "OVH_CONSUMER_KEY=${{ secrets.OVH_CONSUMER_KEY }}" >> .env
 
             OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
             echo ${{ github.token }} | docker login ghcr.io -u "$OWNER_LOWER" --password-stdin
-            mv docker-compose.prod.yaml docker-compose.yml
+            mv docker-compose.staging.yaml docker-compose.yml
             docker compose pull
-            docker compose down
             docker compose up -d --remove-orphans
