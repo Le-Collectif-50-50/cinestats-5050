@@ -3,9 +3,14 @@ FROM node:22-alpine AS builder
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
-# Umami analytics website id. Left unset (e.g. on staging) disables the script — see layout.tsx.
+# Umami analytics website id. Left unset (e.g. on preview) disables the script — see layout.tsx.
 ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID
 ENV NEXT_PUBLIC_UMAMI_WEBSITE_ID=$NEXT_PUBLIC_UMAMI_WEBSITE_ID
+
+# Only "true" on production (see deploy.yml) — every other environment's
+# robots.txt disallows everything by default. See app/robots.ts.
+ARG NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING
+ENV NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING=$NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -17,7 +22,8 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 
 RUN echo "NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL" > .env.local && \
-    echo "NEXT_PUBLIC_UMAMI_WEBSITE_ID=$NEXT_PUBLIC_UMAMI_WEBSITE_ID" >> .env.local
+    echo "NEXT_PUBLIC_UMAMI_WEBSITE_ID=$NEXT_PUBLIC_UMAMI_WEBSITE_ID" >> .env.local && \
+    echo "NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING=$NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING" >> .env.local
 
 RUN pnpm build
 

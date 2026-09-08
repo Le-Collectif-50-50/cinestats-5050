@@ -76,6 +76,7 @@ jobs:
           build-args: |
             ${{ matrix.name == 'frontend' && format('NEXT_PUBLIC_API_URL={0}', vars.NEXT_PUBLIC_API_URL) || '' }}
             ${{ matrix.name == 'frontend' && 'NEXT_PUBLIC_UMAMI_WEBSITE_ID=996668f1-b9bd-4892-974d-b9a0bb145082' || '' }}
+            ${{ matrix.name == 'frontend' && 'NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING=true' || '' }}
 
   deploy:
     runs-on: ubuntu-latest
