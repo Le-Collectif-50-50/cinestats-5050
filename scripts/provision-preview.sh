@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Amorçage d'une VM staging vierge (Debian/Ubuntu) pour cinestats-5050.
+# Amorçage d'une VM preview vierge (Debian/Ubuntu) pour cinestats-5050.
 # À exécuter en root (ou via sudo) sur la machine cible, une seule fois.
 #
 # Ce script installe Docker + le plugin compose, crée l'arborescence attendue
-# par .github/workflows/deploy-staging.yml (~/cinestats5050-staging), et
+# par .github/workflows/deploy-preview.yml (~/cinestats5050-preview), et
 # prépare l'utilisateur de déploiement avec sa clé SSH publique.
 #
-# Usage : ./provision-staging.sh <deploy_user> <chemin_vers_clé_publique.pub>
+# Usage : ./provision-preview.sh <deploy_user> <chemin_vers_clé_publique.pub>
 
 set -euo pipefail
 
@@ -43,12 +43,12 @@ cat "$PUBKEY_FILE" >> "$DEPLOY_HOME/.ssh/authorized_keys"
 chmod 600 "$DEPLOY_HOME/.ssh/authorized_keys"
 chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_HOME/.ssh/authorized_keys"
 
-echo "==> Arborescence de déploiement (~/cinestats5050-staging)"
+echo "==> Arborescence de déploiement (~/cinestats5050-preview)"
 install -d -m 755 -o "$DEPLOY_USER" -g "$DEPLOY_USER" \
-  "$DEPLOY_HOME/cinestats5050-staging" \
-  "$DEPLOY_HOME/cinestats5050-staging/certbot/conf" \
-  "$DEPLOY_HOME/cinestats5050-staging/certbot/www" \
-  "$DEPLOY_HOME/cinestats5050-staging/certbot/logs"
+  "$DEPLOY_HOME/cinestats5050-preview" \
+  "$DEPLOY_HOME/cinestats5050-preview/certbot/conf" \
+  "$DEPLOY_HOME/cinestats5050-preview/certbot/www" \
+  "$DEPLOY_HOME/cinestats5050-preview/certbot/logs"
 
 echo "==> Ouverture des ports 80/443 (si ufw est actif)"
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
@@ -64,6 +64,6 @@ Terminé. Reste à faire manuellement :
   - secrets.SSH_PRIVATE_KEY = clé privée correspondant à $PUBKEY_FILE
   - vérifier que $DEPLOY_USER peut lancer 'docker compose' sans sudo
     (déconnexion/reconnexion nécessaire pour que le groupe 'docker' s'applique)
-  - créer les enregistrements DNS staging.cinestats5050.fr / api.staging.cinestats5050.fr
+  - créer les enregistrements DNS preview.cinestats5050.fr / api.preview.cinestats5050.fr
     pointant vers cette machine (voir docs/MIGRATION.md)
 EOF

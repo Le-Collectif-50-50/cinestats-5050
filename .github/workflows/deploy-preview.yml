@@ -1,4 +1,4 @@
-name: Deploy Staging
+name: Deploy Preview
 
 on:
   push:
@@ -11,7 +11,7 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    environment: staging
+    environment: preview
     permissions:
       contents: read
       packages: write
@@ -58,7 +58,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
           tags: |
-            type=raw,value=staging
+            type=raw,value=preview
             type=sha
 
       - name: Build and push ${{ matrix.name }}
@@ -75,7 +75,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build-and-push
-    environment: staging
+    environment: preview
     permissions:
       contents: read
       packages: write
@@ -84,14 +84,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy docker compose staging file via SSH
+      - name: Copy docker compose preview file via SSH
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.staging.yaml"
-          target: ~/cinestats5050-staging
+          source: "docker-compose.preview.yaml"
+          target: ~/cinestats5050-preview
 
       - name: Copy nginx config via SSH
         uses: appleboy/scp-action@v0.1.7
@@ -100,7 +100,7 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "nginx"
-          target: ~/cinestats5050-staging
+          target: ~/cinestats5050-preview
 
       - name: Copy certbot scaffolding via SSH
         uses: appleboy/scp-action@v0.1.7
@@ -109,7 +109,7 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "certbot"
-          target: ~/cinestats5050-staging
+          target: ~/cinestats5050-preview
 
       - name: Deploy application via SSH
         uses: appleboy/ssh-action@v1
@@ -118,7 +118,7 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd ~/cinestats5050-staging
+            cd ~/cinestats5050-preview
             mkdir -p certbot/conf certbot/www certbot/logs
             echo "ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}" > .env
             echo "BACKEND_PORT=${{ vars.BACKEND_PORT }}" >> .env
@@ -142,6 +142,6 @@ jobs:
 
             OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
             echo ${{ github.token }} | docker login ghcr.io -u "$OWNER_LOWER" --password-stdin
-            mv docker-compose.staging.yaml docker-compose.yml
+            mv docker-compose.preview.yaml docker-compose.yml
             docker compose pull
             docker compose up -d --remove-orphans
