@@ -1,30 +1,29 @@
-name: Deploy
+name: Deploy Preview
 
 on:
   push:
-    branches: [production]
+    branches: [preview]
   workflow_dispatch:
 
 jobs:
   build-and-push:
     uses: ./.github/workflows/build-push-images.yml
     with:
-      environment: production
-      image-tag: latest
-      include-umami: true
+      environment: preview
+      image-tag: preview
       matrix-json: >-
         [
           {"name":"backend","image":"ric-backend","context":".","file":"./backend/Dockerfile.prod"},
           {"name":"frontend","image":"ric-frontend","context":"./frontend","file":"./frontend/Dockerfile.prod"},
           {"name":"nginx","image":"ric-nginx","context":"./nginx","file":"./nginx/Dockerfile"},
-          {"name":"certbot","image":"ric-certbot","context":"./certbot","file":"./certbot/Dockerfile"}
+          {"name":"certbot-dns","image":"ric-certbot-dns","context":"./certbot","file":"./certbot/Dockerfile.dns-ovh"}
         ]
     secrets: inherit
 
   deploy:
     runs-on: ubuntu-latest
     needs: build-and-push
-    environment: production
+    environment: preview
     permissions:
       contents: read
       packages: write
@@ -33,41 +32,41 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy docker compose prod file via SSH
-        uses: appleboy/scp-action@master
+      - name: Copy docker compose preview file via SSH
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.prod.yaml"
-          target: ~/cinestats5050
+          source: "docker-compose.preview.yaml"
+          target: ~/cinestats5050-preview
 
       - name: Copy nginx config via SSH
-        uses: appleboy/scp-action@master
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "nginx"
-          target: ~/cinestats5050
+          target: ~/cinestats5050-preview
 
       - name: Copy certbot scaffolding via SSH
-        uses: appleboy/scp-action@master
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "certbot"
-          target: ~/cinestats5050
+          target: ~/cinestats5050-preview
 
       - name: Copy deploy script via SSH
-        uses: appleboy/scp-action@master
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "scripts"
-          target: ~/cinestats5050
+          target: ~/cinestats5050-preview
 
       - name: Deploy application via SSH
         uses: appleboy/ssh-action@v1
@@ -76,17 +75,27 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd ~/cinestats5050
+            cd ~/cinestats5050-preview
             mkdir -p certbot/conf certbot/www certbot/logs
             echo "ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}" > .env
             echo "BACKEND_PORT=${{ vars.BACKEND_PORT }}" >> .env
             echo "FRONTEND_PORT=${{ vars.FRONTEND_PORT }}" >> .env
             echo "NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}" >> .env
+            echo "POSTGRES_USER=${{ vars.POSTGRES_USER }}" >> .env
+            echo "POSTGRES_DB=${{ vars.POSTGRES_DB }}" >> .env
+            echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
             echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+            echo "RUN_SEED=${{ vars.RUN_SEED }}" >> .env
             echo "IMAGE_PREFIX=$(echo 'ghcr.io/${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> .env
             echo "METABASE_SITE_URL=${{ secrets.METABASE_SITE_URL }}" >> .env
             echo "METABASE_SECRET_KEY=${{ secrets.METABASE_SECRET_KEY }}" >> .env
             echo "METABASE_DASHBOARD_ID=${{ secrets.METABASE_DASHBOARD_ID }}" >> .env
+            echo "DOMAIN=${{ vars.DOMAIN }}" >> .env
+            echo "API_DOMAIN=${{ vars.API_DOMAIN }}" >> .env
+            echo "CERTBOT_EMAIL=${{ secrets.CERTBOT_EMAIL }}" >> .env
+            echo "OVH_APPLICATION_KEY=${{ secrets.OVH_APPLICATION_KEY }}" >> .env
+            echo "OVH_APPLICATION_SECRET=${{ secrets.OVH_APPLICATION_SECRET }}" >> .env
+            echo "OVH_CONSUMER_KEY=${{ secrets.OVH_CONSUMER_KEY }}" >> .env
 
             chmod +x scripts/remote-deploy.sh
-            GITHUB_REPOSITORY_OWNER="${{ github.repository_owner }}" GITHUB_TOKEN="${{ github.token }}" ./scripts/remote-deploy.sh docker-compose.prod.yaml --down
+            GITHUB_REPOSITORY_OWNER="${{ github.repository_owner }}" GITHUB_TOKEN="${{ github.token }}" ./scripts/remote-deploy.sh docker-compose.preview.yaml

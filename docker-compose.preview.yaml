@@ -1,0 +1,123 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - preview-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - web
+
+  # One-shot: runs Alembic migrations, then the seed scripts if RUN_SEED=true.
+  # This is the preview rehearsal for what will eventually run in prod too.
+  migrate:
+    image: ${IMAGE_PREFIX}/ric-backend:preview
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - RUN_SEED=${RUN_SEED:-false}
+    command: >
+      sh -c "alembic -c database/alembic.ini upgrade head &&
+             if [ \"$$RUN_SEED\" = \"true\" ]; then
+               echo 'RUN_SEED=true, seeding preview database' &&
+               python -m database.seed.seed_cnc_movies &&
+               python -m database.seed.seed_film_awards &&
+               python -m database.seed.seed_allocine_movies_details &&
+               python -m database.seed.seed_poster_predictions &&
+               python -m database.seed.seed_trailer_predictions;
+             else
+               echo 'RUN_SEED=false, skipping seed';
+             fi"
+    networks:
+      - web
+
+  backend:
+    restart: unless-stopped
+    image: ${IMAGE_PREFIX}/ric-backend:preview
+    expose:
+      - ${BACKEND_PORT}
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - PORT=${BACKEND_PORT}
+      - METABASE_SITE_URL=${METABASE_SITE_URL}
+      - METABASE_SECRET_KEY=${METABASE_SECRET_KEY}
+      - METABASE_DASHBOARD_ID=${METABASE_DASHBOARD_ID}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - web
+
+  frontend:
+    restart: unless-stopped
+    image: ${IMAGE_PREFIX}/ric-frontend:preview
+    expose:
+      - ${FRONTEND_PORT}
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - INTERNAL_API_URL=http://backend:${BACKEND_PORT}
+    depends_on:
+      - backend
+    networks:
+      - web
+
+  nginx:
+    image: ${IMAGE_PREFIX}/ric-nginx:preview
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/preview.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/security-headers.conf:/etc/nginx/conf.d/security-headers.conf:ro
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    depends_on:
+      - frontend
+      - backend
+      - certbot
+    networks:
+      - web
+
+  # DNS-01 variant (certbot/dns-ovh) — issues and renews the preview certificate
+  # via the OVH API instead of the HTTP-01 webroot challenge used in prod. Unlike
+  # HTTP-01, DNS-01 needs nothing from nginx, so the dependency runs the other
+  # way: nginx waits on certbot (it needs a certificate to even start), not
+  # the reverse.
+  certbot:
+    image: ${IMAGE_PREFIX}/ric-certbot-dns:preview
+    restart: unless-stopped
+    environment:
+      - DOMAIN=${DOMAIN}
+      - API_DOMAIN=${API_DOMAIN}
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL}
+      - OVH_ENDPOINT=ovh-eu
+      - OVH_APPLICATION_KEY=${OVH_APPLICATION_KEY}
+      - OVH_APPLICATION_SECRET=${OVH_APPLICATION_SECRET}
+      - OVH_CONSUMER_KEY=${OVH_CONSUMER_KEY}
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/logs:/var/log/letsencrypt
+    networks:
+      - web
+
+volumes:
+  preview-db-data:
+
+networks:
+  web:
+    driver: bridge
