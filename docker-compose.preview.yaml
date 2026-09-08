@@ -32,8 +32,8 @@ services:
              if [ \"$$RUN_SEED\" = \"true\" ]; then
                echo 'RUN_SEED=true, seeding preview database' &&
                python -m database.seed.seed_cnc_movies &&
-               python -m database.seed.seed_film_awards &&
                python -m database.seed.seed_allocine_movies_details &&
+               python -m database.seed.seed_film_awards &&
                python -m database.seed.seed_poster_predictions &&
                python -m database.seed.seed_trailer_predictions;
              else

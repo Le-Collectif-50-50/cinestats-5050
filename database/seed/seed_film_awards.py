@@ -18,10 +18,19 @@ from backend.repositories import (
 def seed_film_awards(filename):
     session = SessionLocal()
 
+    processed = 0
     try:
         with open(filename, newline='', encoding='utf-8') as csvfile:
             rows = list(csv.DictReader(csvfile))
             director_role = role_repository.find_role_by_name(session, "director")
+            if not director_role:
+                logging.error(
+                    "Role 'director' not found in ric_roles — this script must run after "
+                    "seed_allocine_movies_details (which creates roles). Aborting before "
+                    "processing any of the %d rows so this isn't silently swallowed.",
+                    len(rows),
+                )
+                return
             for row in tqdm(rows, total=len(rows), desc="Processing"):
                 film_title = row['title']
                 film_director = row['director']
@@ -60,13 +69,19 @@ def seed_film_awards(filename):
                     continue
 
                 # Determine whether the award is a winner
-                is_winner = distinction == "Lauréat" 
+                is_winner = distinction == "Lauréat"
                 award_nomination_repository.find_or_create_award_nomination(session, film.id, festival_award.id, is_winner, datetime.date(year, 1, 1))
+                processed += 1
 
             session.commit()
-            print("Import completed successfully!")
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
+            print(f"Import completed successfully! ({processed}/{len(rows)} rows)")
+    except Exception:
+        logging.exception(
+            "seed_film_awards crashed after successfully processing %d rows — "
+            "row that triggered the failure: %r",
+            processed,
+            row if 'row' in locals() else None,
+        )
         session.rollback()  # Rollback the transaction if an error occurs
     finally:
         session.close()
