@@ -20,6 +20,7 @@ Ce qui a été fait pendant cette migration :
 - `main` avait sa protection de branche avec `lock_branch: true` (branche verrouillée en lecture seule, héritée du repo d'origine) — désactivé, sinon aucune PR n'aurait jamais pu y être mergée.
 - `develop` avait un commit que `main` n'avait pas (`ml-image/ml_pipeline_doc.md`) — `main` a été fast-forwardé sur `develop` pour ne rien perdre, puis `develop` a été supprimée.
 - `preview` et `production` ont été créées depuis `main` à ce moment-là (donc initialement identiques).
+- Le push initial vers ce nouvel org était en retard de 2 commits sur `dataforgoodfr/13_reveler_inegalites_cinema` : le merge `Develop (#216)` (contenu déjà présent via un autre chemin, sans conséquence) et surtout la feature **SEO metadata (PR #217/#218)**, ~1600 lignes sur plusieurs fichiers frontend (`frontend/src/lib/seo.ts`, les pages `about`/`films`/`festivals`/`statistics`), jamais poussée vers le nouvel org. Elle a été récupérée via un merge propre (`main` ← `dataforgoodfr/main`, testé à blanc avant exécution, aucun conflit) — pour ne pas la noyer dans une PR de migration, elle a été intégrée à `main` séparément, puis la branche de migration a été rebasée par-dessus.
 
 ## 3. Ordre de bascule
 

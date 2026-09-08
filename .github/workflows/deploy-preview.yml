@@ -5,72 +5,20 @@ on:
     branches: [preview]
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
-    environment: preview
-    permissions:
-      contents: read
-      packages: write
-
-    strategy:
-      matrix:
-        include:
-          - name: backend
-            image: ric-backend
-            context: .
-            file: ./backend/Dockerfile.prod
-          - name: frontend
-            image: ric-frontend
-            context: ./frontend
-            file: ./frontend/Dockerfile.prod
-          - name: nginx
-            image: ric-nginx
-            context: ./nginx
-            file: ./nginx/Dockerfile
-          # DNS-01 variant of certbot (certbot/dns-ovh), distinct from the
-          # HTTP-01 image (ric-certbot) used by prod's deploy.yml.
-          - name: certbot-dns
-            image: ric-certbot-dns
-            context: ./certbot
-            file: ./certbot/Dockerfile.dns-ovh
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.repository_owner }}
-          password: ${{ github.token }}
-
-      - name: Extract metadata (tags, labels) for ${{ matrix.name }}
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
-          tags: |
-            type=raw,value=preview
-            type=sha
-
-      - name: Build and push ${{ matrix.name }}
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            ${{ matrix.name == 'frontend' && format('NEXT_PUBLIC_API_URL={0}', vars.NEXT_PUBLIC_API_URL) || '' }}
+    uses: ./.github/workflows/build-push-images.yml
+    with:
+      environment: preview
+      image-tag: preview
+      matrix-json: >-
+        [
+          {"name":"backend","image":"ric-backend","context":".","file":"./backend/Dockerfile.prod"},
+          {"name":"frontend","image":"ric-frontend","context":"./frontend","file":"./frontend/Dockerfile.prod"},
+          {"name":"nginx","image":"ric-nginx","context":"./nginx","file":"./nginx/Dockerfile"},
+          {"name":"certbot-dns","image":"ric-certbot-dns","context":"./certbot","file":"./certbot/Dockerfile.dns-ovh"}
+        ]
+    secrets: inherit
 
   deploy:
     runs-on: ubuntu-latest
@@ -111,6 +59,15 @@ jobs:
           source: "certbot"
           target: ~/cinestats5050-preview
 
+      - name: Copy deploy script via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "scripts"
+          target: ~/cinestats5050-preview
+
       - name: Deploy application via SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -129,7 +86,7 @@ jobs:
             echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
             echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
             echo "RUN_SEED=${{ vars.RUN_SEED }}" >> .env
-            echo "IMAGE_PREFIX=$(echo '${{ env.REGISTRY }}/${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> .env
+            echo "IMAGE_PREFIX=$(echo 'ghcr.io/${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> .env
             echo "METABASE_SITE_URL=${{ secrets.METABASE_SITE_URL }}" >> .env
             echo "METABASE_SECRET_KEY=${{ secrets.METABASE_SECRET_KEY }}" >> .env
             echo "METABASE_DASHBOARD_ID=${{ secrets.METABASE_DASHBOARD_ID }}" >> .env
@@ -140,8 +97,5 @@ jobs:
             echo "OVH_APPLICATION_SECRET=${{ secrets.OVH_APPLICATION_SECRET }}" >> .env
             echo "OVH_CONSUMER_KEY=${{ secrets.OVH_CONSUMER_KEY }}" >> .env
 
-            OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-            echo ${{ github.token }} | docker login ghcr.io -u "$OWNER_LOWER" --password-stdin
-            mv docker-compose.preview.yaml docker-compose.yml
-            docker compose pull
-            docker compose up -d --remove-orphans
+            chmod +x scripts/remote-deploy.sh
+            GITHUB_REPOSITORY_OWNER="${{ github.repository_owner }}" GITHUB_TOKEN="${{ github.token }}" ./scripts/remote-deploy.sh docker-compose.preview.yaml

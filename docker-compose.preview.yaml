@@ -83,16 +83,21 @@ services:
       - "443:443"
     volumes:
       - ./nginx/preview.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/security-headers.conf:/etc/nginx/conf.d/security-headers.conf:ro
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
     depends_on:
       - frontend
       - backend
+      - certbot
     networks:
       - web
 
   # DNS-01 variant (certbot/dns-ovh) — issues and renews the preview certificate
-  # via the OVH API instead of the HTTP-01 webroot challenge used in prod.
+  # via the OVH API instead of the HTTP-01 webroot challenge used in prod. Unlike
+  # HTTP-01, DNS-01 needs nothing from nginx, so the dependency runs the other
+  # way: nginx waits on certbot (it needs a certificate to even start), not
+  # the reverse.
   certbot:
     image: ${IMAGE_PREFIX}/ric-certbot-dns:preview
     restart: unless-stopped
@@ -107,8 +112,6 @@ services:
     volumes:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/logs:/var/log/letsencrypt
-    depends_on:
-      - nginx
     networks:
       - web
 
