@@ -45,38 +45,27 @@ gh variable set BACKEND_PORT        --env production --repo $REPO --body "5001"
 gh variable set FRONTEND_PORT       --env production --repo $REPO --body "3000"
 ```
 
-## 4. Environment `preview` — état actuel et ce qu'il reste à faire
+## 4. Environment `preview` — état actuel
 
-L'environment `preview` existait déjà (secrets Metabase + `DATABASE_URL` d'avril, variables avec des valeurs de prod par défaut). Dans le cadre de cette migration, il a été mis à jour ainsi :
+✅ **Complet** : les 12 secrets et 9 variables attendus par `deploy-preview.yml` sont posés.
 
-| Clé | Statut | Valeur |
-|---|---|---|
-| `SERVER_HOST`, `SSH_USERNAME`, `SSH_PRIVATE_KEY` | ✅ posé | clé de déploiement dédiée à la VM preview |
-| `POSTGRES_USER` (var) | ✅ posé | `postgres` |
-| `POSTGRES_DB` (var) | ✅ posé | `ric_db` |
-| `POSTGRES_PASSWORD` (secret) | ✅ posé | généré aléatoirement |
-| `DATABASE_URL` (secret) | ✅ posé | `postgresql+psycopg://postgres:***@db:5432/ric_db` — pointe sur le Postgres conteneurisé de `docker-compose.preview.yaml`, **remplace l'ancienne valeur d'avril** |
-| `NEXT_PUBLIC_API_URL` (var) | ✅ posé | `https://api.preview.cinestats5050.fr` |
-| `ALLOWED_ORIGINS` (var) | ✅ posé | `https://preview.cinestats5050.fr,https://www.preview.cinestats5050.fr` |
-| `DOMAIN`, `API_DOMAIN` (var) | ✅ posé | `preview.cinestats5050.fr` / `api.preview.cinestats5050.fr` |
-| `RUN_SEED` (var) | ✅ posé | `true` |
-| `BACKEND_PORT`, `FRONTEND_PORT` (var) | déjà présents (avril) | `5001` / `3000` — inchangés |
-| `METABASE_SITE_URL`, `METABASE_SECRET_KEY`, `METABASE_DASHBOARD_ID` | déjà présents (avril) | **à vérifier** : si ce sont les vraies valeurs de prod, on les réutilise tel quel (voulu) ; sinon les remplacer |
-| `CERTBOT_EMAIL` | ❌ manquant | — |
-| `OVH_APPLICATION_KEY` | ❌ manquant | — |
-| `OVH_APPLICATION_SECRET` | ❌ manquant | — |
-| `OVH_CONSUMER_KEY` | ❌ manquant | — |
+| Clé | Valeur |
+|---|---|
+| `SERVER_HOST`, `SSH_USERNAME`, `SSH_PRIVATE_KEY` | clé de déploiement dédiée à la VM preview |
+| `POSTGRES_USER` (var) | `postgres` |
+| `POSTGRES_DB` (var) | `ric_db` |
+| `POSTGRES_PASSWORD` (secret) | généré aléatoirement |
+| `DATABASE_URL` (secret) | `postgresql+psycopg://postgres:***@db:5432/ric_db` — pointe sur le Postgres conteneurisé de `docker-compose.preview.yaml`, remplace l'ancienne valeur d'avril |
+| `NEXT_PUBLIC_API_URL` (var) | `https://api.preview.cinestats5050.fr` |
+| `ALLOWED_ORIGINS` (var) | `https://preview.cinestats5050.fr,https://www.preview.cinestats5050.fr` |
+| `DOMAIN`, `API_DOMAIN` (var) | `preview.cinestats5050.fr` / `api.preview.cinestats5050.fr` |
+| `RUN_SEED` (var) | `true` |
+| `BACKEND_PORT`, `FRONTEND_PORT` (var) | `5001` / `3000` — déjà présents depuis avril, inchangés |
+| `METABASE_SITE_URL`, `METABASE_SECRET_KEY`, `METABASE_DASHBOARD_ID` | déjà présents depuis avril, réutilisés tel quel |
+| `CERTBOT_EMAIL` | posé |
+| `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY` | posés |
 
-Commandes pour les 4 manquants, une fois les credentials OVH obtenus (§5) :
-
-```bash
-REPO="Le-Collectif-50-50/cinestats-5050"
-
-gh secret set CERTBOT_EMAIL          --env preview --repo $REPO --body "<email>"
-gh secret set OVH_APPLICATION_KEY    --env preview --repo $REPO --body "<clé du §5>"
-gh secret set OVH_APPLICATION_SECRET --env preview --repo $REPO --body "<secret du §5>"
-gh secret set OVH_CONSUMER_KEY       --env preview --repo $REPO --body "<consumer key du §5>"
-```
+Reste hors GitHub : DNS `preview.cinestats5050.fr` / `api.preview.cinestats5050.fr` pointés vers la VM (voir §6), et la VM elle-même provisionnée avec `scripts/provision-preview.sh`.
 
 `DATABASE_URL` utilise le préfixe `postgresql+psycopg://` (et non `postgresql://`) : le projet n'a que `psycopg` v3 d'installé (`poetry.lock`), pas `psycopg2` — SQLAlchemy cherche `psycopg2` par défaut avec le préfixe nu et le service `migrate` planterait au démarrage. `postgres` / `ric_db` reprennent la convention déjà utilisée dans `docker-compose.yaml` (dev) et `.env` local.
 
