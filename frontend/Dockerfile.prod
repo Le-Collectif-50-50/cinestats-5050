@@ -7,8 +7,14 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID
 ENV NEXT_PUBLIC_UMAMI_WEBSITE_ID=$NEXT_PUBLIC_UMAMI_WEBSITE_ID
 
-# Only "true" on production (see deploy.yml) — every other environment's
-# robots.txt disallows everything by default. See app/robots.ts.
+# Only "true" on production (see deploy.yml) — every other environment gets
+# a Disallow-everything robots.txt. Written as a plain static public/ file
+# below rather than an app/robots.ts route: that dynamic-route approach
+# built fine locally but silently dropped /robots.txt from the final
+# routes-manifest.json on the GitHub Actions (linux/amd64) runner — a
+# Turbopack/Next 16 route-generation quirk that didn't reproduce on a local
+# arm64 build. A static public/ file has no bundler involvement, so it
+# can't hit that class of bug.
 ARG NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING
 ENV NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING=$NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING
 
@@ -24,6 +30,12 @@ COPY . .
 RUN echo "NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL" > .env.local && \
     echo "NEXT_PUBLIC_UMAMI_WEBSITE_ID=$NEXT_PUBLIC_UMAMI_WEBSITE_ID" >> .env.local && \
     echo "NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING=$NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING" >> .env.local
+
+RUN if [ "$NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING" = "true" ]; then \
+      printf 'User-Agent: *\nAllow: /\n' > public/robots.txt; \
+    else \
+      printf 'User-Agent: *\nDisallow: /\n' > public/robots.txt; \
+    fi
 
 RUN pnpm build
 
