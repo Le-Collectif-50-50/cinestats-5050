@@ -2,7 +2,7 @@ name: Deploy Preview
 
 on:
   push:
-    branches: [develop]
+    branches: [preview]
   workflow_dispatch:
 
 env:

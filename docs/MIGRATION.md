@@ -12,19 +12,28 @@ git remote add origin git@github.com:Le-Collectif-50-50/cinestats-5050.git
 git remote -v
 ```
 
-## 2. Ordre de bascule
+## 2. Stratégie de branches
 
-1. Créer l'environment `production` et ses secrets/variables (§3) dans le nouveau repo **avant tout push sur `main`** — sinon `deploy.yml` échoue dès la première exécution.
-2. Compléter l'environment `preview` (§4) — il existe déjà, il manque encore `CERTBOT_EMAIL` et les 3 secrets OVH.
-3. Pousser la branche de migration, la merger dans `develop` → le déploiement preview se déclenche. Vérifier de bout en bout (voir `docs/DEPLOYMENT.md`).
-4. Merger `develop` → `main` → les images `latest` sont publiées dans le nouveau namespace, puis le serveur de prod les tire.
+`develop` a été abandonnée au profit de `main` comme branche de travail (les PR y sont mergées directement), avec deux branches dédiées au déploiement : `preview` et `production`. Voir `docs/DEPLOYMENT.md` pour le schéma complet.
+
+Ce qui a été fait pendant cette migration :
+- `main` avait sa protection de branche avec `lock_branch: true` (branche verrouillée en lecture seule, héritée du repo d'origine) — désactivé, sinon aucune PR n'aurait jamais pu y être mergée.
+- `develop` avait un commit que `main` n'avait pas (`ml-image/ml_pipeline_doc.md`) — `main` a été fast-forwardé sur `develop` pour ne rien perdre, puis `develop` a été supprimée.
+- `preview` et `production` ont été créées depuis `main` à ce moment-là (donc initialement identiques).
+
+## 3. Ordre de bascule
+
+1. Créer l'environment `production` et ses secrets/variables (§4) dans le nouveau repo **avant de faire avancer la branche `production`** — sinon `deploy.yml` échoue dès la première exécution.
+2. Compléter l'environment `preview` (§5) — il existe déjà, il manque encore `CERTBOT_EMAIL` et les 3 secrets OVH.
+3. Merger les PR sur `main`, puis faire avancer `preview` jusqu'au commit voulu (`git push origin main:preview` en fast-forward, ou une PR `main` → `preview`) → le déploiement preview se déclenche. Vérifier de bout en bout (voir `docs/DEPLOYMENT.md`).
+4. Faire avancer `production` de la même façon → les images `latest` sont publiées dans le nouveau namespace, puis le serveur de prod les tire.
 5. Rendre les 4 packages GHCR visibles/liés au repo si besoin (`Settings` du package → `Manage Actions access` → lier à `Le-Collectif-50-50/cinestats-5050`).
 6. Réactiver Dependabot et Copilot Autofix dans les réglages de sécurité du nouveau repo (ce n'était pas versionné, donc rien ne suit automatiquement).
 7. Archiver ou documenter l'état de `dataforgoodfr/13_reveler_inegalites_cinema`.
 
-## 3. Environment `production` — secrets et variables
+## 4. Environment `production` — secrets et variables
 
-N'existe pas encore sur le nouveau repo (à créer en premier, avant tout push sur `main`).
+N'existe pas encore sur le nouveau repo (à créer en premier, avant de faire avancer la branche `production`).
 
 ```bash
 REPO="Le-Collectif-50-50/cinestats-5050"
@@ -45,7 +54,7 @@ gh variable set BACKEND_PORT        --env production --repo $REPO --body "5001"
 gh variable set FRONTEND_PORT       --env production --repo $REPO --body "3000"
 ```
 
-## 4. Environment `preview` — état actuel
+## 5. Environment `preview` — état actuel
 
 ✅ **Complet** : les 12 secrets et 9 variables attendus par `deploy-preview.yml` sont posés.
 
@@ -65,21 +74,21 @@ gh variable set FRONTEND_PORT       --env production --repo $REPO --body "3000"
 | `CERTBOT_EMAIL` | posé |
 | `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY` | posés |
 
-Reste hors GitHub : DNS `preview.cinestats5050.fr` / `api.preview.cinestats5050.fr` pointés vers la VM (voir §6), et la VM elle-même provisionnée avec `scripts/provision-preview.sh`.
+Reste hors GitHub : DNS `preview.cinestats5050.fr` / `api.preview.cinestats5050.fr` pointés vers la VM (voir §7), et la VM elle-même provisionnée avec `scripts/provision-preview.sh`.
 
 `DATABASE_URL` utilise le préfixe `postgresql+psycopg://` (et non `postgresql://`) : le projet n'a que `psycopg` v3 d'installé (`poetry.lock`), pas `psycopg2` — SQLAlchemy cherche `psycopg2` par défaut avec le préfixe nu et le service `migrate` planterait au démarrage. `postgres` / `ric_db` reprennent la convention déjà utilisée dans `docker-compose.yaml` (dev) et `.env` local.
 
-## 5. Credentials OVH pour le DNS-01
+## 6. Credentials OVH pour le DNS-01
 
 1. Aller sur https://eu.api.ovh.com/createToken/ (adapter le TLD `.ca`/`.us` selon la zone OVH réelle du domaine).
 2. Renseigner :
    - **Application name** : `cinestats5050-preview-certbot`
    - **Rights** : `GET`, `POST`, `DELETE` sur le chemin `/domain/zone/*`
    - **Validity** : illimitée (le token est utilisé en continu par le renouvellement automatique)
-3. Récupérer les 3 valeurs retournées : `Application Key`, `Application Secret`, `Consumer Key` — ce sont respectivement `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY` du §4.
+3. Récupérer les 3 valeurs retournées : `Application Key`, `Application Secret`, `Consumer Key` — ce sont respectivement `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY` du §5.
 4. ⚠️ Ces clés donnent le droit d'écrire dans la zone DNS du domaine — à traiter comme un secret sensible, jamais commité.
 
-## 6. DNS et machine preview
+## 7. DNS et machine preview
 
 - Créer les enregistrements DNS chez OVH : `preview.cinestats5050.fr` et `api.preview.cinestats5050.fr` → A/AAAA vers l'IP de la VM preview.
 - Provisionner la VM avec `scripts/provision-preview.sh` (Docker, arborescence `~/cinestats5050-preview`, clé SSH de déploiement autorisée).

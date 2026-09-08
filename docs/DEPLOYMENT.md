@@ -1,13 +1,27 @@
 # Déploiement
 
+## Stratégie de branches
+
+`main` est la branche de travail : les PR y sont mergées après review (1 approbation requise). `preview` et `production` sont des branches de déploiement dédiées, sans historique divergent — on y fait remonter (fast-forward ou merge) le contenu de `main` quand on veut déclencher un déploiement, jamais de travail direct dessus.
+
+```
+feature/xxx ──┐
+              ├──► main ──► preview ──► production
+feature/yyy ──┘      (PR)   (promotion) (promotion)
+```
+
+## Environnements
+
 Le projet a deux environnements, chacun sur sa propre machine, déclenchés par un push sur une branche donnée :
 
 | Environnement | Branche | Workflow | Environment GitHub | Domaine |
 |---|---|---|---|---|
-| Production | `main` | `.github/workflows/deploy.yml` | `production` | `cinestats5050.fr` |
-| Preview | `develop` | `.github/workflows/deploy-preview.yml` | `preview` | `preview.cinestats5050.fr` |
+| Preview | `preview` | `.github/workflows/deploy-preview.yml` | `preview` | `preview.cinestats5050.fr` |
+| Production | `production` | `.github/workflows/deploy.yml` | `production` | `cinestats5050.fr` |
 
 Les deux peuvent aussi être déclenchés manuellement (`workflow_dispatch`).
+
+Pour déployer : faire avancer la branche `preview` (ou `production`) jusqu'au commit de `main` qu'on veut déployer — par exemple `git push origin main:preview` pour un fast-forward, ou une PR `main` → `preview` si l'historique a divergé.
 
 ## Flux commun
 
@@ -53,7 +67,7 @@ Voir `docs/MIGRATION.md` pour les commandes `gh` exactes et la procédure OVH.
 
 ## Rollback
 
-**Production** : redéployer une image précédente en repointant manuellement les 4 services sur un tag `sha-<commit>` connu (`docker compose pull && up -d` après avoir édité `docker-compose.prod.yaml` ou en passant `IMAGE_PREFIX`/tag explicitement), puis rejouer `deploy.yml` via `workflow_dispatch` une fois le correctif poussé sur `main`.
+**Production** : redéployer une image précédente en repointant manuellement les 4 services sur un tag `sha-<commit>` connu (`docker compose pull && up -d` après avoir édité `docker-compose.prod.yaml` ou en passant `IMAGE_PREFIX`/tag explicitement), puis rejouer `deploy.yml` via `workflow_dispatch` une fois le correctif poussé sur `production`.
 
 **Preview** : aucun enjeu de service — relancer `workflow_dispatch` sur `deploy-preview.yml`, ou `docker compose down -v && up -d` sur le serveur pour repartir d'une base vide (les migrations et le seed se rejouent automatiquement).
 

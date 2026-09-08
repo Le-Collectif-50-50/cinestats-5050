@@ -3,7 +3,7 @@ name: Frontend Checks
 on:
   pull_request:
   push:
-    branches: [main, develop]
+    branches: [main, preview, production]
 
 jobs:
   frontend-checks:
