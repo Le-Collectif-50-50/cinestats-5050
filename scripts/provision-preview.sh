@@ -49,6 +49,11 @@ install -d -m 755 -o "$DEPLOY_USER" -g "$DEPLOY_USER" \
   "$DEPLOY_HOME/cinestats5050-preview/certbot/conf" \
   "$DEPLOY_HOME/cinestats5050-preview/certbot/www" \
   "$DEPLOY_HOME/cinestats5050-preview/certbot/logs"
+# Belt-and-suspenders: some `install -d` implementations only chown the
+# explicitly-named leaf directories, leaving intermediate ones (here,
+# .../certbot/ itself) owned by root — which then blocks the deploy
+# workflow's scp step from writing certbot/Dockerfile* into it.
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_HOME/cinestats5050-preview"
 
 echo "==> Ouverture des ports 80/443 (si ufw est actif)"
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then

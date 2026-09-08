@@ -53,15 +53,19 @@ gh variable set NEXT_PUBLIC_API_URL --env production --repo $REPO --body "https:
 gh variable set ALLOWED_ORIGINS     --env production --repo $REPO --body "https://cinestats5050.fr,https://www.cinestats5050.fr"
 gh variable set BACKEND_PORT        --env production --repo $REPO --body "5001"
 gh variable set FRONTEND_PORT       --env production --repo $REPO --body "3000"
+gh variable set SERVER_PORT         --env production --repo $REPO --body "22022"
 ```
+
+⚠️ `SERVER_PORT` : les VPS OVH de ce projet sont durcis sur le port SSH **22022** (mot de passe + root désactivés, fail2ban — voir le `~/.ssh/config` local de l'équipe, section "CineStats — 3 VPS-1 OVH"), pas le 22 par défaut. Vérifie que c'est bien le cas pour le serveur qui accueillera la prod avant de poser cette variable.
 
 ## 5. Environment `preview` — état actuel
 
-✅ **Complet** : les 12 secrets et 9 variables attendus par `deploy-preview.yml` sont posés.
+✅ **Complet** : les 12 secrets et 10 variables attendus par `deploy-preview.yml` sont posés.
 
 | Clé | Valeur |
 |---|---|
 | `SERVER_HOST`, `SSH_USERNAME`, `SSH_PRIVATE_KEY` | clé de déploiement dédiée à la VM preview |
+| `SERVER_PORT` (var) | `22022` — port SSH durci, pas le 22 par défaut (voir `~/.ssh/config` local) |
 | `POSTGRES_USER` (var) | `postgres` |
 | `POSTGRES_DB` (var) | `ric_db` |
 | `POSTGRES_PASSWORD` (secret) | généré aléatoirement |

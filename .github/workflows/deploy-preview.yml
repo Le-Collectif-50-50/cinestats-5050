@@ -5,20 +5,74 @@ on:
     branches: [preview]
   workflow_dispatch:
 
+env:
+  REGISTRY: ghcr.io
+
 jobs:
+  # NOTE: duplicated (different matrix/tag/build-args) in deploy.yml — see
+  # the comment there for why this isn't a reusable workflow call.
   build-and-push:
-    uses: ./.github/workflows/build-push-images.yml
-    with:
-      environment: preview
-      image-tag: preview
-      matrix-json: >-
-        [
-          {"name":"backend","image":"ric-backend","context":".","file":"./backend/Dockerfile.prod"},
-          {"name":"frontend","image":"ric-frontend","context":"./frontend","file":"./frontend/Dockerfile.prod"},
-          {"name":"nginx","image":"ric-nginx","context":"./nginx","file":"./nginx/Dockerfile"},
-          {"name":"certbot-dns","image":"ric-certbot-dns","context":"./certbot","file":"./certbot/Dockerfile.dns-ovh"}
-        ]
-    secrets: inherit
+    runs-on: ubuntu-latest
+    environment: preview
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            image: ric-backend
+            context: .
+            file: ./backend/Dockerfile.prod
+          - name: frontend
+            image: ric-frontend
+            context: ./frontend
+            file: ./frontend/Dockerfile.prod
+          - name: nginx
+            image: ric-nginx
+            context: ./nginx
+            file: ./nginx/Dockerfile
+          # DNS-01 variant of certbot (certbot/dns-ovh), distinct from the
+          # HTTP-01 image (ric-certbot) used by prod's deploy.yml.
+          - name: certbot-dns
+            image: ric-certbot-dns
+            context: ./certbot
+            file: ./certbot/Dockerfile.dns-ovh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+
+      - name: Extract metadata (tags, labels) for ${{ matrix.name }}
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=preview
+            type=sha
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ${{ matrix.name == 'frontend' && format('NEXT_PUBLIC_API_URL={0}', vars.NEXT_PUBLIC_API_URL) || '' }}
 
   deploy:
     runs-on: ubuntu-latest
@@ -38,6 +92,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SERVER_PORT }}
           source: "docker-compose.preview.yaml"
           target: ~/cinestats5050-preview
 
@@ -47,6 +102,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SERVER_PORT }}
           source: "nginx"
           target: ~/cinestats5050-preview
 
@@ -56,6 +112,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SERVER_PORT }}
           source: "certbot"
           target: ~/cinestats5050-preview
 
@@ -65,6 +122,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SERVER_PORT }}
           source: "scripts"
           target: ~/cinestats5050-preview
 
@@ -74,6 +132,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SERVER_PORT }}
           script: |
             cd ~/cinestats5050-preview
             mkdir -p certbot/conf certbot/www certbot/logs
