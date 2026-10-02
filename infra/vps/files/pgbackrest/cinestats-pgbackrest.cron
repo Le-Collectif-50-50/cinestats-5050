@@ -1,0 +1,5 @@
+# Installé par infra/vps/40-pgbackrest.sh. Complète le dimanche, différentielle les autres jours.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+30 1 * * 0   postgres cinestats-pgbackrest-backup full 2>&1 | logger -t cinestats-pgbackrest
+30 1 * * 1-6 postgres cinestats-pgbackrest-backup diff 2>&1 | logger -t cinestats-pgbackrest

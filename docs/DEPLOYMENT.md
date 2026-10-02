@@ -33,17 +33,37 @@ Le `.env` du serveur est **entièrement régénéré à chaque déploiement** �
 ## Production
 
 - Images taguées `latest` + `sha-<commit>`.
-- Déployée sous `~/cinestats5050` sur le serveur.
+- **3 VPS OVH** durcis par `infra/vps/` (procédure complète : [`docs/runbooks/securisation-vps-prod.md`](runbooks/securisation-vps-prod.md)) :
+
+  | VPS | Rôle | Joignable depuis Internet |
+  |---|---|---|
+  | `app` | nginx + frontend + backend (ce workflow) | 80, 443, SSH 22022 |
+  | `db` | PostgreSQL 16 natif, sauvegardé par pgBackRest | SSH 22022, WireGuard (UDP 51820, IP des pairs seulement) |
+  | `data` (Canada) | Airbyte, Prefect, dbt, scrapers | SSH 22022 |
+
+  `app` et `data` parlent à `db` par un tunnel WireGuard (`10.50.0.0/24`, `db` = `10.50.0.1`) ; Postgres n'écoute pas sur l'IP publique.
+- Déployée sous `~/cinestats5050` du compte `deploy` du VPS `app` (groupe `docker`, sans sudo).
 - `docker compose down` puis `up -d` → **coupure de service à chaque déploiement**.
 - TLS : HTTP-01 (webroot), boucle `certbot renew` toutes les 12h. **Le certificat initial doit être créé à la main** en SSH sur le serveur (`certbot certonly --webroot ...`) — `certbot/entrypoint.sh` ne fait que le renouvellement.
-- Aucune migration Alembic automatique : à jouer à la main sur le serveur (`alembic upgrade head`).
-- La base de données est externe (secret `DATABASE_URL`), non gérée par la CI.
+- Le backend se connecte avec le rôle **`app_ro`, en lecture seule** (l'API n'a que des routes GET) : `DATABASE_URL=postgresql+psycopg://app_ro:***@10.50.0.1:5432/cinestats-5050-db?sslmode=require`.
+- Aucune migration Alembic automatique : à jouer à la main depuis le VPS `app` avec le rôle **`app_migrator`**, seul à pouvoir modifier le schéma. Son mot de passe vient du gestionnaire de mots de passe et n'est jamais stocké sur le serveur :
+
+  ```bash
+  sudo -iu deploy
+  cd ~/cinestats5050
+  read -rs MIGRATOR_PW   # colle le mot de passe d'app_migrator, rien ne s'affiche
+  export DATABASE_URL="postgresql+psycopg://app_migrator:$MIGRATOR_PW@10.50.0.1:5432/cinestats-5050-db?sslmode=require"
+  docker compose run --rm -e DATABASE_URL backend alembic -c database/alembic.ini upgrade head
+  exit                   # la session deploy et ses variables disparaissent
+  ```
 
 ### Secrets (environment `production`)
 `SERVER_HOST`, `SSH_USERNAME`, `SSH_PRIVATE_KEY`, `DATABASE_URL`, `METABASE_SITE_URL`, `METABASE_SECRET_KEY`, `METABASE_DASHBOARD_ID`.
 
 ### Variables (environment `production`)
-`NEXT_PUBLIC_API_URL`, `ALLOWED_ORIGINS`, `BACKEND_PORT`, `FRONTEND_PORT`, `SERVER_PORT` (port SSH du serveur — les VPS OVH de ce projet sont durcis sur `22022`, pas le 22 par défaut ; voir `~/.ssh/config` local, section "CineStats — 3 VPS-1 OVH").
+`NEXT_PUBLIC_API_URL`, `ALLOWED_ORIGINS`, `BACKEND_PORT`, `FRONTEND_PORT`, `SERVER_PORT` (`22022` : port SSH des VPS durcis par `infra/vps/00-base.sh`, pas le 22 par défaut).
+
+`SSH_USERNAME` vaut `deploy` et `SSH_PRIVATE_KEY` est la clé privée dédiée dont la clé publique a été passée à `infra/vps/20-docker.sh app`. L'environment `production` doit exiger un reviewer et n'autoriser que la branche `production` : un accès à ce secret équivaut à un accès root au VPS `app`.
 
 ## Preview
 
@@ -73,4 +93,5 @@ Voir `docs/MIGRATION.md` pour les commandes `gh` exactes et la procédure OVH.
 
 ## Provisioning d'une nouvelle machine
 
-Voir `scripts/provision-preview.sh` pour l'amorçage d'une VM preview vierge (Docker, arborescence, clé SSH de déploiement).
+- **Production** (VPS `app`, `db`, `data`) : scripts `infra/vps/`, à dérouler dans l'ordre de [`docs/runbooks/securisation-vps-prod.md`](runbooks/securisation-vps-prod.md).
+- **Preview** : `scripts/provision-preview.sh` pour l'amorçage d'une VM preview vierge (Docker, arborescence, clé SSH de déploiement).
