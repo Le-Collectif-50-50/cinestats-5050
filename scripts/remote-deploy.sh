@@ -15,6 +15,8 @@ echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$OWNER_LOWER" --password-stdin
 
 mv "$COMPOSE_FILE" docker-compose.yml
 docker compose pull
+# Don't leave the registry credentials lying in ~/.docker/config.json.
+docker logout ghcr.io
 
 if [ "$DO_DOWN" = "--down" ]; then
   docker compose down

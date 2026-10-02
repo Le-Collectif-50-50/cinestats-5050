@@ -30,6 +30,10 @@ COPY --from=builder /backend/database ./database
 COPY --from=builder /backend/pyproject.toml ./pyproject.toml
 COPY --from=builder /backend/poetry.lock ./poetry.lock
 
+# Unprivileged runtime user: the code stays root-owned and read-only to it.
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
+USER app
+
 EXPOSE 5001
 
 CMD ["python", "-m", "uvicorn", "backend.main:backend", "--host", "0.0.0.0", "--port", "5001"]

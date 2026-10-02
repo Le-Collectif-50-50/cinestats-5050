@@ -77,6 +77,7 @@ services:
       - web
 
   nginx:
+    restart: unless-stopped
     image: ${IMAGE_PREFIX}/ric-nginx:preview
     ports:
       - "80:80"

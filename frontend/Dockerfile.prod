@@ -37,8 +37,14 @@ RUN if [ "$NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING" = "true" ]; then \
       printf 'User-Agent: *\nDisallow: /\n' > public/robots.txt; \
     fi
 
-RUN pnpm build
+# next start writes its cache (images, fetch) under distDir at runtime, so
+# that one folder belongs to the unprivileged node user.
+RUN pnpm build && chown -R node:node dist
+
+USER node
 
 EXPOSE 3000
 
-CMD ["pnpm", "start"]
+# next directly rather than `pnpm start`: as node, corepack would have to
+# download pnpm again at every container start (its cache is root's).
+CMD ["./node_modules/.bin/next", "start"]
