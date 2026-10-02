@@ -1,0 +1,11 @@
+# Installé par infra/vps/00-base.sh.
+[sshd]
+enabled = true
+port = @SSH_PORT@
+# Debian 12+ n'a plus /var/log/auth.log par défaut : on lit le journal systemd.
+backend = systemd
+maxretry = 5
+findtime = 10m
+bantime = 1h
+bantime.increment = true
+bantime.maxtime = 1w
