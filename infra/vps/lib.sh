@@ -90,6 +90,11 @@ random_password() {
 public_iface() { ip -4 route show default | awk '{print $5; exit}'; }
 public_ipv4()  { ip -4 -o addr show dev "$(public_iface)" | awk '{split($4, a, "/"); print a[1]; exit}'; }
 
+# Ligne known_hosts de ce serveur, pour la variable GitHub SSH_KNOWN_HOSTS.
+known_hosts_line() {
+  echo "[$(public_ipv4)]:$SSH_PORT $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
+}
+
 is_ipv4() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }
 
 # Fichier root-only où les scripts consignent les secrets générés.

@@ -3,7 +3,7 @@
 # À exécuter en root (ou via sudo) sur la machine cible, une seule fois.
 #
 # Ce script installe Docker + le plugin compose, crée l'arborescence attendue
-# par .github/workflows/deploy-preview.yml (~/cinestats5050-preview), et
+# par .github/workflows/deploy.yml (~/cinestats5050-preview), et
 # prépare l'utilisateur de déploiement avec sa clé SSH publique.
 #
 # Usage : ./provision-preview.sh <deploy_user> <chemin_vers_clé_publique.pub>
@@ -61,9 +61,21 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
   ufw allow 443/tcp
 fi
 
+# Clé d'hôte SSH épinglée par le workflow (vars.SSH_KNOWN_HOSTS). Port 22 :
+# format « ip clé », sinon « [ip]:port clé ».
+SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port / {print $2; exit}')
+PUBLIC_IP=$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
+HOST_KEY=$(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)
+if [ "${SSH_PORT:-22}" = "22" ]; then
+  KNOWN_HOSTS="$PUBLIC_IP $HOST_KEY"
+else
+  KNOWN_HOSTS="[$PUBLIC_IP]:$SSH_PORT $HOST_KEY"
+fi
+
 cat <<EOF
 
 Terminé. Reste à faire manuellement :
+  - vars.SSH_KNOWN_HOSTS = $KNOWN_HOSTS
   - secrets.SERVER_HOST  = IP ou hostname de cette machine
   - secrets.SSH_USERNAME = $DEPLOY_USER
   - secrets.SSH_PRIVATE_KEY = clé privée correspondant à $PUBKEY_FILE

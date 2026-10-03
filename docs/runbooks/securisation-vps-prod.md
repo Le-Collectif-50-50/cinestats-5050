@@ -212,7 +212,9 @@ Ce que fait le script :
   - `SERVER_HOST=IP_APP`, `SSH_USERNAME=deploy` ;
   - `SSH_PRIVATE_KEY` : contenu de `~/.ssh/cinestats_deploy_prod` ;
   - `DATABASE_URL=postgresql+psycopg://app_ro:<mdp>@10.50.0.1:5432/cinestats-5050-db?sslmode=require`.
-- **Variable :** `SERVER_PORT=22022`.
+- **Variables :**
+  - `SERVER_PORT=22022` ;
+  - `SSH_KNOWN_HOSTS` : la ligne affichée à la fin de `20-docker.sh`. Le workflow épingle la clé d'hôte du serveur avec.
 - **Protection :** un reviewer obligatoire, déploiement limité à la branche `production`. Le secret `SSH_PRIVATE_KEY` donne l'équivalent d'un accès root à `app`. Les reviewers obligatoires sont gratuits sur un dépôt public.
   ```bash
   REPO=Le-Collectif-50-50/cinestats-5050
