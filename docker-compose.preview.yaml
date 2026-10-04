@@ -19,7 +19,7 @@ services:
   # One-shot: runs Alembic migrations, then the seed scripts if RUN_SEED=true.
   # This is the preview rehearsal for what will eventually run in prod too.
   migrate:
-    image: ${IMAGE_PREFIX}/ric-backend:preview
+    image: ${IMAGE_PREFIX}/ric-backend:${IMAGE_TAG:?set by the deploy workflow}
     restart: "no"
     depends_on:
       db:
@@ -44,7 +44,7 @@ services:
 
   backend:
     restart: unless-stopped
-    image: ${IMAGE_PREFIX}/ric-backend:preview
+    image: ${IMAGE_PREFIX}/ric-backend:${IMAGE_TAG:?set by the deploy workflow}
     expose:
       - ${BACKEND_PORT}
     environment:
@@ -54,6 +54,12 @@ services:
       - METABASE_SITE_URL=${METABASE_SITE_URL}
       - METABASE_SECRET_KEY=${METABASE_SECRET_KEY}
       - METABASE_DASHBOARD_ID=${METABASE_DASHBOARD_ID}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       db:
         condition: service_healthy
@@ -64,13 +70,20 @@ services:
 
   frontend:
     restart: unless-stopped
-    image: ${IMAGE_PREFIX}/ric-frontend:preview
+    image: ${IMAGE_PREFIX}/ric-frontend:${IMAGE_TAG:?set by the deploy workflow}
     expose:
       - ${FRONTEND_PORT}
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
       - INTERNAL_API_URL=http://backend:${BACKEND_PORT}
+    # A static file: checks that next is serving without depending on the API.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/robots.txt"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       - backend
     networks:
@@ -78,7 +91,7 @@ services:
 
   nginx:
     restart: unless-stopped
-    image: ${IMAGE_PREFIX}/ric-nginx:preview
+    image: ${IMAGE_PREFIX}/ric-nginx:${IMAGE_TAG:?set by the deploy workflow}
     ports:
       - "80:80"
       - "443:443"
@@ -100,7 +113,7 @@ services:
   # way: nginx waits on certbot (it needs a certificate to even start), not
   # the reverse.
   certbot:
-    image: ${IMAGE_PREFIX}/ric-certbot-dns:preview
+    image: ${IMAGE_PREFIX}/ric-certbot-dns:${IMAGE_TAG:?set by the deploy workflow}
     restart: unless-stopped
     environment:
       - DOMAIN=${DOMAIN}

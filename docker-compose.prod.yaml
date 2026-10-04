@@ -10,7 +10,7 @@ services:
   backend:
     logging: *logging
     restart: unless-stopped
-    image: ${IMAGE_PREFIX}/ric-backend:latest
+    image: ${IMAGE_PREFIX}/ric-backend:${IMAGE_TAG:?set by the deploy workflow}
     expose:
       - ${BACKEND_PORT}
     environment:
@@ -20,19 +20,32 @@ services:
       - METABASE_SITE_URL=${METABASE_SITE_URL}
       - METABASE_SECRET_KEY=${METABASE_SECRET_KEY}
       - METABASE_DASHBOARD_ID=${METABASE_DASHBOARD_ID}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     networks:
       - web
 
   frontend:
     logging: *logging
     restart: unless-stopped
-    image: ${IMAGE_PREFIX}/ric-frontend:latest
+    image: ${IMAGE_PREFIX}/ric-frontend:${IMAGE_TAG:?set by the deploy workflow}
     expose:
       - ${FRONTEND_PORT}
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
       - INTERNAL_API_URL=http://backend:${BACKEND_PORT}
+    # A static file: checks that next is serving without depending on the API.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/robots.txt"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       - backend
     networks:
@@ -41,9 +54,7 @@ services:
   nginx:
     logging: *logging
     restart: unless-stopped
-    image: ${IMAGE_PREFIX}/ric-nginx:latest
-    build:
-      context: ./nginx
+    image: ${IMAGE_PREFIX}/ric-nginx:${IMAGE_TAG:?set by the deploy workflow}
     ports:
       - "80:80"
       - "443:443"
@@ -62,9 +73,7 @@ services:
 
   certbot:
     logging: *logging
-    image: ${IMAGE_PREFIX}/ric-certbot:latest
-    build:
-      context: ./certbot
+    image: ${IMAGE_PREFIX}/ric-certbot:${IMAGE_TAG:?set by the deploy workflow}
     restart: unless-stopped
     volumes:
       - ./certbot/conf:/etc/letsencrypt

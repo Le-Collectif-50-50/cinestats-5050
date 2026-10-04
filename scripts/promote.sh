@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Promotes `main` onto a deployment branch (preview or production),
-# which triggers the corresponding GitHub Actions deploy workflow
-# (deploy-preview.yml / deploy.yml). Fast-forward only by default —
+# which triggers the GitHub Actions deploy workflow for that branch
+# (.github/workflows/deploy.yml). Fast-forward only by default —
 # use --force only if you know why the branch has diverged.
 #
 # Usage:
@@ -63,10 +63,8 @@ else
   git push origin "origin/main:refs/heads/$TARGET"
 fi
 
+# Same workflow for both environments; the branch filter tells them apart.
 WORKFLOW="Deploy"
-if [[ "$TARGET" == "preview" ]]; then
-  WORKFLOW="Deploy Preview"
-fi
 
 if ! $WATCH; then
   echo "==> Done. Watch it with: gh run watch --repo $REPO \$(gh run list --repo $REPO --branch $TARGET --workflow \"$WORKFLOW\" --limit 1 --json databaseId -q '.[0].databaseId')"

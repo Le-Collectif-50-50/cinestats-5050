@@ -78,6 +78,13 @@ if [ "$ROLE" = "app" ]; then
 fi
 
 docker info --format 'Docker {{.ServerVersion}}, logs : {{.LoggingDriver}}'
+if [ "$ROLE" = "app" ]; then
+  cat <<EOF
+
+Variable GitHub SSH_KNOWN_HOSTS de l'environment production (clé d'hôte épinglée par le workflow) :
+  $(known_hosts_line)
+EOF
+fi
 cat <<EOF
 
 Docker prêt sur le VPS $ROLE. Contrôle depuis ton poste (doit expirer sauf 80/443 sur app) :
