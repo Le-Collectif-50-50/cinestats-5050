@@ -290,6 +290,7 @@ Ensuite, suivre le runbook analytics (branche `analytics/fix_join`) : installati
 1. **Disque**, sur chaque VPS : créer un check healthchecks.io (période 15 min, grâce 30 min), puis `sudo ~/vps/50-monitoring.sh https://hc-ping.com/<uuid>`. Une alerte part au-delà de 80 % d'occupation.
 2. **Sauvegardes** : check créé à l'étape 4.
 3. **Disponibilité** : un service d'uptime externe (UptimeRobot, Better Stack, Uptime Kuma…) sur `https://cinestats5050.fr` et `https://api.cinestats5050.fr`, avec alerte sur l'expiration du certificat.
+4. **Métriques** (Prometheus + Grafana du repo `cinestats-infra`, sur le VPS Services) : sur chaque VPS, `sudo ~/vps/55-exporters.sh <IP du VPS Services>`. Le script installe `node-exporter` et n'ouvre le port 9100 qu'à cette IP. Les cibles sont déclarées dans `cinestats-infra` (variables `VPS_PROD_APP_HOST`, `VPS_PROD_DB_HOST`, `VPS_PROD_DATA_HOST`). Vérification : dans Prometheus, *Status → Targets*, les trois cibles `node-exporter-prod` sont `UP`. Il n'y a pas d'alerte automatique : un VPS qui tombe se voit dans Grafana, mais personne n'est prévenu (le point 1 prévient du disque seulement).
 
 ## 8. Vérification finale
 
