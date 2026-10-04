@@ -45,8 +45,6 @@ jobs:
       floating_tag: ${{ steps.config.outputs.floating_tag }}
       compose_file: ${{ steps.config.outputs.compose_file }}
       deploy_dir: ${{ steps.config.outputs.deploy_dir }}
-      certbot_image: ${{ steps.config.outputs.certbot_image }}
-      certbot_dockerfile: ${{ steps.config.outputs.certbot_dockerfile }}
       umami_website_id: ${{ steps.config.outputs.umami_website_id }}
       allow_robots_indexing: ${{ steps.config.outputs.allow_robots_indexing }}
       site_url: ${{ steps.config.outputs.site_url }}
@@ -69,14 +67,12 @@ jobs:
             production)
               environment=production floating_tag=latest
               compose_file=docker-compose.prod.yaml deploy_dir=cinestats5050
-              certbot_image=ric-certbot certbot_dockerfile=./certbot/Dockerfile
               umami_website_id=996668f1-b9bd-4892-974d-b9a0bb145082 allow_robots_indexing=true
               site_url=https://cinestats5050.fr robots_expected="Allow: /"
               ;;
             preview)
               environment=preview floating_tag=preview
               compose_file=docker-compose.preview.yaml deploy_dir=cinestats5050-preview
-              certbot_image=ric-certbot-dns certbot_dockerfile=./certbot/Dockerfile.dns-ovh
               umami_website_id="" allow_robots_indexing=false
               site_url=https://preview.cinestats5050.fr robots_expected="Disallow: /"
               ;;
@@ -108,8 +104,6 @@ jobs:
             echo "floating_tag=$floating_tag"
             echo "compose_file=$compose_file"
             echo "deploy_dir=$deploy_dir"
-            echo "certbot_image=$certbot_image"
-            echo "certbot_dockerfile=$certbot_dockerfile"
             echo "umami_website_id=$umami_website_id"
             echo "allow_robots_indexing=$allow_robots_indexing"
             echo "site_url=$site_url"
@@ -137,9 +131,11 @@ jobs:
           - image: ric-nginx
             context: ./nginx
             file: ./nginx/Dockerfile
-          - image: ${{ needs.config.outputs.certbot_image }}
+          # Certificates are issued through the OVH DNS API (DNS-01) in both
+          # environments.
+          - image: ric-certbot-dns
             context: ./certbot
-            file: ${{ needs.config.outputs.certbot_dockerfile }}
+            file: ./certbot/Dockerfile.dns-ovh
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -239,17 +235,18 @@ jobs:
           METABASE_SITE_URL: ${{ secrets.METABASE_SITE_URL }}
           METABASE_SECRET_KEY: ${{ secrets.METABASE_SECRET_KEY }}
           METABASE_DASHBOARD_ID: ${{ secrets.METABASE_DASHBOARD_ID }}
+          DOMAIN: ${{ vars.DOMAIN }}
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
+          CERT_EXTRA_DOMAINS: ${{ vars.CERT_EXTRA_DOMAINS }}
+          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
+          OVH_APPLICATION_KEY: ${{ secrets.OVH_APPLICATION_KEY }}
+          OVH_APPLICATION_SECRET: ${{ secrets.OVH_APPLICATION_SECRET }}
+          OVH_CONSUMER_KEY: ${{ secrets.OVH_CONSUMER_KEY }}
           # Preview only (unset in production).
           POSTGRES_USER: ${{ vars.POSTGRES_USER }}
           POSTGRES_DB: ${{ vars.POSTGRES_DB }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           RUN_SEED: ${{ vars.RUN_SEED }}
-          DOMAIN: ${{ vars.DOMAIN }}
-          API_DOMAIN: ${{ vars.API_DOMAIN }}
-          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
-          OVH_APPLICATION_KEY: ${{ secrets.OVH_APPLICATION_KEY }}
-          OVH_APPLICATION_SECRET: ${{ secrets.OVH_APPLICATION_SECRET }}
-          OVH_CONSUMER_KEY: ${{ secrets.OVH_CONSUMER_KEY }}
           ENVIRONMENT: ${{ needs.config.outputs.environment }}
         run: |
           (umask 077 && scripts/render-server-env.sh "$ENVIRONMENT" > "$RUNNER_TEMP/server.env")

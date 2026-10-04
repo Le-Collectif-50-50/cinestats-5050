@@ -107,11 +107,10 @@ services:
     networks:
       - web
 
-  # DNS-01 variant (certbot/dns-ovh) — issues and renews the preview certificate
-  # via the OVH API instead of the HTTP-01 webroot challenge used in prod. Unlike
-  # HTTP-01, DNS-01 needs nothing from nginx, so the dependency runs the other
-  # way: nginx waits on certbot (it needs a certificate to even start), not
-  # the reverse.
+  # Issues and renews the preview certificate through the OVH API (DNS-01,
+  # certbot/dns-ovh), like prod. DNS-01 needs nothing from nginx, so the
+  # dependency runs the other way: nginx waits on certbot (it needs a
+  # certificate to even start), not the reverse.
   certbot:
     image: ${IMAGE_PREFIX}/ric-certbot-dns:${IMAGE_TAG:?set by the deploy workflow}
     restart: unless-stopped

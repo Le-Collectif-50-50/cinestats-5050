@@ -27,7 +27,7 @@ Pour déployer : faire avancer la branche `preview` (ou `production`) jusqu'au c
 
 Un seul workflow, `.github/workflows/deploy.yml`, sert les deux environnements : la branche poussée choisit l'environment GitHub et ses réglages. Il n'utilise aucune action tierce : le runner parle au serveur avec son propre `ssh`.
 
-1. **Config** : réglages de l'environnement (fichier compose, dossier sur le serveur, variante de certbot, URL du site).
+1. **Config** : réglages de l'environnement (fichier compose, dossier sur le serveur, URL du site).
 2. **Build** : 4 images (backend, frontend, nginx, certbot) poussées sur `ghcr.io/<owner>/<repo>/<image>`. Elles sont taguées `<environnement>-<sha court>` (ex. `production-1a2b3c4`), plus `latest` en prod ou `preview`. Le tag porte l'environnement parce que l'image frontend embarque des réglages propres à chacun (URL de l'API, Umami, `robots.txt`).
 3. **Deploy** :
    - **Connexion :** SSH avec la **clé d'hôte du serveur épinglée** (`SSH_KNOWN_HOSTS`, voir plus bas). Un serveur usurpé fait échouer le déploiement au lieu de recevoir les secrets.
@@ -65,7 +65,9 @@ Si le serveur est réinstallé, sa clé change : le déploiement échoue tant qu
 
   `app` et `data` parlent à `db` par un tunnel WireGuard (`10.50.0.0/24`, `db` = `10.50.0.1`) ; Postgres n'écoute pas sur l'IP publique.
 - Déployée sous `~/cinestats5050` du compte `deploy` du VPS `app` (groupe `docker`, sans sudo).
-- TLS : HTTP-01 (webroot), boucle `certbot renew` toutes les 12h. **Le certificat initial doit être créé à la main** en SSH sur le serveur (`certbot certonly --webroot ...`) — `certbot/entrypoint.sh` ne fait que le renouvellement.
+- TLS : **DNS-01 via l'API OVH**, comme en preview (`certbot/dns-ovh`, `certbot/entrypoint-dns.sh`). Le certificat initial est émis **automatiquement** au premier déploiement, rien à faire à la main sur le serveur. Il couvre `DOMAIN`, `API_DOMAIN` et les noms de `CERT_EXTRA_DOMAINS` (les alias `www.`), puis `certbot renew` tourne toutes les 12 h. nginx ne démarre qu'une fois le certificat présent (`certbot` est `healthy`) : comptez environ 2 minutes au tout premier déploiement. Le port 80 ne sert plus qu'à rediriger vers HTTPS.
+  - `CERT_EXTRA_DOMAINS` n'est lue qu'à l'émission. Pour changer la liste plus tard, supprimer `certbot/conf/live/cinestats5050.fr`, `archive/cinestats5050.fr` et `renewal/cinestats5050.fr.conf` sur le serveur, puis redéployer.
+  - Il faut que les enregistrements DNS soient chez OVH (même compte que le token) : DNS-01 n'a pas besoin que le domaine pointe déjà vers le serveur.
 - Le backend se connecte avec le rôle **`app_ro`, en lecture seule** (l'API n'a que des routes GET) : `DATABASE_URL=postgresql+psycopg://app_ro:***@10.50.0.1:5432/cinestats-5050-db?sslmode=require`.
 - Aucune migration Alembic automatique : à jouer à la main depuis le VPS `app` avec le rôle **`app_migrator`**, seul à pouvoir modifier le schéma. Son mot de passe vient du gestionnaire de mots de passe et n'est jamais stocké sur le serveur :
 
@@ -79,10 +81,10 @@ Si le serveur est réinstallé, sa clé change : le déploiement échoue tant qu
   ```
 
 ### Secrets (environment `production`)
-`SERVER_HOST`, `SSH_USERNAME`, `SSH_PRIVATE_KEY`, `DATABASE_URL`, `METABASE_SITE_URL`, `METABASE_SECRET_KEY`, `METABASE_DASHBOARD_ID`.
+`SERVER_HOST`, `SSH_USERNAME`, `SSH_PRIVATE_KEY`, `DATABASE_URL`, `METABASE_SITE_URL`, `METABASE_SECRET_KEY`, `METABASE_DASHBOARD_ID`, `CERTBOT_EMAIL`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`.
 
 ### Variables (environment `production`)
-`NEXT_PUBLIC_API_URL`, `ALLOWED_ORIGINS`, `BACKEND_PORT`, `FRONTEND_PORT`, `SERVER_PORT` (`22022` : port SSH des VPS durcis par `infra/vps/00-base.sh`, pas le 22 par défaut), `SSH_KNOWN_HOSTS`.
+`NEXT_PUBLIC_API_URL`, `ALLOWED_ORIGINS`, `BACKEND_PORT`, `FRONTEND_PORT`, `SERVER_PORT` (`22022` : port SSH des VPS durcis par `infra/vps/00-base.sh`, pas le 22 par défaut), `SSH_KNOWN_HOSTS`, `DOMAIN` (`cinestats5050.fr`), `API_DOMAIN` (`api.cinestats5050.fr`), `CERT_EXTRA_DOMAINS` (`www.cinestats5050.fr www.api.cinestats5050.fr`, séparés par des espaces).
 
 `SSH_USERNAME` vaut `deploy` et `SSH_PRIVATE_KEY` est la clé privée dédiée dont la clé publique a été passée à `infra/vps/20-docker.sh app`. L'environment `production` doit exiger un reviewer et n'autoriser que la branche `production` : un accès à ce secret équivaut à un accès root au VPS `app`.
 
@@ -95,7 +97,7 @@ Si le serveur est réinstallé, sa clé change : le déploiement échoue tant qu
 - **Seed automatique**, piloté par la variable `RUN_SEED` (`true`/`false`) — les 5 scripts de `database/seed/` n'étant pas garantis idempotents, mets `RUN_SEED=false` si tu vois des doublons apparaître après un merge.
 - **Umami désactivé** : le build ne reçoit pas `NEXT_PUBLIC_UMAMI_WEBSITE_ID`, donc le script n'est pas injecté (voir `frontend/src/app/layout.tsx`) — les visites de test sur preview ne polluent pas les statistiques de prod.
 - **Metabase réutilisé** : mêmes identifiants que la prod (même instance Metabase).
-- TLS : **DNS-01 via l'API OVH** (`certbot/dns-ovh`, `certbot/entrypoint-dns.sh`). Contrairement à la prod, **le certificat initial est créé automatiquement** au premier démarrage du conteneur — rien à faire à la main sur le serveur.
+- TLS : **DNS-01 via l'API OVH** (`certbot/dns-ovh`, `certbot/entrypoint-dns.sh`). Même mécanisme qu'en prod : **le certificat initial est créé automatiquement** au premier démarrage du conteneur — rien à faire à la main sur le serveur.
 
 ### Secrets (environment `preview`)
 `SERVER_HOST`, `SSH_USERNAME`, `SSH_PRIVATE_KEY`, `DATABASE_URL` (interne, ex. `postgresql+psycopg://postgres:***@db:5432/ric_db` — le préfixe `+psycopg` est obligatoire, le projet n'a que psycopg v3 d'installé, pas psycopg2), `POSTGRES_PASSWORD`, `METABASE_SITE_URL`, `METABASE_SECRET_KEY`, `METABASE_DASHBOARD_ID`, `CERTBOT_EMAIL`, `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`.
