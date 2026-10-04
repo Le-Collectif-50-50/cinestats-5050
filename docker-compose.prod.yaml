@@ -64,23 +64,45 @@ services:
       # refuse to start.
       - ./nginx/prod.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_started
+      # nginx can't start without a certificate: wait until certbot has issued
+      # one (first deploy) or found it on disk (every later deploy).
+      certbot:
+        condition: service_healthy
     networks:
       - web
 
+  # Issues and renews the certificate through the OVH DNS API (DNS-01), so
+  # nothing is needed from nginx or port 80, and no manual step on a new server.
   certbot:
     logging: *logging
-    image: ${IMAGE_PREFIX}/ric-certbot:${IMAGE_TAG:?set by the deploy workflow}
+    image: ${IMAGE_PREFIX}/ric-certbot-dns:${IMAGE_TAG:?set by the deploy workflow}
     restart: unless-stopped
+    environment:
+      - DOMAIN=${DOMAIN}
+      - API_DOMAIN=${API_DOMAIN}
+      - CERT_EXTRA_DOMAINS=${CERT_EXTRA_DOMAINS:-}
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL}
+      - OVH_ENDPOINT=ovh-eu
+      - OVH_APPLICATION_KEY=${OVH_APPLICATION_KEY}
+      - OVH_APPLICATION_SECRET=${OVH_APPLICATION_SECRET}
+      - OVH_CONSUMER_KEY=${OVH_CONSUMER_KEY}
+    # Healthy once the certificate exists. The 60 s DNS propagation wait makes
+    # the very first issuance take about two minutes; the start period must
+    # stay below remote-deploy.sh's --wait-timeout (300 s).
+    healthcheck:
+      test: ["CMD", "test", "-s", "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 240s
     volumes:
       - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
       - ./certbot/logs:/var/log/letsencrypt
-    depends_on:
-      - nginx
     networks:
       - web
 

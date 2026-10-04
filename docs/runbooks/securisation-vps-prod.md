@@ -211,9 +211,11 @@ Ce que fait le script :
 - **Secrets :**
   - `SERVER_HOST=IP_APP`, `SSH_USERNAME=deploy` ;
   - `SSH_PRIVATE_KEY` : contenu de `~/.ssh/cinestats_deploy_prod` ;
-  - `DATABASE_URL=postgresql+psycopg://app_ro:<mdp>@10.50.0.1:5432/cinestats-5050-db?sslmode=require`.
+  - `DATABASE_URL=postgresql+psycopg://app_ro:<mdp>@10.50.0.1:5432/cinestats-5050-db?sslmode=require` ;
+  - `CERTBOT_EMAIL` et `OVH_APPLICATION_KEY` / `OVH_APPLICATION_SECRET` / `OVH_CONSUMER_KEY` : le token OVH du certificat (voir `docs/MIGRATION.md` §6).
 - **Variables :**
   - `SERVER_PORT=22022` ;
+  - `DOMAIN=cinestats5050.fr`, `API_DOMAIN=api.cinestats5050.fr`, `CERT_EXTRA_DOMAINS="www.cinestats5050.fr www.api.cinestats5050.fr"` ;
   - `SSH_KNOWN_HOSTS` : la ligne affichée à la fin de `20-docker.sh`. Le workflow épingle la clé d'hôte du serveur avec.
 - **Protection :** un reviewer obligatoire, déploiement limité à la branche `production`. Le secret `SSH_PRIVATE_KEY` donne l'équivalent d'un accès root à `app`. Les reviewers obligatoires sont gratuits sur un dépôt public.
   ```bash
@@ -249,7 +251,7 @@ L'erreur `schema "public" already exists` de `pg_restore` est attendue et sans e
 
 **Mise en ligne :**
 1. Faire pointer les enregistrements DNS `cinestats5050.fr`, `www`, `api` et `www.api` vers `IP_APP`.
-2. Créer le certificat initial (voir `docs/DEPLOYMENT.md`).
+2. Rien à faire pour le certificat : il est émis automatiquement au premier déploiement, par DNS-01 via l'API OVH (voir `docs/DEPLOYMENT.md`). Les secrets `CERTBOT_EMAIL`, `OVH_*` et les variables `DOMAIN`, `API_DOMAIN`, `CERT_EXTRA_DOMAINS` doivent être posés avant.
 3. Lancer `scripts/promote.sh production`.
 4. Les migrations Alembic se jouent à la main avec `app_migrator` (commande dans `docs/DEPLOYMENT.md`).
 

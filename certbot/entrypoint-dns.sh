@@ -19,16 +19,25 @@ dns_ovh_consumer_key = ${OVH_CONSUMER_KEY}
 EOF
 chmod 600 "$CREDENTIALS_FILE"
 
-# Unlike the HTTP-01 setup, DNS-01 can issue the *initial* certificate on its
-# own — no need to run `certbot certonly` by hand on the server first.
+# DNS-01 issues the *initial* certificate on its own — no need to run
+# `certbot certonly` by hand on the server first.
+#
+# CERT_EXTRA_DOMAINS (optional, space-separated) adds names to the certificate,
+# e.g. the www. aliases. It is only read when the certificate is first issued:
+# changing it later means deleting certbot/conf/live/${DOMAIN} (and its
+# archive/ and renewal/ entries) on the server.
 if [ ! -d "/etc/letsencrypt/live/${DOMAIN}" ]; then
   log "no certificate found for ${DOMAIN}, requesting an initial one via DNS-01"
+  set -- -d "${DOMAIN}" -d "${API_DOMAIN}"
+  for extra in ${CERT_EXTRA_DOMAINS:-}; do
+    set -- "$@" -d "$extra"
+  done
   if certbot certonly \
     --non-interactive --agree-tos --no-eff-email \
     --email "${CERTBOT_EMAIL}" \
     --dns-ovh --dns-ovh-credentials "$CREDENTIALS_FILE" \
     --dns-ovh-propagation-seconds 60 \
-    -d "${DOMAIN}" -d "${API_DOMAIN}"; then
+    "$@"; then
     log "initial certificate issued"
     date +%s > /etc/letsencrypt/.reload
   else

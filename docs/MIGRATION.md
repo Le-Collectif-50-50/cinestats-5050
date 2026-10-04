@@ -48,12 +48,19 @@ gh secret set DATABASE_URL        --env production --repo $REPO --body "postgres
 gh secret set METABASE_SITE_URL   --env production --repo $REPO --body "<url>"
 gh secret set METABASE_SECRET_KEY --env production --repo $REPO --body "<clé>"
 gh secret set METABASE_DASHBOARD_ID --env production --repo $REPO --body "<id>"
+gh secret set CERTBOT_EMAIL         --env production --repo $REPO --body "<email>"
+gh secret set OVH_APPLICATION_KEY   --env production --repo $REPO --body "<§6>"
+gh secret set OVH_APPLICATION_SECRET --env production --repo $REPO --body "<§6>"
+gh secret set OVH_CONSUMER_KEY      --env production --repo $REPO --body "<§6>"
 
 gh variable set NEXT_PUBLIC_API_URL --env production --repo $REPO --body "https://api.cinestats5050.fr"
 gh variable set ALLOWED_ORIGINS     --env production --repo $REPO --body "https://cinestats5050.fr,https://www.cinestats5050.fr"
 gh variable set BACKEND_PORT        --env production --repo $REPO --body "5001"
 gh variable set FRONTEND_PORT       --env production --repo $REPO --body "3000"
 gh variable set SERVER_PORT         --env production --repo $REPO --body "22022"
+gh variable set DOMAIN              --env production --repo $REPO --body "cinestats5050.fr"
+gh variable set API_DOMAIN          --env production --repo $REPO --body "api.cinestats5050.fr"
+gh variable set CERT_EXTRA_DOMAINS  --env production --repo $REPO --body "www.cinestats5050.fr www.api.cinestats5050.fr"
 ```
 
 ⚠️ `SERVER_PORT` : les VPS OVH de ce projet sont durcis sur le port SSH **22022** (mot de passe + root désactivés, fail2ban — voir le `~/.ssh/config` local de l'équipe, section "CineStats — 3 VPS-1 OVH"), pas le 22 par défaut. Vérifie que c'est bien le cas pour le serveur qui accueillera la prod avant de poser cette variable.
@@ -91,7 +98,8 @@ Reste hors GitHub : DNS `preview.cinestats5050.fr` / `api.preview.cinestats5050.
    - **Rights** : `GET`, `POST`, `DELETE` sur le chemin `/domain/zone/*`
    - **Validity** : illimitée (le token est utilisé en continu par le renouvellement automatique)
 3. Récupérer les 3 valeurs retournées : `Application Key`, `Application Secret`, `Consumer Key` — ce sont respectivement `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY` du §5.
-4. ⚠️ Ces clés donnent le droit d'écrire dans la zone DNS du domaine — à traiter comme un secret sensible, jamais commité.
+4. **Production :** créer un second token, distinct de celui de la preview (**Application name** `cinestats5050-prod-certbot`, mêmes droits), pour pouvoir révoquer l'un sans toucher à l'autre. Ses 3 valeurs vont dans l'environment `production`.
+5. ⚠️ Ces clés donnent le droit d'écrire dans la zone DNS du domaine — à traiter comme un secret sensible, jamais commité.
 
 ## 7. DNS et machine preview
 
