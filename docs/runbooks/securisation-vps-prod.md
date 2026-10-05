@@ -321,7 +321,7 @@ ssh -p 22022 root@IP_DB                                          # refusé
 
 | Besoin | Commande |
 |---|---|
-| Ajouter un admin | relancer `00-base.sh <rôle> nouveau:/chemin/clé.pub` |
+| Ajouter un admin | copier `lib.sh`, `05-add-admin.sh` et la clé publique sur le VPS, puis, **dans une session avec terminal** (`ssh -t`) : `sudo ~/vps/05-add-admin.sh nouveau:/chemin/clé.pub`. Il crée le compte (`sudo` + `ssh-users`), ajoute la clé, demande un mot de passe `sudo` **temporaire** et impose son changement à la première connexion. Il ne touche ni à `sshd` ni au pare-feu : il convient donc aussi aux VPS qui n'ont pas reçu `00-base.sh` (Metabase, Services, preview), où relancer `00-base.sh` couperait les services web. Sur `db`, `app` et `data`, relancer `00-base.sh <rôle> nouveau:/chemin/clé.pub` reste possible mais refait tout le socle |
 | Retirer un admin | `sudo gpasswd -d <user> ssh-users && sudo gpasswd -d <user> sudo && sudo passwd -l <user>` |
 | Changer le mot de passe d'un rôle Postgres | `sudo -u postgres psql -c '\password app_ro'`, puis mettre à jour le secret GitHub et redéployer |
 | Test de restauration (**mensuel**) | `sudo cinestats-pgbackrest-restore-test 2` |
