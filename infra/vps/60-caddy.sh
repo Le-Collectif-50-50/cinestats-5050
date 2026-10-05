@@ -3,7 +3,7 @@
 # Prérequis : 00-base.sh, et l'enregistrement DNS du domaine déjà pointé vers ce VPS
 # (Caddy demande son certificat au démarrage et réessaie tant que le DNS n'est pas bon).
 #
-# - Caddy officiel (paquet .deb de la release GitHub, empreinte SHA-256 vérifiée),
+# - Caddy officiel (paquet .deb de la release GitHub, empreinte SHA-512 vérifiée),
 #   pas le paquet Ubuntu, trop ancien
 # - un site : <domaine> -> 127.0.0.1:<port_amont>
 # - ufw : 80 et 443 ouverts à tous
@@ -33,7 +33,7 @@ else
   trap 'rm -rf "$tmp"' EXIT
   curl -fsSL -o "$tmp/$DEB" "$BASE/$DEB"
   curl -fsSL -o "$tmp/checksums.txt" "$BASE/caddy_${CADDY_VERSION}_checksums.txt"
-  (cd "$tmp" && grep " $DEB\$" checksums.txt | sha256sum -c -) || die "Empreinte de $DEB invalide : abandon."
+  (cd "$tmp" && grep " $DEB\$" checksums.txt | sha512sum -c -) || die "Empreinte de $DEB invalide : abandon."
   dpkg -i "$tmp/$DEB"
 fi
 
