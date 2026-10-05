@@ -64,9 +64,27 @@ ssh -L 4222:localhost:4222 cinestats-data      # puis http://localhost:4222
 
 Identifiants : la valeur de `PREFECT_AUTH_STRING` du `.env` du serveur (`utilisateur:mot_de_passe`). L'API refuse tout accès sans eux (401) ; `/api/health` et l'interface statique sont publics, sans données.
 
-## 6. Reste à faire
+## 6. Accès web à Airbyte (SSO Authentik)
 
-- Airbyte (`abctl local install`) : à installer et à dimensionner avec le worker et Browserless sur 8 Go.
+Airbyte OSS n'a qu'un mot de passe, sans SSO : il n'est jamais exposé directement. Il est publié sur `https://airbyte.cinestats5050.fr`, derrière Authentik, par ce montage :
+
+```
+navigateur → Caddy (VPS data, 80/443, Let's Encrypt) → outpost Authentik (127.0.0.1:9000) → Airbyte (127.0.0.1:8000)
+                                                          └─ vérification auprès de auth.cinestats5050.fr
+```
+
+Seuls Caddy (80 et 443) et SSH sont joignables depuis Internet : 8000 (Airbyte), 4222 (Prefect) et 9000/9443 (outpost) restent filtrés (vérifié). Airbyte garde son propre mot de passe : deux couches. Le worker Prefect, sur la même machine, appelle l'API d'Airbyte en local et n'est pas concerné par le SSO.
+
+- **Côté Authentik** : blueprint `authentik/blueprints/airbyte.yaml` du dépôt `cinestats-infra` (groupe **Airbyte Admins**, proxy provider, application, outpost distant `airbyte-outpost`). Les personnes autorisées s'ajoutent au groupe dans Authentik (*Directory → Groups*).
+- **DNS** : `airbyte.cinestats5050.fr` en A vers l'IP du VPS data, avant de lancer Caddy.
+- **Caddy** : `sudo ~/vps/60-caddy.sh airbyte.cinestats5050.fr 9000` (paquet officiel, empreinte SHA-512 vérifiée, ufw 80/443).
+- **Outpost** : `infra/data/authentik-outpost/docker-compose.yml`, copié dans `~/cinestats-data/authentik-outpost/`. Son `.env` porte `AUTHENTIK_TOKEN`, à copier depuis Authentik (*Applications → Outposts → airbyte-outpost → View Deployment Info*) et à écrire sur le serveur avec `read -rs`, jamais dans git. Puis `sudo docker compose up -d`.
+- **Vérification sans connexion** : `curl -I https://airbyte.cinestats5050.fr/` doit répondre `302` vers `/outpost.goauthentik.io/start`, et il en va de même pour `/api/v1/health`. Suivre les redirections doit arriver sur `auth.cinestats5050.fr`.
+- **Accès de secours** : le tunnel SSH reste possible (`ssh -L 8000:localhost:8000 cinestats-data`) et ne passe pas par le SSO.
+
+## 7. Reste à faire
+
+- Airbyte est installé (`abctl` 0.30.4, mode économe : environ 3,3 Go de RAM au repos, il reste environ 3,4 Go pour le worker et Chrome). Reste à le configurer : voir ci-dessous.
 - Compte de service Google (Sheets en lecture seule) et URL des 12 feuilles pour `airbyte/bootstrap.py`.
 - Corrections côté code de la branche : `sslmode` configurable dans les scrapers (aujourd'hui `disable` en dur), rôle dédié aux scrapers.
 - Décision sur le scraping planifié (voir §4).
