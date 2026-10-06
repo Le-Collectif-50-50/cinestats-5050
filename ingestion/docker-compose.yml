@@ -1,11 +1,11 @@
 services:
   prefect-server:
-    image: ric-prefect:${PREFECT_VERSION:-3.4.24}
+    image: ric-prefect:${PREFECT_VERSION:-3.8.7}
     build:
       context: ..
       dockerfile: ingestion/prefect/Dockerfile
       args:
-        PREFECT_VERSION: ${PREFECT_VERSION:-3.4.24}
+        PREFECT_VERSION: ${PREFECT_VERSION:-3.8.7}
     cpus: ${PREFECT_SERVER_CPUS:-0.50}
     mem_limit: ${PREFECT_SERVER_MEM_LIMIT:-512m}
     mem_reservation: ${PREFECT_SERVER_MEM_RESERVATION:-256m}
@@ -33,12 +33,12 @@ services:
       start_period: 60s
 
   prefect-worker:
-    image: ric-prefect:${PREFECT_VERSION:-3.4.24}
+    image: ric-prefect:${PREFECT_VERSION:-3.8.7}
     build:
       context: ..
       dockerfile: ingestion/prefect/Dockerfile
       args:
-        PREFECT_VERSION: ${PREFECT_VERSION:-3.4.24}
+        PREFECT_VERSION: ${PREFECT_VERSION:-3.8.7}
     cpus: ${PREFECT_WORKER_CPUS:-1.50}
     mem_limit: ${PREFECT_WORKER_MEM_LIMIT:-2g}
     mem_reservation: ${PREFECT_WORKER_MEM_RESERVATION:-768m}
