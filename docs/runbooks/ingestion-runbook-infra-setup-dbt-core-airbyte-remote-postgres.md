@@ -179,7 +179,7 @@ GRANT SELECT, UPDATE ON ops.ingestion_run_requests TO prefect_user;
 Exemple `.env`:
 
 ```bash
-PREFECT_VERSION=3.4.24
+PREFECT_VERSION=3.8.7
 PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect_user:<replace>@<db-host>:<db-port>/prefect
 PREFECT_AUTH_STRING=<user>:<password>
 INGESTION_REQUEST_POSTGRES_USER=prefect_user

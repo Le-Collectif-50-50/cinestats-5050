@@ -2,18 +2,19 @@
 
 ## Metadata du document
 
-**Responsable:** Joel Teixeira
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-05-26
+**Last reviewed:** 2026-10-06
 
-**Statut:** actif
+**Status:** active
 
-### Historique du document
+## Historique du document
 
-| #   | Date       | Auteur        | Observations           |
+| #   | Date       | Author        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-26 | Joel Teixeira | Alignement avec l'orchestration Prefect actuelle, le poller Metabase et le statut Airbyte/dbt phase 2 |
+| 3   | 2026-10-06 | Joel Teixeira | Alignement des modèles CNC/Allociné actuels et clarification des sélections dbt par phase |
 
 ## Statut de référence
 
@@ -221,7 +222,7 @@ flowchart LR
 
     subgraph DBT_FLOW[dbt flow]
         direction TB
-        STG_FILMS[staging.stg_films]
+        STG_FILMS[staging.stg_cnc_films]
         STG_FILM_CREDITS[staging.stg_film_credits]
         STG_GENRES[staging.stg_genres]
         STG_FILM_GENRES[staging.stg_film_genres]
@@ -233,7 +234,7 @@ flowchart LR
         STG_FESTIVALS[staging.stg_festivals]
         STG_FESTIVAL_AWARDS[staging.stg_festival_awards]
 
-        INT_FILMS[intermediate.int_films]
+        INT_FILMS[intermediate.int_cnc_films]
         INT_FILM_CREDITS[intermediate.int_film_credits]
         INT_GENRES[intermediate.int_genres]
         INT_FILMS_GENRES[intermediate.int_films_genres]
@@ -344,7 +345,7 @@ flowchart LR
 8. Il compare les deux listes et isole les IDs présents dans `id_matching` mais absents de `allocine_data`, ou dont le statut ne fait pas partie des statuts terminaux configurés.
 9. Le scraping cible ne porte donc que sur les IDs manquants, puis les nouvelles données scrapées sont ajoutées à la table existante avec `run_id`, `extracted_at`, `scrape_status` et `record_hash`.
 10. Le même principe s'applique au flux MUBI: la table de sortie existante sert de mémoire d'exécution, et `id_matching` sert de liste de référence.
-11. Côté dbt, le flux Allociné peut maintenant être relu via `stg_allocine_data` puis consolidé avec `int_allocine_data_latest_by_source_record`.
+11. Côté dbt, `stg_allocine_films` relit les résultats Allociné réussis et `int_allocine_films` les joint à `stg_id_matching`. Ce modèle intermédiaire ne sélectionne pas la dernière tentative par enregistrement source.
 
 ## Conséquence importante pour les modèles dbt
 
@@ -372,7 +373,7 @@ flowchart LR
 6. `airbyte sync` est fonctionnel quand des noms de connexions Airbyte explicites sont fournis; `dbt phase 2` est exécutable mais désactivé par défaut dans le flow principal.
 7. Le flow principal chaîne déjà les quatre étapes dans l'ordre cible.
 8. Le job standalone Allociné existe dans `ingestion/scraping/allocine/` et suit déjà la logique `id_matching -> allocine_data`.
-9. Les modèles `stg_films`, `stg_allocine_data`, `int_films_latest_by_visa` et `int_allocine_data_latest_by_source_record` existent.
+9. Les modèles `stg_cnc_films`, `stg_allocine_films`, `int_cnc_films` et `int_allocine_films` existent. `phase1` sélectionne uniquement `stg_cnc_films`; `phase2` sélectionne `stg_allocine_films` et `v_allocine_pipeline_status`, avec leurs tests associés. Ces phases ne valident pas tous les modèles intermédiaires et finaux. Les anciens modèles de déduplication ne sont plus présents dans le code.
 10. Le schéma `ops` contient la file `ops.ingestion_run_requests` et la vue dbt `ops.v_allocine_pipeline_status` pour le déclenchement Metabase et le suivi Allociné.
 11. Le poller Prefect `Traiter les demandes d'ingestion` claim une ligne `pending`, déclenche le deployment principal, puis le flow principal écrit `success` ou `failed`.
 12. Les tables finales `fnl_*` du schéma cible restent largement à construire.

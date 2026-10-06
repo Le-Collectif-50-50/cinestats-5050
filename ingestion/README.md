@@ -2,21 +2,22 @@
 
 ## Metadata du document
 
-**Responsable:** Joel Teixeira
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-10-06
+**Last reviewed:** 2026-10-06
 
-**Statut:** actif
+**Status:** active
 
-### Historique du document
+## Historique du document
 
-| #   | Date       | Auteur        | Observations           |
+| #   | Date       | Author        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-21 | Joel Teixeira | Ajout du deployment Prefect dédié au scraping Allociné. Planification automatique du scraping Allociné toutes les 10 minutes |
 | 3   | 2026-05-22 | Joel Teixeira | Alignement version Prefect server/worker et ajout du troubleshooting de migration Prefect. Ajout de l'authentification basic sur l'UI et l'API Prefect. Le CLI de scraping Allociné charge automatiquement `ingestion/.env` avant de résoudre les placeholders JSON |
 | 4   | 2026-05-26 | Joel Teixeira | Ajout du polling de file `ops.ingestion_run_requests` directement dans Prefect, du monitoring `ops.v_allocine_pipeline_status` et du wiring Docker Compose associé |
 | 5   | 2026-10-06 | Joel Teixeira | Séparation du compte Postgres des scrapers et paramétrage SSL commun |
+| 6   | 2026-10-06 | Joel Teixeira | Alignement des noms de modèles dbt et clarification du périmètre des phases après suppression des déclarations obsolètes |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -49,16 +50,18 @@ Ce que cela implique:
 
 Modèles implémentés:
 
-1. `stg_films`: normalisation et typage de `raw.films`.
-2. `stg_allocine_data`: normalisation de `raw.allocine_data`.
-3. `int_films_latest_by_visa`: derniere ligne Films par `cnc_visa`.
-4. `int_allocine_data_latest_by_source_record`: dernière version Allociné par enregistrement source.
+1. `stg_cnc_films`: normalisation et typage de `raw.films`.
+2. `stg_allocine_films`: normalisation des résultats réussis de `raw.allocine_data`.
+3. `int_cnc_films`: transformations métier CNC et jointure avec `stg_id_matching`.
+4. `int_allocine_films`: projection des données Allociné et jointure avec `stg_id_matching`.
 
 Découpage d'exécution:
 
 1. les modèles taggés `phase1` s'exécutent avant scraping;
 2. les modèles taggés `phase2` s'exécutent après scraping;
 3. `raw.allocine_data` ne doit donc pas être testé ni relu pendant `dbt phase 1`.
+
+Actuellement, `phase1` sélectionne `stg_cnc_films`; `phase2` sélectionne `stg_allocine_films` et `v_allocine_pipeline_status`, avec leurs tests associés. Les modèles intermédiaires et finaux non taggés ne sont pas couverts par ces commandes. Les modèles intermédiaires CNC et Allociné actuels n'appliquent pas la déduplication « dernière version » des anciens modèles.
 
 Point important:
 
@@ -184,7 +187,7 @@ cd ingestion
 Dans `dbt/models/`:
 
 1. `staging/`: normalisation des sources
-2. `intermediate/`: consolidation de la dernière version par clé
+2. `intermediate/`: transformations métier et jointures; certaines tables de corrections retiennent la dernière version par clé
 3. `fnl/`: futurs datasets publiés ou artefacts finaux du projet
 
 ## Runbook

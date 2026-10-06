@@ -2,19 +2,20 @@
 
 ## Metadata du document
 
-**Responsable:** Joel Teixeira
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-10-06
+**Last reviewed:** 2026-10-06
 
-**Statut:** actif
+**Status:** active
 
-### Historique du document
+## Historique du document
 
-| #   | Date       | Auteur        | Observations           |
+| #   | Date       | Author        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-26 | Joel Teixeira | Alignement avec le flow Prefect actuel et la phase dbt post-scraping exécutable |
 | 3   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement |
+| 4   | 2026-10-06 | Joel Teixeira | Alignement des modèles dbt post-scraping sur le code actuel |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -158,7 +159,7 @@ Séparation assumée:
 2. Le bootstrap crée seulement la table mémoire de sortie. Il ne crée jamais la table d'entrée.
 3. Si votre destination Airbyte n'expose que des tables `_airbyte_raw_*`, il faut ajouter une couche de compatibilité avant d'utiliser la logique de skip incrémental.
 4. Les seeders historiques consomment encore des CSV aujourd'hui. Ce connecteur couvre seulement la partie scraping.
-5. Le repo contient maintenant des modèles dbt de base pour ce flux: `stg_allocine_data` et `int_allocine_data_latest_by_source_record`.
+5. Le repo contient `stg_allocine_films` (résultats réussis), `int_allocine_films` (jointure avec les identifiants de films) et `v_allocine_pipeline_status` (suivi opérationnel). La phase `phase2` sélectionne le staging et la vue de suivi, avec leurs tests; le modèle intermédiaire n'est pas taggé `phase2` et ne déduplique pas les tentatives par enregistrement source.
 6. le port hôte de `browserless/chrome` est piloté par `BROWSERLESS_PORT` dans `.env`;
 7. le service `browserless/chrome` du compose local est une commodité de dev; il peut être remplacé par un endpoint Browserless/Chrome distant.
 8. Le flow Prefect versionné est le point d'entrée recommandé pour ce scraping en environnement local ou serveur.

@@ -2,17 +2,18 @@
 
 ## Metadata du document
 
-**Responsable:** Data Team DataForGood
+**Owner:** Data Team DataForGood
 
-**Dernière révision:** 2026-05-26
+**Last reviewed:** 2026-10-06
 
-**Statut:** actif
+**Status:** active
 
-### Historique du document
+## Historique du document
 
-| # | Date | Auteur | Observations |
+| # | Date | Author | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-05-26 | Joel Teixeira | Documentation du projet dbt ingestion, des tags phase1/phase2 et du schéma `ops` |
+| 2 | 2026-10-06 | Joel Teixeira | Suppression des déclarations de modèles absents et alignement des modèles documentés sur le code actuel |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -44,16 +45,22 @@ docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt build --p
 
 ## Tags
 
-1. `phase1`: modèles exécutés avant scraping Allociné.
-2. `phase2`: modèles exécutés après scraping Allociné.
+1. `phase1`: `stg_cnc_films`, exécuté avant scraping Allociné.
+2. `phase2`: `stg_allocine_films` et `v_allocine_pipeline_status`, exécutés après scraping Allociné.
 
 Le flow Prefect principal exécute toujours `tag:phase1`. Il exécute `tag:phase2` seulement quand le paramètre `run_dbt_phase_2_step` est activé.
 
+Ces sélections incluent les tests associés, mais ne couvrent pas tous les modèles `intermediate` et `fnl`. Leur réussite ne valide donc pas un build complet du projet.
+
 ## Modèles opérationnels
 
-1. `staging.stg_allocine_data`: projection typée de `raw.allocine_data`.
-2. `intermediate.int_allocine_data_latest_by_source_record`: dernière tentative Allociné par `source_record_id`.
-3. `ops.v_allocine_pipeline_status`: vue dashboard Metabase pour le suivi Allociné.
+1. `staging.stg_cnc_films`: projection typée de `raw.films`.
+2. `staging.stg_allocine_films`: projection typée des résultats réussis de `raw.allocine_data`.
+3. `intermediate.int_cnc_films`: transformations métier CNC et jointure avec `stg_id_matching`.
+4. `intermediate.int_allocine_films`: projection des données Allociné et jointure avec `stg_id_matching`.
+5. `ops.v_allocine_pipeline_status`: vue dashboard Metabase pour le suivi Allociné.
+
+Les modèles intermédiaires CNC et Allociné actuels ne sélectionnent pas automatiquement la dernière version par visa ou par enregistrement source. Les anciennes déclarations YAML de déduplication, dont les fichiers SQL sont absents, ne constituent pas des tests actifs. Leur suppression ne supprime aucune relation PostgreSQL existante.
 
 ## Permissions
 
