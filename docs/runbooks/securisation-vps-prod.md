@@ -321,13 +321,32 @@ ssh -p 22022 root@IP_DB                                          # refusé
 
 | Besoin | Commande |
 |---|---|
-| Ajouter un admin | copier `lib.sh`, `05-add-admin.sh` et la clé publique sur le VPS, puis, **dans une session avec terminal** (`ssh -t`) : `sudo ~/vps/05-add-admin.sh nouveau:/chemin/clé.pub`. Il crée le compte (`sudo` + `ssh-users`), ajoute la clé, demande un mot de passe `sudo` **temporaire** et impose son changement à la première connexion. Il ne touche ni à `sshd` ni au pare-feu : il convient donc aussi aux VPS qui n'ont pas reçu `00-base.sh` (Metabase, Services, preview), où relancer `00-base.sh` couperait les services web. Sur `db`, `app` et `data`, relancer `00-base.sh <rôle> nouveau:/chemin/clé.pub` reste possible mais refait tout le socle |
-| Retirer un admin | `sudo gpasswd -d <user> ssh-users && sudo gpasswd -d <user> sudo && sudo passwd -l <user>` |
+| Ajouter un admin | ajouter sa **clé publique** dans `~ubuntu/.ssh/authorized_keys` du VPS (commentaire = son nom, pour retrouver qui est qui). Tout le monde se connecte en `ubuntu`, voir « Compte ubuntu partagé » ci-dessous |
+| Retirer un admin | supprimer **sa ligne** de `~ubuntu/.ssh/authorized_keys`, sur chaque VPS |
 | Changer le mot de passe d'un rôle Postgres | `sudo -u postgres psql -c '\password app_ro'`, puis mettre à jour le secret GitHub et redéployer |
 | Test de restauration (**mensuel**) | `sudo cinestats-pgbackrest-restore-test 2` |
 | Mises à jour hors sécurité (Docker, etc.) | mensuellement : `sudo apt update && sudo apt full-upgrade` |
 | Requête SQL d'admin | `ssh cinestats-db` puis `sudo -u postgres psql cinestats-5050-db` |
 | Accès Postgres pour Metabase | relancer `30-postgres.sh cinestats-5050-db <ip> <wg\|public>` |
+
+## Compte ubuntu partagé
+
+Les administrateurs se connectent tous avec le compte **`ubuntu`**, sur les six serveurs (`db`, `app`, `data`, Metabase, Services, preview). Leurs clés SSH sont dans `~ubuntu/.ssh/authorized_keys`, ce qui leur donne un seul répertoire personnel partagé (`~/vps`, `~/cinestats-data`…). Il n'y a plus de compte nominatif.
+
+Mise en place, par `infra/vps/08-shared-ubuntu.sh` (deux phases, pour ne jamais s'enfermer dehors) :
+
+```bash
+sudo ~/vps/08-shared-ubuntu.sh enable <utilisateur>...   # ubuntu : ssh-users + sudo, sudoers, clés et fichiers rapatriés
+ssh -l ubuntu <vps> 'id && sudo -n true'                  # TESTER avec chaque clé avant la suite
+sudo ~/vps/08-shared-ubuntu.sh retire <utilisateur>...   # vide leur authorized_keys, verrouille leur compte
+```
+
+**Choix assumé, qui défait une partie du durcissement initial :**
+- **`sudo` sans mot de passe** pour `ubuntu` (`/etc/sudoers.d/90-cinestats-ubuntu`), comme dans l'image OVH d'origine : quiconque vole un ordinateur contenant une clé autorisée a `root` immédiatement. Garder les clés sur des disques chiffrés, avec une phrase de passe.
+- **Plus d'attribution nominative** : `sudo`, l'historique du shell et les fichiers sont tous au nom d'`ubuntu`. Seul le journal SSH (`journalctl -u ssh`) garde l'empreinte de la clé utilisée.
+- Sur `db`, `app` et `data`, le compte `ubuntu` avait été verrouillé et son `sudoers` supprimé : `enable` les remet, et l'ajoute au groupe `ssh-users` exigé par `sshd`.
+
+Les clés des personnes qui partent se retirent une par une du fichier `authorized_keys`. `05-add-admin.sh` (comptes nominatifs) n'est plus la procédure courante.
 
 ## Écarts assumés et limites
 
