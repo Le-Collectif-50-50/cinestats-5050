@@ -16,8 +16,7 @@
 | 2   | 2026-05-21 | Joel Teixeira | Ajout du deployment Prefect dédié au scraping Allociné. Planification automatique du scraping Allociné toutes les 10 minutes |
 | 3   | 2026-05-22 | Joel Teixeira | Alignement version Prefect server/worker et ajout du troubleshooting de migration Prefect. Ajout de l'authentification basic sur l'UI et l'API Prefect. Le CLI de scraping Allociné charge automatiquement `ingestion/.env` avant de résoudre les placeholders JSON |
 | 4   | 2026-05-26 | Joel Teixeira | Ajout du polling de file `ops.ingestion_run_requests` directement dans Prefect, du monitoring `ops.v_allocine_pipeline_status` et du wiring Docker Compose associé |
-| 5   | 2026-10-06 | Joel Teixeira | Séparation du compte Postgres des scrapers et paramétrage SSL commun |
-| 6   | 2026-10-06 | Joel Teixeira | Alignement des noms de modèles dbt et clarification du périmètre des phases après suppression des déclarations obsolètes |
+| 5   | 2026-10-06 | Joel Teixeira | Séparation du compte Postgres des scrapers et paramétrage SSL commun. Alignement des noms de modèles dbt et clarification du périmètre des phases après suppression des déclarations obsolètes. Correction de l'appel à la phase dbt 2 : le flow principal contrôle son activation avant d'appeler le helper sans argument. Activation de la phase dbt 2 par défaut pour les runs manuels, le CLI et le poller Metabase, avec désactivation explicite possible |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -46,7 +45,7 @@ Ce que cela implique:
 6. le runtime Prefect expose un flow principal unique, un flow de scraping seul et un poller de demandes Metabase;
 7. côté exécution réelle, `dbt phase 1` et `scraping Allociné` sont finalisés;
 8. `airbyte sync` est maintenant exécutable dans Prefect à partir de noms de connexions explicites;
-9. `dbt phase 2` est modélisé et exécutable lorsqu'il est explicitement activé.
+9. `dbt phase 2` est modélisé et activé par défaut après le scraping.
 
 Modèles implémentés:
 
@@ -276,7 +275,7 @@ Dans le flow principal, les étapes sont exécutées en séquence dans le même 
 3. `Recuperer les donnees Allocine`
    Description: lance le scraping Allociné avec le fichier de configuration fourni.
 4. `Finaliser les donnees`
-   Description: exécute `dbt build --select tag:phase2` uniquement si cette étape est activée.
+   Description: le flow principal appelle le helper sans argument uniquement lorsque `run_dbt_phase_2_step=true`, puis exécute `dbt build --select tag:phase2`.
 
 Deployments publiés automatiquement:
 
@@ -292,7 +291,7 @@ Important:
 1. la séparation `dbt avant scraping` / `dbt après scraping` est toujours conservée dans le code;
 2. `dbt phase 1` exécute `dbt build --select tag:phase1`;
 3. `allocine scraping` est opérationnel;
-4. `dbt phase 2` exécute `dbt build --select tag:phase2`, mais reste une étape aval désactivée par défaut;
+4. `dbt phase 2` exécute `dbt build --select tag:phase2` et est activé par défaut. Pour le désactiver, utiliser le paramètre Prefect `run_dbt_phase_2_step=false`, le flag CLI `--no-run-dbt-phase-2` ou `INGESTION_REQUEST_RUN_DBT_PHASE_2_STEP=false` pour les demandes Metabase;
 5. `airbyte sync` exige `--run-airbyte-sync`, au moins un nom de connexion Airbyte explicite, et des valeurs `AIRBYTE_CLIENT_ID` / `AIRBYTE_CLIENT_SECRET` valides dans `.env`;
 6. l'étape Airbyte attend la fin de chaque job avant de passer à `dbt phase 1`;
 7. le flow principal exécute la bonne séquence et saute les étapes futures tant qu'elles ne sont pas activées.
@@ -330,7 +329,7 @@ Artefacts associés:
 5. Si l'option Airbyte est activée, Prefect déclenche les syncs demandés par noms de connexions et attend leur fin.
 6. Dans ce flow, Prefect lance ensuite `dbt phase 1` avant scraping.
 7. Prefect lance ensuite le scraping Allociné.
-8. Prefect prévoit enfin `dbt phase 2`, mais cette étape reste désactivée par défaut.
+8. Prefect exécute enfin `dbt phase 2` par défaut, sauf désactivation explicite.
 
 ## Documentation détaillée
 

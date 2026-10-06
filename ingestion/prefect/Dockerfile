@@ -4,13 +4,14 @@ ARG PREFECT_VERSION=3.8.7
 
 WORKDIR /app
 
+# Prefect 3.8.7's scheduler is incompatible with SQLAlchemy 2.1 hybrid bulk DML.
 RUN apt-get update && apt-get install -y cron \
     && pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir \
         "prefect==${PREFECT_VERSION}" \
         "dbt-core==1.11.7" \
         "dbt-postgres==1.10.0" \
-        "sqlalchemy>=2.0" \
+        "sqlalchemy>=2.0,<2.1" \
         "psycopg[binary]>=3.2" \
         "python-dotenv>=1.0" \
         "beautifulsoup4>=4.13" \

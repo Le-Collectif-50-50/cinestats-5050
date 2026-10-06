@@ -158,7 +158,7 @@ class IngestionRequestSettings:
             ),
             run_dbt_phase_2_step=_parse_bool(
                 os.getenv("INGESTION_REQUEST_RUN_DBT_PHASE_2_STEP"),
-                default=False,
+                default=True,
             ),
             airbyte_connection_names=_parse_csv(
                 os.getenv("INGESTION_REQUEST_AIRBYTE_CONNECTION_NAMES")
@@ -682,7 +682,7 @@ def main_ingestion_flow(
     request_id: str | None = None,
     config_path: str = str(ALLOCINE_CONFIG_PATH),
     run_airbyte_sync_step: bool = False,
-    run_dbt_phase_2_step: bool = False,
+    run_dbt_phase_2_step: bool = True,
     airbyte_connection_names: list[str] | None = None,
 ) -> None:
     logger = get_run_logger()
@@ -710,7 +710,8 @@ def main_ingestion_flow(
         )
         _run_dbt_phase_1_step()
         _run_allocine_scraping_step(config_path=config_path)
-        _run_dbt_phase_2_step(enabled=run_dbt_phase_2_step)
+        if run_dbt_phase_2_step:
+            _run_dbt_phase_2_step()
     except Exception as exc:
         if request_settings is not None and request_uuid is not None:
             _mark_request_failed(
@@ -829,8 +830,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--run-dbt-phase-2",
-        action="store_true",
-        help="Exécute la phase dbt 2. Sinon, elle est explicitement sautée.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Exécute la phase dbt 2 par défaut. Utiliser --no-run-dbt-phase-2 pour la sauter.",
     )
     parser.add_argument(
         "--airbyte-connection-name",

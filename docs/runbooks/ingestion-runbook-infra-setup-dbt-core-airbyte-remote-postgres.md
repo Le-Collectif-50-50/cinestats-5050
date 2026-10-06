@@ -2,19 +2,20 @@
 
 ## Metadata du document
 
-**Responsable:** Joel Teixeira
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-05-26
+**Last reviewed:** 2026-10-06
 
-**Statut:** actif
+**Status:** active
 
-### Historique du document
+## Historique du document
 
-| #   | Date       | Auteur         | Observations                                            |
+| #   | Date       | Author         | Observations                                            |
 | --- | ---------- | -------------- | ------------------------------------------------------- |
 | 1   | 2026-05-07 | Joel Teixeira  | Initial implementation                                  |
 | 2   | 2026-05-22 | Joel Teixeira | Ajout du pinning de version Prefect et du troubleshooting de revision Alembic inconnue |
 | 3   | 2026-05-26 | Joel Teixeira | Alignement avec les deployments Prefect actuels, le poller `ops.ingestion_run_requests` et les grants `ops` |
+| 4   | 2026-10-06 | Joel Teixeira | Borne SQLAlchemy sous 2.1 pour corriger les erreurs du scheduler Prefect et procédure de reconstruction de l'image partagée. Ajout du compte Postgres dédié aux scrapers et de ses privilèges limités à `raw` |
 
 ## 1. Objectif
 
@@ -47,8 +48,9 @@ Topologie cible en local:
 Conventions utilisateurs:
 
 1. `airbyte_user` pour la zone `raw`
-2. `dbt_user` pour le runtime dbt + scraping
+2. `dbt_user` pour le runtime dbt
 3. `prefect_user` pour la base `prefect` et les updates de lifecycle dans `ops.ingestion_run_requests`
+4. `scraper_user` pour les scrapers standalone, limité aux tables nécessaires dans `raw`
 
 ## 3. Répertoire de travail
 
@@ -88,7 +90,7 @@ cp .env.example .env
 Variables indispensables à renseigner:
 
 1. `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_SSLMODE`
-2. `DBT_USER_POSTGRES_PASSWORD`
+2. `DBT_USER_POSTGRES_PASSWORD`, `SCRAPER_POSTGRES_USER` et `SCRAPER_POSTGRES_PASSWORD`
 3. `PREFECT_VERSION`
 4. `PREFECT_API_DATABASE_CONNECTION_URL`
 5. `AIRBYTE_HOST`, `AIRBYTE_PORT`, `AIRBYTE_CLIENT_ID`, `AIRBYTE_CLIENT_SECRET`
@@ -112,10 +114,12 @@ set +a
 ```sql
 CREATE USER airbyte_user WITH PASSWORD '<replace>';
 CREATE USER dbt_user WITH PASSWORD '<replace>';
+CREATE USER scraper_user WITH PASSWORD '<replace>';
 
 GRANT CONNECT ON DATABASE reveler_inegalites_cinema TO airbyte_user;
 GRANT CREATE, TEMPORARY ON DATABASE reveler_inegalites_cinema TO airbyte_user;
 GRANT CONNECT ON DATABASE reveler_inegalites_cinema TO dbt_user;
+GRANT CONNECT ON DATABASE reveler_inegalites_cinema TO scraper_user;
 
 CREATE SCHEMA IF NOT EXISTS raw;
 CREATE SCHEMA IF NOT EXISTS staging;
@@ -135,7 +139,16 @@ GRANT USAGE, CREATE ON SCHEMA staging TO dbt_user;
 GRANT USAGE, CREATE ON SCHEMA intermediate TO dbt_user;
 GRANT USAGE, CREATE ON SCHEMA fnl TO dbt_user;
 GRANT USAGE, CREATE ON SCHEMA ops TO dbt_user;
+
+-- Compte dédié aux scrapers : lecture source et écriture des seules sorties.
+GRANT USAGE, CREATE ON SCHEMA raw TO scraper_user;
+GRANT SELECT ON TABLE raw.id_matching TO scraper_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.allocine_data TO scraper_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.mubi_festival_films TO scraper_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.mubi_film_awards TO scraper_user;
 ```
+
+Les trois derniers `GRANT` sont requis seulement si ces tables de sortie existent déjà et appartiennent à un autre rôle. Les tables créées par `scraper_user` lui appartiennent.
 
 Base Prefect dédiée:
 
@@ -184,6 +197,8 @@ PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect_user:<replace>@
 PREFECT_AUTH_STRING=<user>:<password>
 INGESTION_REQUEST_POSTGRES_USER=prefect_user
 INGESTION_REQUEST_POSTGRES_PASSWORD=<replace>
+SCRAPER_POSTGRES_USER=scraper_user
+SCRAPER_POSTGRES_PASSWORD=<replace>
 ```
 
 ### 4.4 Setup, configuration et bootstrap Airbyte
@@ -236,7 +251,7 @@ Comportement attendu:
 
 1. `prefect-server` sert l'UI/API sur `http://localhost:$PREFECT_PORT`
 2. `prefect-worker` crée le work pool `ingestion-pool`
-3. `prefect-worker` publie les deployments `lancer-ingestion-donnees`, `lancer-scraping-allocine` et `traiter-les-demandes-ingestion`
+3. `prefect-worker` publie les deployments `lancer-ingestion-donnees`, `lancer-scraping-mubi-cnc` et `traiter-les-demandes-ingestion`; le deployment de scraping Allociné seul est désactivé dans `start_worker.sh`
 4. `browserless` est utilisé par le scraping Allociné
 
 ## 5. Vérifications
@@ -317,10 +332,11 @@ Mettre à jour dans `.env`:
 
 1. `POSTGRES_*`
 2. `DBT_USER_POSTGRES_PASSWORD`
-3. `AIRBYTE_DESTINATION_POSTGRES_PASSWORD`
-4. `PREFECT_API_DATABASE_CONNECTION_URL`
-5. `PREFECT_AUTH_STRING`
-6. `INGESTION_REQUEST_POSTGRES_PASSWORD`
+3. `SCRAPER_POSTGRES_USER` et `SCRAPER_POSTGRES_PASSWORD`
+4. `AIRBYTE_DESTINATION_POSTGRES_PASSWORD`
+5. `PREFECT_API_DATABASE_CONNECTION_URL`
+6. `PREFECT_AUTH_STRING`
+7. `INGESTION_REQUEST_POSTGRES_PASSWORD`
 
 Puis relancer:
 
@@ -332,6 +348,21 @@ docker compose up -d
 ### 7.2 Airbyte ne démarre pas (port déjà pris)
 
 Choisir un autre port dans `.env` (ex: `AIRBYTE_PORT=8001`) puis relancer `abctl local install`.
+
+### 7.3 Prefect est healthy mais ne crée aucun run planifié
+
+Avec Prefect `3.8.7` et SQLAlchemy `2.1`, le scheduler peut échouer lors de l'insertion des runs avec l'erreur `Can't evaluate bulk DML statement; please supply a bulk_dml decorated function`. Le statut Docker `healthy` vérifie l'API, pas le fonctionnement du scheduler.
+
+L'image ingestion impose `sqlalchemy>=2.0,<2.1` dans `ingestion/prefect/Dockerfile`. Après modification de cette dépendance, reconstruire une seule fois l'image partagée, puis recréer le serveur et le worker sans lancer deux builds concurrents :
+
+```bash
+docker compose build prefect-worker
+docker compose up -d --no-build --force-recreate prefect-server prefect-worker
+docker compose exec prefect-server python -c "import prefect, sqlalchemy; print(prefect.__version__, sqlalchemy.__version__)"
+docker compose logs --since 5m prefect-server prefect-worker
+```
+
+Vérifier que SQLAlchemy reste en version `2.0.x`, que les erreurs du scheduler ont disparu et que les deployments ayant un schedule actif reçoivent des runs planifiés. Le worker reprend automatiquement les schedules existants; sa procédure de démarrage republie les deployments configurés dans `start_worker.sh`. Ne pas supprimer la base Prefect ni les volumes pour résoudre cette erreur de dépendance.
 
 ## 8. Références
 
