@@ -4,7 +4,7 @@
 
 **Responsable:** Joel Teixeira
 
-**Dernière révision:** 2026-05-27
+**Dernière révision:** 2026-10-06
 
 **Statut:** actif
 
@@ -13,6 +13,7 @@
 | #   | Date       | Auteur        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-27 | Joel Teixeira | Initial implementation |
+| 2   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement |
 
 Job de scraping standalone pour la collecte des données de festivals et palmarès depuis Mubi.
 
@@ -95,9 +96,9 @@ Fichier de référence : `ingestion/scraping/mubi/config.json`.
   "postgres_host": "${POSTGRES_HOST}",
   "postgres_port": "${POSTGRES_PORT}",
   "postgres_db": "${POSTGRES_DB}",
-  "postgres_user": "dbt_user",
-  "postgres_password": "${DBT_USER_POSTGRES_PASSWORD}",
-  "postgres_sslmode": "disable",
+  "postgres_user": "${SCRAPER_POSTGRES_USER}",
+  "postgres_password": "${SCRAPER_POSTGRES_PASSWORD}",
+  "postgres_sslmode": "${POSTGRES_SSLMODE}",
   "output_schema": "raw",
   "festival_films_table": "mubi_festival_films",
   "film_awards_table": "mubi_film_awards",
@@ -123,6 +124,8 @@ Fichier de référence : `ingestion/scraping/mubi/config.json`.
 ```
 
 Les valeurs au format `${ENV_VAR:-default}` sont résolues depuis l'environnement au démarrage.
+
+Les accès PostgreSQL sont isolés via `SCRAPER_POSTGRES_USER` et `SCRAPER_POSTGRES_PASSWORD`. `POSTGRES_SSLMODE` pilote le mode TLS pour ce scraper, sans valeur SSL codée en dur. Voir `ingestion/README.md` pour créer le rôle et ses droits.
 
 Si `database_url` est fourni, il remplace l'ensemble des champs Postgres individuels.
 

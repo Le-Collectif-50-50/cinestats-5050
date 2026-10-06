@@ -4,7 +4,7 @@
 
 **Responsable:** Joel Teixeira
 
-**Dernière révision:** 2026-06-25
+**Dernière révision:** 2026-10-06
 
 **Statut:** actif
 
@@ -13,6 +13,7 @@
 | #   | Date       | Auteur        | Observations                          |
 | --- | ---------- | ------------- | ------------------------------------- |
 | 1   | 2026-06-25 | Joel Teixeira | Flux Mubi restreint aux films du CNC  |
+| 2   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement |
 
 Job de scraping Mubi **piloté par l'entrée** (input-driven), en alternative au job de découverte `ingestion/scraping/mubi/`.
 
@@ -72,6 +73,8 @@ Champs spécifiques à ce job :
 | `scrape_limit` | Borne le nombre de films CNC traités en Phase A (tests). `null` en production. |
 
 Les autres champs (`output_schema`, tables de sortie, délais, retry, navigateur) sont identiques au job `mubi/`.
+
+Les connexions PostgreSQL utilisent `SCRAPER_POSTGRES_USER`, `SCRAPER_POSTGRES_PASSWORD` et `POSTGRES_SSLMODE`. Voir `ingestion/README.md` pour créer le rôle dédié et appliquer ses droits dans `raw`.
 
 ## Commandes
 

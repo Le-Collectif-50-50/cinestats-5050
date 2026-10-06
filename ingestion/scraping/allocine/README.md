@@ -4,7 +4,7 @@
 
 **Responsable:** Joel Teixeira
 
-**Dernière révision:** 2026-05-26
+**Dernière révision:** 2026-10-06
 
 **Statut:** actif
 
@@ -14,6 +14,7 @@
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-26 | Joel Teixeira | Alignement avec le flow Prefect actuel et la phase dbt post-scraping exécutable |
+| 3   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -47,9 +48,9 @@ Exemple minimal:
   "postgres_host": "${POSTGRES_HOST:-localhost}",
   "postgres_port": "${POSTGRES_PORT:-5432}",
   "postgres_db": "${POSTGRES_DB:-reveler_inegalites_cinema}",
-  "postgres_user": "dbt_user",
-  "postgres_password": "${DBT_USER_POSTGRES_PASSWORD:-secret}",
-  "postgres_sslmode": "${POSTGRES_SSLMODE:-disable}",
+  "postgres_user": "${SCRAPER_POSTGRES_USER}",
+  "postgres_password": "${SCRAPER_POSTGRES_PASSWORD}",
+  "postgres_sslmode": "${POSTGRES_SSLMODE}",
   "input_schema": "raw",
   "input_table": "id_matching",
   "output_schema": "raw",
@@ -70,6 +71,8 @@ Si `database_url` est fourni, il remplace les champs Postgres individuels.
 Le fichier `config.json` du dossier est le fichier de configuration runtime utilise par les commandes locales et Docker. Il est versionne dans ce repo.
 
 Les valeurs au format `${ENV_VAR:-default}` du `config.json` sont résolues depuis l'environnement du runtime.
+
+Les accès PostgreSQL sont isolés via `SCRAPER_POSTGRES_USER` et `SCRAPER_POSTGRES_PASSWORD`. `POSTGRES_SSLMODE` pilote le mode TLS pour ce scraper, sans valeur SSL codée en dur. Voir `ingestion/README.md` pour créer le rôle et ses droits.
 
 Dans l'environnement Airbyte actuel, la table source par défaut est `raw.id_matching` et reprend les noms de colonnes bruts du sheet (`VISA`, `TITRE`, `ID_ALLOCINE`). Les champs absents comme l'année CNC ou l'URL Allociné peuvent être laissés à `null`.
 

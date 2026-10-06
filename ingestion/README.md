@@ -4,7 +4,7 @@
 
 **Responsable:** Joel Teixeira
 
-**Dernière révision:** 2026-05-26
+**Dernière révision:** 2026-10-06
 
 **Statut:** actif
 
@@ -16,6 +16,7 @@
 | 2   | 2026-05-21 | Joel Teixeira | Ajout du deployment Prefect dédié au scraping Allociné. Planification automatique du scraping Allociné toutes les 10 minutes |
 | 3   | 2026-05-22 | Joel Teixeira | Alignement version Prefect server/worker et ajout du troubleshooting de migration Prefect. Ajout de l'authentification basic sur l'UI et l'API Prefect. Le CLI de scraping Allociné charge automatiquement `ingestion/.env` avant de résoudre les placeholders JSON |
 | 4   | 2026-05-26 | Joel Teixeira | Ajout du polling de file `ops.ingestion_run_requests` directement dans Prefect, du monitoring `ops.v_allocine_pipeline_status` et du wiring Docker Compose associé |
+| 5   | 2026-10-06 | Joel Teixeira | Séparation du compte Postgres des scrapers et paramétrage SSL commun |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -64,8 +65,8 @@ Point important:
 1. l'entrée canonique actuelle du scraping est `raw.id_matching`;
 2. la sortie canonique du scraping Allociné est `raw.allocine_data`;
 3. les tables finales `fnl_*` de `schema1` restent encore largement à construire.
-4. stratégie comptes recommandée: `prefect_user` pour Prefect, `airbyte_user` pour Airbyte, `dbt_user` pour le runtime `dbt + scraping` du repo.
-5. dans l'état actuel du repo, le profil `dbt` utilise `dbt_user` en dur.
+4. stratégie comptes appliquée: `prefect_user` pour Prefect, `airbyte_user` pour Airbyte, `dbt_user` pour dbt et `scraper_user` pour les scrapers.
+5. les scrapers lisent leurs identifiants via `SCRAPER_POSTGRES_USER` et `SCRAPER_POSTGRES_PASSWORD`; leur SSL est piloté par `POSTGRES_SSLMODE`.
 
 ## Roles
 
@@ -99,10 +100,12 @@ Variables d'environnement Airbyte désormais attendues dans `.env`:
 3. `POSTGRES_PORT`
 4. `POSTGRES_DB`
 5. `AIRBYTE_DESTINATION_POSTGRES_PASSWORD`
-6. `AIRBYTE_CLIENT_ID`
-7. `AIRBYTE_CLIENT_SECRET`
-8. `AIRBYTE_SYNC_TIMEOUT_SECONDS`
-9. `AIRBYTE_SYNC_POLL_SECONDS`
+6. `SCRAPER_POSTGRES_USER`
+7. `SCRAPER_POSTGRES_PASSWORD`
+8. `AIRBYTE_CLIENT_ID`
+9. `AIRBYTE_CLIENT_SECRET`
+10. `AIRBYTE_SYNC_TIMEOUT_SECONDS`
+11. `AIRBYTE_SYNC_POLL_SECONDS`
 
 Variables d'environnement Prefect désormais attendues dans `.env`:
 
@@ -110,6 +113,25 @@ Variables d'environnement Prefect désormais attendues dans `.env`:
 2. `PREFECT_API_DATABASE_CONNECTION_URL`
 3. `PREFECT_PORT`
 4. `PREFECT_AUTH_STRING`
+
+## Compte Postgres des scrapers
+
+Créer un compte dédié avant d'exécuter les scrapers, puis renseigner son nom et son secret dans `SCRAPER_POSTGRES_USER` et `SCRAPER_POSTGRES_PASSWORD`. Le compte lit les tables source de `raw` et crée ou écrit uniquement les tables de sortie de scraping dans ce schéma.
+
+Exemple à exécuter avec un rôle d'administration PostgreSQL, en remplaçant le secret :
+
+```sql
+CREATE ROLE scraper_user LOGIN PASSWORD '<secret>';
+GRANT USAGE, CREATE ON SCHEMA raw TO scraper_user;
+GRANT SELECT ON TABLE raw.id_matching TO scraper_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.allocine_data TO scraper_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.mubi_festival_films TO scraper_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.mubi_film_awards TO scraper_user;
+```
+
+Les trois dernières instructions ne sont nécessaires que si les tables de sortie existent déjà et appartiennent à un autre rôle. Les nouvelles tables créées par le scraper appartiennent à `scraper_user`.
+
+`POSTGRES_SSLMODE` est partagé par dbt, Airbyte et les scrapers. Utiliser par exemple `require` ou `verify-full` lorsque PostgreSQL impose TLS.
 
 Variables d'environnement du poller de demandes ingestion désormais attendues dans `.env`:
 

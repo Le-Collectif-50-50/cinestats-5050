@@ -44,8 +44,7 @@ Usage
 
 Connection comes from the same env vars the connector uses:
 POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_SSLMODE, and either
-DATABASE_URL or (POSTGRES_USER + password). Defaults match config.json
-(dbt_user / DBT_USER_POSTGRES_PASSWORD).
+DATABASE_URL or SCRAPER_POSTGRES_USER + SCRAPER_POSTGRES_PASSWORD.
 """
 
 import argparse
@@ -77,10 +76,19 @@ def _build_database_url() -> str:
     host = os.getenv("POSTGRES_HOST")
     port = int(os.getenv("POSTGRES_PORT", "5432"))
     db = os.getenv("POSTGRES_DB")
-    user = os.getenv("POSTGRES_USER", "dbt_user")
-    password = os.getenv("DBT_USER_POSTGRES_PASSWORD") or os.getenv("POSTGRES_PASSWORD")
+    user = os.getenv("SCRAPER_POSTGRES_USER")
+    password = os.getenv("SCRAPER_POSTGRES_PASSWORD")
     sslmode = os.getenv("POSTGRES_SSLMODE", "disable")
-    missing = [n for n, v in (("POSTGRES_HOST", host), ("POSTGRES_DB", db), ("password", password)) if not v]
+    missing = [
+        name
+        for name, value in (
+            ("POSTGRES_HOST", host),
+            ("POSTGRES_DB", db),
+            ("SCRAPER_POSTGRES_USER", user),
+            ("SCRAPER_POSTGRES_PASSWORD", password),
+        )
+        if not value
+    ]
     if missing:
         sys.exit(f"Missing connection settings: {', '.join(missing)} (or set DATABASE_URL).")
     return (
