@@ -187,3 +187,4 @@ certbot/logs/*
 .codex
 database/data/allocine/*.csv
 mubi_festivals_debug.csv
+*.dump
