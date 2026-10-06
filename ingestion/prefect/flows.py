@@ -649,15 +649,7 @@ def run_mubi_cnc_scraping(config_path: str = str(MUBI_CNC_CONFIG_PATH)) -> None:
     _run_mubi_cnc_scraping_step(config_path=config_path)
 
 
-def _run_dbt_phase_2_step(enabled: bool = False) -> None:
-    logger = get_run_logger()
-    logger.info("Task parameters: enabled=%s", enabled)
-    if not enabled:
-        logger.info(
-            "dbt phase 2 skipped. Step is implemented but disabled for this run."
-        )
-        return
-
+def _run_dbt_phase_2_step() -> None:
     _run(
         [
             "dbt",
@@ -678,8 +670,8 @@ def _run_dbt_phase_2_step(enabled: bool = False) -> None:
     name="Finaliser les donnees",
     description="Execute la phase dbt finale lorsque cette etape est activee.",
 )
-def run_dbt_phase_2(enabled: bool = False) -> None:
-    _run_dbt_phase_2_step(enabled=enabled)
+def run_dbt_phase_2() -> None:
+    _run_dbt_phase_2_step()
 
 
 @flow(
