@@ -1,0 +1,14 @@
+# Installé par infra/vps/20-docker.sh. Réapplique le filtrage à chaque (re)démarrage de Docker.
+[Unit]
+Description=Filtrage Internet vers conteneurs Docker (chaîne DOCKER-USER)
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/cinestats-docker-user-firewall
+
+[Install]
+WantedBy=docker.service

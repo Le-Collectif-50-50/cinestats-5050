@@ -1,6 +1,6 @@
-FROM certbot/certbot
+FROM certbot/dns-ovh
 
-COPY entrypoint.sh /usr/local/bin/certbot-entrypoint.sh
+COPY entrypoint-dns.sh /usr/local/bin/certbot-entrypoint.sh
 RUN chmod +x /usr/local/bin/certbot-entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/certbot-entrypoint.sh"]

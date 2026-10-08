@@ -3,7 +3,7 @@ name: pre-commit
 on:
   pull_request:
   push:
-    branches: [main, develop]
+    branches: [main, preview, production]
 
 jobs:
   pre-commit:
@@ -28,7 +28,19 @@ jobs:
     - name: Export requirements from poetry
       run: poetry export -f requirements.txt --without-hashes -o requirements.txt
     - name: Run pip-audit
-      run: pip-audit -r requirements.txt
+      # starlette (transitive via fastapi) has 5 known CVEs whose fixes require
+      # starlette >=1.0, but fastapi==0.123.x (and even the latest 0.141.1) still
+      # pins starlette <0.51.0 — there is no compatible fix available yet.
+      # Ignored pending a FastAPI release that supports a patched starlette;
+      # remove these --ignore-vuln flags once `poetry update fastapi starlette`
+      # picks up a compatible pair.
+      run: >
+        pip-audit -r requirements.txt
+        --ignore-vuln PYSEC-2026-161
+        --ignore-vuln PYSEC-2026-248
+        --ignore-vuln PYSEC-2026-249
+        --ignore-vuln PYSEC-2026-2280
+        --ignore-vuln PYSEC-2026-2281
     - name: set PY
       run: echo "PY=$(python -c 'import hashlib, sys;print(hashlib.sha256(sys.version.encode()+sys.executable.encode()).hexdigest())')" >> $GITHUB_ENV
     - uses: actions/cache@v3

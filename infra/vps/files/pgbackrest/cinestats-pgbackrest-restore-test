@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Test de restauration pgBackRest, sans toucher à la prod : restaure un dépôt dans
+# un cluster temporaire (port 5433, socket local uniquement), attend la fin du rejeu
+# des WAL, compare le nombre de lignes de chaque table avec la prod, puis supprime
+# le cluster temporaire. Installé par infra/vps/40-pgbackrest.sh.
+#
+# Usage : sudo cinestats-pgbackrest-restore-test [dépôt] [cible_PITR]
+#   sudo cinestats-pgbackrest-restore-test 2
+#   sudo cinestats-pgbackrest-restore-test 1 "2026-10-02 14:00:00+02"
+set -euo pipefail
+
+REPO="${1:-1}"
+TARGET="${2:-}"
+PG_VERSION=16
+PG_BIN="/usr/lib/postgresql/$PG_VERSION/bin"
+RESTORE_DIR=/var/lib/postgresql/restore-test
+PORT=5433
+
+[ "$(id -u)" -eq 0 ] || { echo "À lancer en root (sudo)." >&2; exit 1; }
+[ ! -e "$RESTORE_DIR" ] || { echo "$RESTORE_DIR existe déjà (test interrompu ?) : le supprimer d'abord." >&2; exit 1; }
+
+as_pg() { sudo -u postgres "$@"; }
+psql_prod()    { as_pg psql -X -tA -p 5432 "$@"; }
+psql_restore() { as_pg psql -X -tA -p "$PORT" "$@"; }
+
+cleanup() {
+  as_pg "$PG_BIN/pg_ctl" -D "$RESTORE_DIR" -m immediate stop >/dev/null 2>&1 || true
+  rm -rf "$RESTORE_DIR"
+}
+trap cleanup EXIT
+
+echo "==> Restauration du dépôt $REPO${TARGET:+ (cible : $TARGET)} dans $RESTORE_DIR"
+install -d -m 700 -o postgres -g postgres "$RESTORE_DIR"
+# archive-mode=off : le cluster restauré ne doit surtout pas pousser ses WAL dans le dépôt.
+args=(--stanza=main --repo="$REPO" --pg1-path="$RESTORE_DIR" --archive-mode=off)
+[ -z "$TARGET" ] || args+=(--type=time "--target=$TARGET" --target-action=promote)
+start=$(date +%s)
+as_pg pgbackrest "${args[@]}" restore
+
+# Sur Debian, postgresql.conf et pg_hba.conf vivent dans /etc, hors sauvegarde :
+# config minimale, sans écoute réseau.
+as_pg tee "$RESTORE_DIR/postgresql.conf" >/dev/null <<EOF
+port = $PORT
+listen_addresses = ''
+unix_socket_directories = '/var/run/postgresql'
+hba_file = '$RESTORE_DIR/pg_hba.conf'
+ident_file = '$RESTORE_DIR/pg_ident.conf'
+shared_buffers = 128MB
+EOF
+echo "local all postgres peer" | as_pg tee "$RESTORE_DIR/pg_hba.conf" >/dev/null
+as_pg touch "$RESTORE_DIR/pg_ident.conf"
+
+echo "==> Démarrage du cluster temporaire (port $PORT) et rejeu des WAL"
+as_pg "$PG_BIN/pg_ctl" -D "$RESTORE_DIR" -l "$RESTORE_DIR/restore-test.log" -w -t 3600 start >/dev/null
+for _ in $(seq 1 3600); do
+  [ "$(psql_restore -c 'SELECT pg_is_in_recovery()' 2>/dev/null)" = "f" ] && break
+  sleep 1
+done
+[ "$(psql_restore -c 'SELECT pg_is_in_recovery()')" = "f" ] \
+  || { echo "Rejeu des WAL non terminé après 1 h, voir $RESTORE_DIR/restore-test.log" >&2; exit 1; }
+echo "    restauré et rejoué en $(( $(date +%s) - start )) s"
+
+echo "==> Nombre de lignes : prod vs restauration"
+LIST_TABLES="SELECT format('%I.%I', schemaname, tablename) FROM pg_tables
+             WHERE schemaname NOT IN ('pg_catalog', 'information_schema') ORDER BY 1"
+printf '%-24s %-48s %12s %12s\n' base table prod restaurée
+while IFS= read -r db; do
+  while IFS= read -r table; do
+    restored="$(psql_restore -d "$db" -c "SELECT count(*) FROM $table")"
+    prod="$(psql_prod -d "$db" -c "SELECT count(*) FROM $table" 2>/dev/null || echo absente)"
+    flag=""
+    [ "$prod" = "$restored" ] || flag="  ≠"
+    printf '%-24s %-48s %12s %12s%s\n' "$db" "$table" "$prod" "$restored" "$flag"
+  done < <(psql_restore -d "$db" -c "$LIST_TABLES")
+  comm -23 <(psql_prod -d "$db" -c "$LIST_TABLES" 2>/dev/null | sort) \
+           <(psql_restore -d "$db" -c "$LIST_TABLES" | sort) \
+    | sed "s/^/    table absente de la restauration : $db /"
+done < <(psql_restore -d postgres -c "SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres' ORDER BY 1")
+
+cat <<EOF
+
+Restauration réussie (dépôt $REPO). Les écarts « ≠ » sont normaux pour les tables
+modifiées depuis la sauvegarde ; ils doivent disparaître avec une cible PITR récente.
+Le cluster temporaire va être supprimé.
+EOF

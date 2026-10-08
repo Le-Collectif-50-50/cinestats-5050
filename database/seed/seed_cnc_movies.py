@@ -1,3 +1,4 @@
+import logging
 from tqdm import tqdm # Progress bar for long-running tasks
 from database.database import SessionLocal
 from database.data.cnc.extract_cnc_data_from_excel import ExtractCncDataFromExcel
@@ -20,6 +21,7 @@ def seed_cnc_movies():
     data = extractor.clean_data()
 
     session = SessionLocal()
+    processed = 0
     try:
         with session.begin():  # starts a transaction, will rollback on error
             for _, row in tqdm(data.iterrows(), total=len(data), desc="Seeding CNC films"):
@@ -62,11 +64,15 @@ def seed_cnc_movies():
                     for broadcaster_name in broadcasters:
                         holder = credit_holder_repository.find_or_create_credit_holder(session, full_name=broadcaster_name, type="Company")
                         film_credit_repository.find_or_create_film_credit(session, film.id, role.id, holder.id)
+                processed += 1
             session.commit()
             print(f"Seeded {len(data)} films.")
-    except Exception as e:
+    except Exception:
         session.rollback()
-        print("Error while seeding CNC movies:", e)
+        logging.exception(
+            "seed_cnc_movies crashed after processing %d/%d rows — visa_number of the failing row: %r",
+            processed, len(data), row.get("visa_number") if 'row' in locals() else None,
+        )
     finally:
         session.close()
 
