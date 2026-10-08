@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Filtre le trafic Internet → conteneurs dans la chaîne DOCKER-USER.
+# Les ports publiés par Docker (et par le cluster kind d'abctl) passent par FORWARD
+# après DNAT, pas par INPUT : ufw ne les voit jamais. Ce script ferme ce trou.
+# Installé par infra/vps/20-docker.sh ; ports ouverts dans /etc/default/cinestats-docker-user-firewall.
+set -euo pipefail
+
+ALLOWED_TCP_PORTS=""
+# shellcheck source=/dev/null
+[ -f /etc/default/cinestats-docker-user-firewall ] && . /etc/default/cinestats-docker-user-firewall
+
+PUB_IF="$(ip -4 route show default | awk '{print $5; exit}')"
+[ -n "$PUB_IF" ] || { echo "Interface publique introuvable" >&2; exit 1; }
+
+apply() { # <iptables|ip6tables>
+  local ipt="$1" port
+  command -v "$ipt" >/dev/null || return 0
+  "$ipt" -N DOCKER-USER 2>/dev/null || true
+  "$ipt" -F DOCKER-USER
+  # Réponses aux connexions déjà établies (dont celles initiées par les conteneurs).
+  "$ipt" -A DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+  # Trafic qui n'entre pas par l'interface publique (inter-conteneurs, wg0) : géré par Docker.
+  "$ipt" -A DOCKER-USER ! -i "$PUB_IF" -j RETURN
+  # Ports autorisés depuis Internet, comparés au port d'origine (avant DNAT).
+  for port in $ALLOWED_TCP_PORTS; do
+    "$ipt" -A DOCKER-USER -p tcp -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL -j RETURN
+  done
+  "$ipt" -A DOCKER-USER -j DROP
+}
+
+apply iptables
+apply ip6tables
+echo "DOCKER-USER : seuls les ports TCP [${ALLOWED_TCP_PORTS:-aucun}] sont joignables depuis $PUB_IF."

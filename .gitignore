@@ -178,8 +178,8 @@ ingestion/dbt/profiles/.user.yml
 
 # Certbot: keep Dockerfile/entrypoint, ignore generated data
 certbot/*
-!certbot/Dockerfile
-!certbot/entrypoint.sh
+!certbot/Dockerfile.dns-ovh
+!certbot/entrypoint-dns.sh
 certbot/conf/*
 certbot/www/*
 certbot/logs/*

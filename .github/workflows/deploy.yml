@@ -1,43 +1,141 @@
 name: Deploy
+run-name: Deploy ${{ github.ref_name }}${{ inputs.rollback_commit != '' && format(' (rollback to {0})', inputs.rollback_commit) || '' }}
+
+# One workflow for both environments, picked from the branch: a push to
+# `preview` deploys the preview, a push to `production` deploys prod.
+# Not a reusable workflow (workflow_call): those fail with a startup_failure
+# on this repo, most likely an org-level Actions policy.
+#
+# No third-party action: the server is reached with the runner's own ssh,
+# with its host key pinned (SSH_KNOWN_HOSTS), so there is nothing to pin.
+#
+# Rollback: run this workflow by hand on the environment's branch with
+# `rollback_commit` set. Nothing is rebuilt: that commit's images (already
+# published) are deployed along with that commit's compose and nginx files.
 
 on:
   push:
-    branches: [main]
+    branches: [preview, production]
   workflow_dispatch:
+    inputs:
+      rollback_commit:
+        description: "Rollback: commit to redeploy (short or full SHA, already deployed to this environment). Empty = build and deploy the branch head."
+        required: false
+        default: ""
 
-env:
-  REGISTRY: ghcr.io
+# Deploys of the same environment queue up instead of overlapping.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions: {}
 
 jobs:
-  build-and-push:
+  config:
     runs-on: ubuntu-latest
-    environment: production
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      environment: ${{ steps.config.outputs.environment }}
+      commit: ${{ steps.config.outputs.commit }}
+      build: ${{ steps.config.outputs.build }}
+      image_prefix: ${{ steps.config.outputs.image_prefix }}
+      image_tag: ${{ steps.config.outputs.image_tag }}
+      floating_tag: ${{ steps.config.outputs.floating_tag }}
+      compose_file: ${{ steps.config.outputs.compose_file }}
+      deploy_dir: ${{ steps.config.outputs.deploy_dir }}
+      umami_website_id: ${{ steps.config.outputs.umami_website_id }}
+      allow_robots_indexing: ${{ steps.config.outputs.allow_robots_indexing }}
+      site_url: ${{ steps.config.outputs.site_url }}
+      robots_expected: ${{ steps.config.outputs.robots_expected }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # A rollback needs the history to resolve rollback_commit. (Written
+          # this way round because `cond && 0 || 1` can never yield 0.)
+          fetch-depth: ${{ inputs.rollback_commit == '' && 1 || 0 }}
+
+      - name: Resolve the environment's settings
+        id: config
+        env:
+          ROLLBACK_COMMIT: ${{ inputs.rollback_commit }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          case "$GITHUB_REF_NAME" in
+            production)
+              environment=production floating_tag=latest
+              compose_file=docker-compose.prod.yaml deploy_dir=cinestats5050
+              umami_website_id=996668f1-b9bd-4892-974d-b9a0bb145082 allow_robots_indexing=true
+              site_url=https://cinestats5050.fr robots_expected="Allow: /"
+              ;;
+            preview)
+              environment=preview floating_tag=preview
+              compose_file=docker-compose.preview.yaml deploy_dir=cinestats5050-preview
+              umami_website_id="" allow_robots_indexing=false
+              site_url=https://preview.cinestats5050.fr robots_expected="Disallow: /"
+              ;;
+            *)
+              echo "::error::Deploys only run from the preview or production branch (got: $GITHUB_REF_NAME)."
+              exit 1
+              ;;
+          esac
+
+          if [ -n "$ROLLBACK_COMMIT" ]; then
+            [[ "$ROLLBACK_COMMIT" =~ ^[0-9a-f]{7,40}$ ]] \
+              || { echo "::error::rollback_commit must be a commit SHA (got: $ROLLBACK_COMMIT)."; exit 1; }
+            commit="$(git rev-parse --verify --quiet "$ROLLBACK_COMMIT^{commit}")" \
+              || { echo "::error::Commit $ROLLBACK_COMMIT not found."; exit 1; }
+            build=false
+          else
+            commit="$GITHUB_SHA"
+            build=true
+          fi
+
+          # Tags carry the environment: the frontend image bakes in
+          # per-environment build args (API URL, Umami, robots.txt).
+          {
+            echo "environment=$environment"
+            echo "commit=$commit"
+            echo "build=$build"
+            echo "image_prefix=$(echo "ghcr.io/$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+            echo "image_tag=$environment-${commit::7}"
+            echo "floating_tag=$floating_tag"
+            echo "compose_file=$compose_file"
+            echo "deploy_dir=$deploy_dir"
+            echo "umami_website_id=$umami_website_id"
+            echo "allow_robots_indexing=$allow_robots_indexing"
+            echo "site_url=$site_url"
+            echo "robots_expected=$robots_expected"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: config
+    if: needs.config.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ needs.config.outputs.environment }}
     permissions:
       contents: read
       packages: write
-      attestations: write
-      id-token: write
-
     strategy:
       matrix:
         include:
-          - name: backend
-            image: ric-backend
+          - image: ric-backend
             context: .
             file: ./backend/Dockerfile.prod
-          - name: frontend
-            image: ric-frontend
+          - image: ric-frontend
             context: ./frontend
             file: ./frontend/Dockerfile.prod
-          - name: nginx
-            image: ric-nginx
+          - image: ric-nginx
             context: ./nginx
             file: ./nginx/Dockerfile
-          - name: certbot
-            image: ric-certbot
+          # Certificates are issued through the OVH DNS API (DNS-01) in both
+          # environments.
+          - image: ric-certbot-dns
             context: ./certbot
-            file: ./certbot/Dockerfile
-
+            file: ./certbot/Dockerfile.dns-ovh
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -48,20 +146,20 @@ jobs:
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.repository_owner }}
-          password: ${{ github.token }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for ${{ matrix.name }}
+      - name: Extract metadata (tags, labels) for ${{ matrix.image }}
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
+          images: ${{ needs.config.outputs.image_prefix }}/${{ matrix.image }}
           tags: |
-            type=raw,value=latest
-            type=sha
+            type=raw,value=${{ needs.config.outputs.image_tag }}
+            type=raw,value=${{ needs.config.outputs.floating_tag }}
 
-      - name: Build and push ${{ matrix.name }}
+      - name: Build and push ${{ matrix.image }}
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
@@ -69,71 +167,128 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ needs.config.outputs.environment }}-${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ needs.config.outputs.environment }}-${{ matrix.image }}
           build-args: |
-            ${{ matrix.name == 'frontend' && format('NEXT_PUBLIC_API_URL={0}', vars.NEXT_PUBLIC_API_URL) || '' }}
+            ${{ matrix.image == 'ric-frontend' && format('NEXT_PUBLIC_API_URL={0}', vars.NEXT_PUBLIC_API_URL) || '' }}
+            ${{ matrix.image == 'ric-frontend' && needs.config.outputs.umami_website_id != '' && format('NEXT_PUBLIC_UMAMI_WEBSITE_ID={0}', needs.config.outputs.umami_website_id) || '' }}
+            ${{ matrix.image == 'ric-frontend' && format('NEXT_PUBLIC_ALLOW_ROBOTS_INDEXING={0}', needs.config.outputs.allow_robots_indexing) || '' }}
 
   deploy:
+    needs: [config, build]
+    # Runs after a successful build, or right away for a rollback (build skipped).
+    if: ${{ !cancelled() && needs.config.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: ubuntu-latest
-    needs: build-and-push
-    environment: production
+    timeout-minutes: 20
+    environment:
+      name: ${{ needs.config.outputs.environment }}
+      url: ${{ needs.config.outputs.site_url }}
     permissions:
       contents: read
-      packages: write
-      attestations: write
-      id-token: write
-
+      packages: read
+    env:
+      DEPLOY_DIR: ${{ needs.config.outputs.deploy_dir }}
     steps:
-      - name: Checkout repository
+      - name: Checkout the deployed commit
         uses: actions/checkout@v4
-
-      - name: Copy docker compose prod file via SSH
-        uses: appleboy/scp-action@master
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.prod.yaml"
-          target: ~/cinestats5050
+          ref: ${{ needs.config.outputs.commit }}
 
-      - name: Copy nginx config via SSH
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "nginx"
-          target: ~/cinestats5050
+      - name: Configure SSH (pinned host key)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+          SERVER_PORT: ${{ vars.SERVER_PORT }}
+        run: |
+          if [ -z "$SSH_KNOWN_HOSTS" ]; then
+            echo "::error::Variable SSH_KNOWN_HOSTS is missing from this GitHub environment: see « Clé d'hôte SSH » in docs/DEPLOYMENT.md."
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host target
+            HostName $SERVER_HOST
+            Port ${SERVER_PORT:-22}
+            User $SSH_USERNAME
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            ServerAliveInterval 15
+          EOF
+          ssh target true
 
-      - name: Copy certbot scaffolding via SSH
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "certbot"
-          target: ~/cinestats5050
+      - name: Render the server .env
+        env:
+          IMAGE_PREFIX: ${{ needs.config.outputs.image_prefix }}
+          IMAGE_TAG: ${{ needs.config.outputs.image_tag }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
+          BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+          FRONTEND_PORT: ${{ vars.FRONTEND_PORT }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          METABASE_SITE_URL: ${{ secrets.METABASE_SITE_URL }}
+          METABASE_SECRET_KEY: ${{ secrets.METABASE_SECRET_KEY }}
+          METABASE_DASHBOARD_ID: ${{ secrets.METABASE_DASHBOARD_ID }}
+          DOMAIN: ${{ vars.DOMAIN }}
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
+          CERT_EXTRA_DOMAINS: ${{ vars.CERT_EXTRA_DOMAINS }}
+          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
+          OVH_APPLICATION_KEY: ${{ secrets.OVH_APPLICATION_KEY }}
+          OVH_APPLICATION_SECRET: ${{ secrets.OVH_APPLICATION_SECRET }}
+          OVH_CONSUMER_KEY: ${{ secrets.OVH_CONSUMER_KEY }}
+          # Preview only (unset in production).
+          POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          RUN_SEED: ${{ vars.RUN_SEED }}
+          ENVIRONMENT: ${{ needs.config.outputs.environment }}
+        run: |
+          (umask 077 && scripts/render-server-env.sh "$ENVIRONMENT" > "$RUNNER_TEMP/server.env")
 
-      - name: Deploy application via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd ~/cinestats5050
-            mkdir -p certbot/conf certbot/www certbot/logs
-            echo "ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}" > .env
-            echo "BACKEND_PORT=${{ vars.BACKEND_PORT }}" >> .env
-            echo "FRONTEND_PORT=${{ vars.FRONTEND_PORT }}" >> .env
-            echo "NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}" >> .env
-            echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
-            echo "DOCKERHUB_USERNAME=${{ env.REGISTRY }}/${{ github.repository }}" >> .env
-            echo "METABASE_SITE_URL=${{ secrets.METABASE_SITE_URL }}" >> .env
-            echo "METABASE_SECRET_KEY=${{ secrets.METABASE_SECRET_KEY }}" >> .env
-            echo "METABASE_DASHBOARD_ID=${{ secrets.METABASE_DASHBOARD_ID }}" >> .env
+      - name: Copy files to the server
+        env:
+          COMPOSE_FILE: ${{ needs.config.outputs.compose_file }}
+        # Remote commands run from the deploy user's home, hence the relative
+        # paths; $DEPLOY_DIR is meant to expand on the runner side.
+        run: |
+          bundle="$RUNNER_TEMP/bundle"
+          mkdir -p "$bundle/nginx"
+          cp "$COMPOSE_FILE" "$bundle/docker-compose.yml"
+          cp nginx/*.conf "$bundle/nginx/"
+          cp scripts/remote-deploy.sh "$bundle/"
+          # shellcheck disable=SC2029
+          tar -C "$bundle" -cz . | ssh target "mkdir -p $DEPLOY_DIR && tar -xz -C $DEPLOY_DIR"
+          # Over stdin: secrets never show up in a command line, and the file is
+          # 600. remote-deploy.sh only swaps it in once the release is healthy.
+          # shellcheck disable=SC2029
+          ssh target "umask 077 && cat > $DEPLOY_DIR/.env.new" < "$RUNNER_TEMP/server.env"
+          rm -f "$RUNNER_TEMP/server.env"
 
-            echo ${{ github.token }} | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
-            mv docker-compose.prod.yaml docker-compose.yml
-            docker compose pull
-            docker compose down
-            docker compose up -d --remove-orphans
+      - name: Deploy
+        env:
+          REGISTRY_USER: ${{ github.repository_owner }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # shellcheck disable=SC2029
+          printf '%s\n' "$REGISTRY_TOKEN" | ssh target "$DEPLOY_DIR/remote-deploy.sh ${REGISTRY_USER,,}"
+
+      - name: Smoke test
+        env:
+          SITE_URL: ${{ needs.config.outputs.site_url }}
+          API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          ROBOTS_EXPECTED: ${{ needs.config.outputs.robots_expected }}
+        run: |
+          get() { curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$@"; }
+          get -o /dev/null "$API_URL/"
+          get -o /dev/null "$SITE_URL/"
+          robots="$(get "$SITE_URL/robots.txt")"
+          if ! grep -qxF "$ROBOTS_EXPECTED" <<<"$robots"; then
+            echo "::error::Unexpected robots.txt on $SITE_URL (expected « $ROBOTS_EXPECTED »): $robots"
+            exit 1
+          fi

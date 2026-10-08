@@ -1,0 +1,7 @@
+// Installé par infra/vps/00-base.sh. Complète 50unattended-upgrades, dont les
+// origines par défaut (mises à jour de sécurité de la distribution) sont conservées.
+Unattended-Upgrade::Automatic-Reboot "true";
+// Heure locale (Europe/Paris), décalée par VPS pour ne pas tout redémarrer en même temps.
+Unattended-Upgrade::Automatic-Reboot-Time "@REBOOT_TIME@";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";

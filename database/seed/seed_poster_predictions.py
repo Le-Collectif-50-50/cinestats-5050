@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 from tqdm import tqdm
 from database.database import SessionLocal
@@ -15,6 +16,7 @@ def seed_poster_predictions(csv_path: str = DEFAULT_CSV_PATH):
     visa_numbers = df["visa_number"].dropna().astype(str).unique().tolist()
 
     session = SessionLocal()
+    processed = 0
     try:
         with session.begin():
             # Step 0: Bulk delete existing PosterCharacter records for the given visa numbers
@@ -50,12 +52,16 @@ def seed_poster_predictions(csv_path: str = DEFAULT_CSV_PATH):
 
                 # Step 4: Create new PosterCharacter
                 poster_character_repository.create_poster_character(session, poster.id, predictions_data)
+                processed += 1
 
             session.commit()
             print(f"Seeded {len(df)} poster predictions.")
-    except Exception as e:
+    except Exception:
         session.rollback()
-        print("Error while seeding poster predictions:", e)
+        logging.exception(
+            "seed_poster_predictions crashed after processing %d/%d rows — visa_number of the failing row: %r",
+            processed, len(df), row.get("visa_number") if 'row' in locals() else None,
+        )
     finally:
         session.close()
 

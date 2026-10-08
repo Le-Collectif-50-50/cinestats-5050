@@ -23,7 +23,12 @@ const ShareDialog = ({
   setOpen: (open: boolean) => void;
   imageSource: string;
 }) => {
-  const shareUrl = window?.location.href;
+  // `window` isn't defined during SSR — `window?.` doesn't guard against
+  // that (it's an undeclared identifier, not just a null/undefined value),
+  // so this crashed the server render of every /films/[slug] page. Only
+  // used inside click handlers below, so a plain "" placeholder on the
+  // server is safe.
+  const shareUrl = typeof window !== "undefined" ? window.location.href : "";
   const shareText = "Découvrez ce film incroyable !";
 
   const copyLink = () => {

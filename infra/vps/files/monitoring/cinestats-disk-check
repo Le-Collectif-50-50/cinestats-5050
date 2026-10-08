@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Ping healthchecks.io : succès si chaque système de fichiers est sous le seuil,
+# /fail (avec le détail) sinon. Installé par infra/vps/50-monitoring.sh, lancé par cron.
+set -uo pipefail
+
+DISK_THRESHOLD=80
+HEALTHCHECK_DISK_URL=""
+# shellcheck source=/dev/null
+[ -f /etc/default/cinestats-monitoring ] && . /etc/default/cinestats-monitoring
+[ -n "$HEALTHCHECK_DISK_URL" ] || exit 0
+
+over="$(df -P -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs \
+  | awk -v t="$DISK_THRESHOLD" 'NR > 1 { use = $5; sub("%", "", use); if (use + 0 >= t) print $6 " " $5 }')"
+if [ -n "$over" ]; then
+  curl -fsS -m 10 --retry 3 -o /dev/null --data-raw "$(hostname) : $over" "$HEALTHCHECK_DISK_URL/fail"
+else
+  curl -fsS -m 10 --retry 3 -o /dev/null "$HEALTHCHECK_DISK_URL"
+fi
