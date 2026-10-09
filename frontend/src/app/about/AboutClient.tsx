@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Mouse } from "lucide-react";
+import BackgroundImage from "@/components/atoms/BackgroundImage";
 
 export default function AboutClient() {
   const sectionBelowRef = useRef<HTMLDivElement | null>(null);
@@ -13,14 +14,7 @@ export default function AboutClient() {
 
   return (
     <>
-      <div
-        className="background-image"
-        style={
-          {
-            "--background-image-url": `url('/home.jpg')`,
-          } as React.CSSProperties
-        }
-      ></div>
+      <BackgroundImage />
       <main
         className="container mx-auto px-10 py-16 flex flex-col items-center justify-center text-white"
         style={{ background: "unset" }}
