@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS ops.ingestion_run_requests (
   requested_at TIMESTAMP NOT NULL DEFAULT now(),
   requested_by_metabase_user TEXT NOT NULL,
   requested_by_metabase_group TEXT,
+  request_reason TEXT,
   request_source TEXT NOT NULL DEFAULT 'metabase',
   request_status TEXT NOT NULL DEFAULT 'pending',
   claimed_at TIMESTAMP,
@@ -83,6 +84,9 @@ CREATE UNIQUE INDEX idx_ingestion_run_requests_dedupe_key_active
 
 ALTER TABLE ops.ingestion_run_requests
   ALTER COLUMN request_id SET DEFAULT gen_random_uuid();
+
+ALTER TABLE ops.ingestion_run_requests
+  ADD COLUMN IF NOT EXISTS request_reason TEXT;
 
 ALTER TABLE ops.ingestion_run_requests
   DROP COLUMN IF EXISTS requested_extraction_date;

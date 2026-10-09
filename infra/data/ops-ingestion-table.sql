@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS ops.ingestion_run_requests (
   requested_at TIMESTAMP NOT NULL DEFAULT now(),
   requested_by_metabase_user TEXT NOT NULL,
   requested_by_metabase_group TEXT,
+  request_reason TEXT,
   request_source TEXT NOT NULL DEFAULT 'metabase',
   request_status TEXT NOT NULL DEFAULT 'pending',
   claimed_at TIMESTAMP,
@@ -18,6 +19,10 @@ CREATE TABLE IF NOT EXISTS ops.ingestion_run_requests (
   trigger_error TEXT,
   dedupe_key TEXT NOT NULL
 );
+
+-- Migration additive pour les files déjà en service ; historique conservé.
+ALTER TABLE ops.ingestion_run_requests
+  ADD COLUMN IF NOT EXISTS request_reason TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_run_requests_status_requested_at
   ON ops.ingestion_run_requests (request_status, requested_at ASC);

@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Last reviewed:** 2026-10-06
+**Last reviewed:** 2026-10-09
 
 **Status:** active
 
@@ -16,6 +16,7 @@
 | 2   | 2026-05-22 | Joel Teixeira | Ajout du pinning de version Prefect et du troubleshooting de revision Alembic inconnue |
 | 3   | 2026-05-26 | Joel Teixeira | Alignement avec les deployments Prefect actuels, le poller `ops.ingestion_run_requests` et les grants `ops` |
 | 4   | 2026-10-06 | Joel Teixeira | Borne SQLAlchemy sous 2.1 pour corriger les erreurs du scheduler Prefect et procédure de reconstruction de l'image partagée. Ajout du compte Postgres dédié aux scrapers et de ses privilèges limités à `raw` |
+| 5 | 2026-10-09 | Joel Teixeira | Formulaire Metabase natif avec identité déclarative et motif obligatoire, conservé dans la file d’ingestion. |
 
 ## 1. Objectif
 
@@ -166,6 +167,7 @@ CREATE TABLE IF NOT EXISTS ops.ingestion_run_requests (
   requested_at TIMESTAMP NOT NULL DEFAULT now(),
   requested_by_metabase_user TEXT NOT NULL,
   requested_by_metabase_group TEXT,
+  request_reason TEXT,
   request_source TEXT NOT NULL DEFAULT 'metabase',
   request_status TEXT NOT NULL DEFAULT 'pending',
   claimed_at TIMESTAMP,
@@ -200,6 +202,26 @@ INGESTION_REQUEST_POSTGRES_PASSWORD=<replace>
 SCRAPER_POSTGRES_USER=scraper_user
 SCRAPER_POSTGRES_PASSWORD=<replace>
 ```
+
+### Formulaire de déclenchement Metabase
+
+Le bouton du dashboard `Pipeline Overview` ouvre l’action `Demander une ingestion` sur la connexion `cinestats-ops-db` (rôle `metabase_ops_user`). Le formulaire demande deux champs obligatoires :
+
+- **Votre nom ou adresse e-mail** : variable texte `email`, enregistrée dans `requested_by_metabase_user`. Cette identité est déclarative ; elle n’est pas déduite de la session Metabase.
+- **Motif de la demande** : variable texte `reason`, présentée comme **Texte long**, enregistrée dans `request_reason`.
+
+Le SQL de l’action est versionné dans `infra/data/metabase-trigger-ingestion.sql`. Le libellé d’envoi est **Enregistrer la demande**. Une demande active pour la même journée empêche une nouvelle insertion, comme pour l’ancien bouton. Le poller et ses paramètres restent inchangés.
+
+Sur une base existante, appliquer en propriétaire de la table ou administrateur :
+
+```sql
+ALTER TABLE ops.ingestion_run_requests
+  ADD COLUMN IF NOT EXISTS request_reason TEXT;
+```
+
+La colonne reste nullable pour conserver les demandes historiques. Les scripts `infra/data/ops-ingestion-table.sql` et l’initialisation optionnelle du poller comprennent cette migration additive. Aucun droit supplémentaire n’est requis pour `metabase_ops_user`.
+
+Après migration, synchroniser le schéma de `cinestats-ops-db` dans Metabase et afficher `request_reason` dans la question `Trigger / Ingestion Run Requests`. Les tests de configuration ne doivent pas soumettre de demande réelle : chaque ligne `pending` peut être prise en charge par Prefect.
 
 ### 4.4 Setup, configuration et bootstrap Airbyte
 
