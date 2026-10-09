@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Last reviewed:** 2026-10-06
+**Last reviewed:** 2026-10-09
 
 **Status:** active
 
@@ -17,6 +17,7 @@
 | 3   | 2026-05-22 | Joel Teixeira | Alignement version Prefect server/worker et ajout du troubleshooting de migration Prefect. Ajout de l'authentification basic sur l'UI et l'API Prefect. Le CLI de scraping Allociné charge automatiquement `ingestion/.env` avant de résoudre les placeholders JSON |
 | 4   | 2026-05-26 | Joel Teixeira | Ajout du polling de file `ops.ingestion_run_requests` directement dans Prefect, du monitoring `ops.v_allocine_pipeline_status` et du wiring Docker Compose associé |
 | 5   | 2026-10-06 | Joel Teixeira | Séparation du compte Postgres des scrapers et paramétrage SSL commun. Alignement des noms de modèles dbt et clarification du périmètre des phases après suppression des déclarations obsolètes. Correction de l'appel à la phase dbt 2 : le flow principal contrôle son activation avant d'appeler le helper sans argument. Activation de la phase dbt 2 par défaut pour les runs manuels, le CLI et le poller Metabase, avec désactivation explicite possible |
+| 6   | 2026-10-09 | Joel Teixeira | Autorisation TLS du compte scraper_user depuis le VPS data dans pg_hba.conf et son générateur |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -132,6 +133,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.mubi_film_awards TO scraper_us
 ```
 
 Les trois dernières instructions ne sont nécessaires que si les tables de sortie existent déjà et appartiennent à un autre rôle. Les nouvelles tables créées par le scraper appartiennent à `scraper_user`.
+
+Sur les VPS, le générateur `infra/vps/30-postgres.sh` autorise aussi ce rôle en TLS depuis le VPS data (`10.50.0.3/32`). La règle doit précéder les rejets globaux dans `/etc/postgresql/16/main/pg_hba.conf` :
+
+```conf
+hostssl cinestats-5050-db scraper_user 10.50.0.3/32 scram-sha-256
+```
+
+Pour appliquer uniquement cette correction sur une instance existante, sauvegarder le fichier, ajouter la règle, vérifier que `SELECT * FROM pg_hba_file_rules WHERE error IS NOT NULL;` ne renvoie aucune erreur, puis recharger avec `SELECT pg_reload_conf();` en administrateur PostgreSQL. Tester ensuite la connexion TLS depuis le worker avec ses identifiants configurés et vérifier les droits SQL ; la règle réseau ne les accorde pas. Le provisionnement du rôle et de ses droits reste une étape distincte décrite ci-dessus. Le script complet effectue aussi des opérations de provisionnement et un redémarrage : ne pas le relancer pour ce seul rechargement.
 
 `POSTGRES_SSLMODE` est partagé par dbt, Airbyte et les scrapers. Utiliser par exemple `require` ou `verify-full` lorsque PostgreSQL impose TLS.
 

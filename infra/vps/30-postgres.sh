@@ -78,6 +78,7 @@ hostssl  $DB_NAME  app_ro             $WG_APP_IP/32      scram-sha-256
 hostssl  $DB_NAME  app_migrator       $WG_APP_IP/32      scram-sha-256
 hostssl  $DB_NAME  airbyte_user       $WG_DATA_IP/32      scram-sha-256
 hostssl  $DB_NAME  prefect_user       $WG_DATA_IP/32      scram-sha-256
+hostssl  $DB_NAME  scraper_user       $WG_DATA_IP/32      scram-sha-256
 # dbt_user accepte aussi le non-TLS : les scrapers (connectés en dbt_user) forcent
 # sslmode=disable. Le tunnel WireGuard chiffre quand même. Passer en hostssl dès
 # que la branche analytics lit POSTGRES_SSLMODE dans les scrapers.
