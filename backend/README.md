@@ -2,17 +2,18 @@
 
 ## Metadata du document
 
-**Responsable:** Nicolas Revel
+**Owner:** Nicolas Revel
 
-**Dernière révision:** 2026-05-08
+**Last reviewed:** 2026-10-09
 
-**Statut:** actif
+**Status:** active
 
-### Historique du document
+## Historique du document
 
-| #   | Date       | Auteur        | Observations           |
+| #   | Date       | Author        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
+| 2   | 2026-10-09 | Joel Teixeira | Tests de compatibilité FastAPI/AnyIO et signature Metabase lors des mises à jour de dépendances |
 
 ## Comment lancer le backend ?
 
@@ -101,7 +102,7 @@ Voici une liste non exhaustive de commandes simples à exécuter sur la tables `
 
 ## 📦 `routers/`
 
-Tous les points d'entrée HTTP (routes) sont définis dans le dossier `routers/`.  
+Tous les points d'entrée HTTP (routes) sont définis dans le dossier `routers/`.
 Chaque fichier regroupe les routes selon une logique métier, par exemple :
 
 - `routers/films.py` → toutes les routes liées aux films
@@ -110,12 +111,22 @@ Les routes sont définies à l’aide du `APIRouter` de FastAPI et sont ensuite 
 
 ## ⚙️ `use_cases/`
 
-La logique métier est isolée dans des classes dédiées appelées "use cases", situées dans le dossier `use_cases/`.  
+La logique métier est isolée dans des classes dédiées appelées "use cases", situées dans le dossier `use_cases/`.
 Chaque use case encapsule une opération spécifique, ce qui permet de garder les handlers de routes simples et lisibles.
 
 Par exemple :
 
 - `GetFilmDetails` dans `use_cases/get_film_details.py` contient toute la logique nécessaire pour récupérer les informations détaillées d’un film.
+
+## Vérifier les mises à jour de dépendances
+
+Depuis la racine du dépôt, installer les dépendances verrouillées avec `poetry install --with dev`, puis lancer `poetry run python -m pytest tests`.
+
+`tests/backend/test_metabase_compatibility.py` exerce la route Metabase via le client HTTP de test FastAPI, notamment son exécution synchrone via AnyIO. Il vérifie les claims et la durée de validité du jeton HS256, le rejet d'une signature incorrecte et d'un jeton expiré, ainsi que la réponse HTTP 503 en cas de configuration absente. Les clés et URL sont fictives ; aucun accès à Metabase ou PostgreSQL n'est nécessaire.
+
+Comparer les résultats avant et après mise à jour du verrou, puis relancer l'audit `pip-audit` défini dans `.github/workflows/pre-commit.yaml` sans élargir ses exclusions. Les tests de compatibilité et l'audit de vulnérabilités répondent à deux questions distinctes ; leur réussite ne remplace pas une validation avec les services réels.
+
+Le backend de production installe les dépendances exportées de `poetry.lock` via `backend/Dockerfile.prod`. L'image Prefect définit ses propres dépendances dans `ingestion/prefect/Dockerfile` : une mise à jour du verrou racine ne met pas cette image à jour.
 
 ## Referenced by
 
