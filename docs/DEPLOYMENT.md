@@ -1,14 +1,26 @@
 # Déploiement
 
+**Owner:** Data Team DataForGood
+**Last reviewed:** 2026-10-09
+**Status:** active
+
+## Historique du document
+
+| # | Date | Author | Observations |
+| --- | --- | --- | --- |
+| 1 | 2026-10-09 | Joel Teixeira | Ajout du parcours de validation en preview et clarification des branches sources de promotion. |
+
 ## Stratégie de branches
 
-`main` est la branche de travail : les PR y sont mergées après review (1 approbation requise). `preview` et `production` sont des branches de déploiement dédiées, sans historique divergent — on y fait remonter (fast-forward ou merge) le contenu de `main` quand on veut déclencher un déploiement, jamais de travail direct dessus.
+`main` est la branche de travail : les PR y sont mergées après review (1 approbation requise). `preview` et `production` sont des branches de déploiement dédiées : le script `scripts/promote.sh` les fait avancer vers `origin/main` en fast-forward par défaut. Ne pas travailler directement sur ces branches.
 
 ```
 feature/xxx ──┐
-              ├──► main ──► preview ──► production
-feature/yyy ──┘      (PR)   (promotion) (promotion)
+              ├──► main ──┬──► preview
+feature/yyy ──┘    (PR)   └──► production
 ```
+
+L'ordre de validation est **preview, puis production**, mais chaque promotion prend sa source dans `main`. La preview correspond au staging. Suivre le [runbook de promotion et validation](runbooks/deploiement-promotion-preview-production.md) pour les commandes, les vérifications fonctionnelles et le contrôle du commit avant production.
 
 ## Environnements
 
@@ -21,11 +33,11 @@ Le projet a deux environnements, chacun sur sa propre machine, déclenchés par 
 
 Les deux peuvent aussi être déclenchés manuellement (`workflow_dispatch`) depuis leur branche ; c'est aussi par là que passe un rollback.
 
-Pour déployer : faire avancer la branche `preview` (ou `production`) jusqu'au commit de `main` qu'on veut déployer — par exemple `git push origin main:preview` pour un fast-forward, ou une PR `main` → `preview` si l'historique a divergé.
+Pour déployer en preview : `scripts/promote.sh preview --watch`. Après validation, utiliser `scripts/promote.sh production --watch`. Ces commandes utilisent le `main` distant et refusent par défaut une divergence d'historique ; suivre le runbook avant de forcer une mise à jour.
 
 ## Flux commun
 
-Un seul workflow, `.github/workflows/deploy.yml`, sert les deux environnements : la branche poussée choisit l'environment GitHub et ses réglages. Il n'utilise aucune action tierce : le runner parle au serveur avec son propre `ssh`.
+Un seul workflow, `.github/workflows/deploy.yml`, sert les deux environnements : la branche poussée choisit l'environment GitHub et ses réglages. La connexion au serveur utilise directement le client `ssh` du runner ; la construction des images utilise des actions Docker.
 
 1. **Config** : réglages de l'environnement (fichier compose, dossier sur le serveur, URL du site).
 2. **Build** : 4 images (backend, frontend, nginx, certbot) poussées sur `ghcr.io/<owner>/<repo>/<image>`. Elles sont taguées `<environnement>-<sha court>` (ex. `production-1a2b3c4`), plus `latest` en prod ou `preview`. Le tag porte l'environnement parce que l'image frontend embarque des réglages propres à chacun (URL de l'API, Umami, `robots.txt`).

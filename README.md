@@ -2,17 +2,18 @@
 
 ## Metadata du document
 
-**Responsable:** Data Team DataForGood
+**Owner:** Data Team DataForGood
 
-**Dernière révision:** 2026-05-08
+**Last reviewed:** 2026-10-09
 
-**Statut:** actif
+**Status:** active
 
-### Historique du document
+## Historique du document
 
-| #   | Date       | Auteur        | Observations                                  |
+| #   | Date       | Author        | Observations                                  |
 | --- | ---------- | ------------- | --------------------------------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Révision post implementation module ingestion |
+| 2   | 2026-10-09 | Joel Teixeira | Ajout du guide de promotion preview vers production |
 
 L'objectif de ce projet est de créer une application web qui informera le grand public et les institutions sur les inégalités de genre et raciales dans le cinéma français.
 
@@ -51,6 +52,7 @@ Points d'entrée principaux:
 5. [ml-image/README.md](ml-image/README.md): code de machine learning pour l'analyse automatique des différentes images (frames) de bande-annonces, modèles utilisés, installation et execution.
 6. [docs/repo-documentation-guidelines.md](docs/repo-documentation-guidelines.md): directives pour la documentation projet, structure recommandée, cycle de vie des documents.
 7. [AGENTS.md](AGENTS.md): guide de travail du repository, bonnes pratiques et documents à lire en priorité.
+8. [Promotion preview vers production](docs/runbooks/deploiement-promotion-preview-production.md): déployer en staging, vérifier l’application et promouvoir le commit validé en production.
 
 ## Contribution
 
