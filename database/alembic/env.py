@@ -1,13 +1,9 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-from sqlalchemy import create_engine
-
 from alembic import context
+from sqlalchemy import create_engine, engine_from_config, pool, text
 
-from database.database import Base
-from database.database import DATABASE_URL
+from database.database import DATABASE_SCHEMA, DATABASE_URL, Base
 from database.models import *  # noqa: F403
 
 # this is the Alembic Config object, which provides
@@ -22,12 +18,18 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 engine = create_engine(DATABASE_URL)
 target_metadata = Base.metadata
-config.set_section_option('alembic', 'sqlalchemy.url', DATABASE_URL)
+config.set_section_option("alembic", "sqlalchemy.url", DATABASE_URL)
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
+
+
+def set_schema_search_path(connection) -> None:
+    schema = connection.dialect.identifier_preparer.quote_schema(DATABASE_SCHEMA)
+    connection.execute(text(f"SET search_path TO {schema}, public"))
+    connection.commit()
 
 
 def run_migrations_offline() -> None:
@@ -46,6 +48,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        version_table_schema="public",
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -68,8 +71,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        set_schema_search_path(connection)
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            version_table_schema="public",
         )
 
         with context.begin_transaction():

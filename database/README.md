@@ -1,198 +1,141 @@
-# Data For Good #13 - Révéler les Inégalités dans le Cinéma (RIC) - base de données
+# Base de données
 
+## Metadata du document
 
-## Comment lancer et accéder à la base de données ?
+**Responsable:** Joel Teixeira
 
-Pour lancer la base de données avec le backend:
-* Builder et lancer les containers: `docker-compose up --build -d`
-* Vérifier qu'au moins le conteneur `db` est bien démarré : `docker compose ps`
-* Accéder au container avec `psql`: `docker-compose exec db psql -U postgres`
+**Dernière révision:** 2026-05-08
 
-## Commandes psql utiles
-* `\l` : lister les bases de données
-* `\c ric_db` : se connecter à une base de données
-* `\dt` : lister les tables de la base de donnée en cours
-* `\q` : quitter psql et le container
+**Statut:** actif
 
+### Historique du document
 
-## Comment configurer la base de données ?
+| #   | Date       | Auteur        | Observations           |
+| --- | ---------- | ------------- | ---------------------- |
+| 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 
-### Configuration depuis le backend
-* Lancer le projet: `docker-compose up --build -d`
-* Se connecter au backend: `docker-compose exec backend bash`
-* Lancer les migrations via Alembic: `poetry run alembic -c database/alembic.ini upgrade head`
-* Vérifier que le schéma est à jour: `poetry run alembic -c database/alembic.ini revision --autogenerate -m "Add missing elements"`
+Ce dossier regroupe la configuration PostgreSQL locale, les modèles SQLAlchemy, les migrations Alembic, les scripts de seed et les données historiques utilisées par le projet RIC.
 
-# Seeder la base de données
-* OPTION 1 - seeding de toutes les données - WORK IN PROGRESS
-   - Seeder les films CNC :
-   `poetry run python -m database.seed.seed_cnc_movies`
+## Role du dossier
 
-   - Seeder les données Allociné :
-   `poetry run python -m database.seed.seed_allocine_movies_details`
+`database/` décrit et alimente les tables applicatives `ric_*` consommées par le backend FastAPI. Il ne contient pas la nouvelle couche Airbyte/dbt, qui vit dans `ingestion/`.
 
-   - Seeder les récompenses de films (il est nécessaire de seeder les infos CNC et allociné avant):
-   `poetry run python -m database.seed.seed_film_awards`
+Le flux actuel reste principalement manuel:
 
-   - Seeder les prédictions du machine learning sur les posters :
-   `poetry run python -m database.seed.seed_poster_predictions`
+1. les données source ou scrapées sont stockées dans `database/data/`;
+2. les scripts `database/seed/seed_*.py` lisent ces fichiers;
+3. les scripts créent ou mettent à jour les tables `ric_*` via SQLAlchemy;
+4. le backend lit ensuite ces tables avec ses repositories.
 
-   - Seeder les prédictions du machine learning sur les trailers :
-   `poetry run python -m database.seed.seed_trailer_predictions`
+## Structure
 
-* OPTION 2 - seeder un sample de données pour 5 films
-   * ATTENTION: ce script supprime toutes les données existantes sur la base actuelle
-   * Depuis le container backend: `poetry run python database/data/sample/seed_sample.py`
-
-### Configuration manuelle avec des scripts - option dépréciée
-La base de données est automatiquement initialisée au premier démarrage avec les scripts SQL suivants :
-
-1. `0_init_database.sql` : Crée le schéma et les tables de la base de données
-2. `1_insert_festivals.sql` : Insère les données des festivals de cinéma
-3. `2_insert_realisateurs.sql` : Insère les données des réalisateurs
-
-Ces scripts sont exécutés automatiquement dans l'ordre alphabétique lors du premier démarrage du conteneur PostgreSQL. Cette exécution est gérée par Docker, qui lance tous les scripts `.sql` présents dans le dossier `/docker-entrypoint-initdb.d/` du conteneur.
-
-## Comment expérimenter avec Jupyter ?
-
-* Lancer le projet: `docker-compose up --build -d`
-* Se connecter au backend: `docker-compose exec backend bash`
-* Lancer jupyter: `poetry run jupyter notebook --ip 0.0.0.0 --port 8888 --allow-root --NotebookApp.token='' --NotebookApp.password=''`
-* Se rendre sur l'url suivant: `http://localhost:8888/tree/database/notebooks`
-* Créer ou modifier des fichiers notebook
-
-
-## Comment faire du scraping sur le projet ?
-
-* Pour scraper la resource Mubi, il était nécessaire de valider certains éléments
-   * Scraper depuis un navigateur (type chrome), car les données apparaissent dynamiquement
-   => Voir comment faire plus bas
-   * Associer des informations humaines à ce navigateur
-   => Voir classe associée (AsyncBrowserSession)[database/data/scraping_browser.py]
-   * Mettre des délais de temps de réponse après chargement de la page et des scroll
-   => Voir classe associée (AsyncBrowserSession)[database/data/scraping_browser.py]
-* Comment lancer un navigateur avec notre structure de code
-   * Rajouter un container dans le `docker-compose.yaml`
-   ```
-   backend:
-   ...
-      environment:
-      - ...
-      - PLAYWRIGHT_WS_ENDPOINT=ws://chromium:3000  # Way to connect to Chromium
-      depends_on:
-         - db
-         - chromium
-   
-   chromium:
-      image: browserless/chrome
-      restart: always
-      ports:
-         - "3000:3000"
-      environment:
-         - PREBOOT_CHROME=true
-         - CONNECTION_TIMEOUT=60000
-         - MAX_CONCURRENT_SESSIONS=5
-   ```
-   * Lancer le projet de manière habituelle: `docker-compose up --build`
-   Attention : la création de l'image chromium est longue
-
-
-## Informations de Connexion
-- Host : localhost
-- Port : 5432
-- Base de données : ric_db
-- Utilisateur : postgres
-- Mot de passe : postgres
-
-
-## Utilisation de DBeaver (Interface Graphique)
-
-1. Installer DBeaver :
-```bash
-# Pour Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install dbeaver-ce
+```text
+database/
+|-- alembic/                  # environnement Alembic et migrations versionnées
+|-- data/                     # données source, scrapers historiques, CSV intermédiaires
+|-- models/                   # modèles SQLAlchemy des tables applicatives ric_*
+|-- seed/                     # scripts d'insertion ou mise a jour en base
+|-- database.py               # engine SQLAlchemy, SessionLocal, Base et get_db
+|-- alembic.ini               # configuration Alembic
+`-- Dockerfile                # image PostgreSQL locale basee sur postgres:16-alpine
 ```
 
-2. Configurer la connexion dans DBeaver :
-   - Cliquer sur "Nouvelle Connexion"
-   - Sélectionner "PostgreSQL"
-   - Remplir les champs avec les informations suivantes :
-     * Serveur : localhost
-     * Port : 5432
-     * Base de données : ric_db
-     * Nom d'utilisateur : postgres
-     * Mot de passe : postgres
-   - Tester la connexion avec le bouton "Tester la connexion"
-   - Valider pour sauvegarder
+## Configuration SQLAlchemy
 
-3. Fonctionnalités utiles de DBeaver :
-   - Explorateur de tables
-   - Éditeur SQL
-   - Visualisation des données
-   - Export/Import de données
+`database.py` charge `DATABASE_URL` et `DATABASE_SCHEMA` depuis l'environnement avec `python-dotenv`, crée l'engine SQLAlchemy, expose `SessionLocal` et déclare `Base`. `DATABASE_SCHEMA` vaut `public` par défaut.
 
-## Exploration avec Jupyter Notebook
+Le backend utilise `get_db()` comme dépendance FastAPI pour ouvrir et fermer une session par requête.
 
-Une alternative à DBeaver est d'utiliser le notebook Jupyter fourni (`exploration.ipynb`).
+Prerequis:
 
-1. Lancer Jupyter Notebook :
 ```bash
-jupyter notebook
+export DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/ric_db
+export DATABASE_SCHEMA=public
 ```
 
-2. Ouvrir le fichier `exploration.ipynb` et exécuter les cellules pour explorer la base de données.
+En local avec `docker-compose.yaml`, la base exposee par defaut est:
 
-## Structure de la Base de Données
+1. host: `localhost`
+2. port: `5432`
+3. database: `ric_db`
+4. user: `postgres`
+5. password: `postgres`
 
-Le schéma `inegalites_cinema` contient les tables suivantes :
+## Modeles SQLAlchemy
 
-### Table `film`
-- Stocke les informations sur les films
-- Contient des détails comme le titre, la date de sortie, le pays, etc.
+Les modèles dans `database/models/` représentent les tables applicatives:
 
-### Table `realisateur`
-- Contient les informations sur les réalisateurs
-- Inclut des données biographiques et démographiques
+1. `ric_films`: films, données CNC, identifiants externes Allocine/MUBI, métadonnées principales.
+2. `ric_countries`: pays.
+3. `ric_genres` et `ric_films_genres`: genres et table d'association film/genre.
+4. `ric_credit_holders`: personnes ou societes creditees.
+5. `ric_roles`: rôles métier, rôles Allocine et libellés inclusifs.
+6. `ric_film_credits`: association film/rôle/personne ou société.
+7. `ric_film_country_budget_allocations`: repartition de budget par pays.
+8. `ric_festivals`, `ric_festival_awards`, `ric_award_nominations`: festivals, prix et nominations.
+9. `ric_posters`, `ric_poster_characters`: affiches et predictions de personnages sur affiches.
+10. `ric_trailers`, `ric_trailer_characters`: bandes-annonces et predictions de personnages sur trailers.
 
-### Table `festival`
-- Répertorie les festivals de cinéma
-- Stocke les informations de localisation et historiques
+## Migrations Alembic
 
-## Arrêt et Redémarrage de PostgreSQL
+`database/alembic/versions/` contient les migrations qui créent et font évoluer les tables `ric_*`.
 
-### Arrêt Sécurisé
-Pour arrêter PostgreSQL tout en conservant les données :
+Commandes usuelles depuis la racine du repo:
+
 ```bash
-# Arrêter le conteneur sans supprimer les volumes
-docker compose stop
+poetry run alembic -c database/alembic.ini upgrade head
+poetry run alembic -c database/alembic.ini revision --autogenerate -m "description"
 ```
 
-### Redémarrage
-Pour redémarrer le service après un arrêt :
+Alembic importe `database.models` dans `database/alembic/env.py`, donc les nouveaux modèles doivent être exportés/importables depuis ce package pour être pris en compte par l'autogénération.
+
+## Donnees et extractions
+
+`database/data/` contient les sources historiques et scripts de collecte:
+
+1. `cnc/`: fichier Excel CNC versionné et script d'extraction `extract_cnc_data_from_excel.py`.
+2. `allocine/`: matcher, enricher, parser BeautifulSoup et CLI `allocine_runner.py`.
+3. `mubi/`: classes de scraping MUBI et export `films_all_awards.csv`.
+4. `machine_learning_predictions/`: CSV de predictions poster/trailer produits par la pipeline ML.
+5. `sample/`: données de sample et seed minimal.
+6. `scraping_browser.py`: session Playwright asynchrone connectée à un Chromium distant via `PLAYWRIGHT_WS_ENDPOINT`.
+
+Voir aussi:
+
+1. [database/data/README.md](data/README.md)
+2. [database/data/allocine/README.md](data/allocine/README.md)
+3. [database/data/mubi/README.md](data/mubi/README.md)
+
+## Scripts de seed
+
+Les scripts dans `database/seed/` alimentent les tables applicatives depuis les fichiers versionnés ou générés:
+
+1. `seed_cnc_movies.py`: lit le fichier Excel CNC nettoyé et crée les films, allocations budgétaires et certains crédits diffuseurs.
+2. `seed_allocine_movies_details.py`: lit `database/data/allocine/allocine_matches_enriched.csv`, met à jour les films et crée genres, trailers, posters et crédits Allocine.
+3. `seed_film_awards.py`: lit `database/data/mubi/films_all_awards.csv`, matche les films et crée festivals, prix et nominations.
+4. `seed_poster_predictions.py`: lit `database/data/machine_learning_predictions/poster_predictions.csv` et recrée les personnages d'affiches.
+5. `seed_trailer_predictions.py`: lit `database/data/machine_learning_predictions/trailer_predictions.csv` et recrée les personnages de trailers.
+
+Exemples:
+
 ```bash
-docker compose start
+poetry run python -m database.seed.seed_cnc_movies
+poetry run python -m database.seed.seed_allocine_movies_details
+poetry run python -m database.seed.seed_film_awards
+poetry run python -m database.seed.seed_poster_predictions
+poetry run python -m database.seed.seed_trailer_predictions
 ```
 
-### Vérification du Statut
-Pour vérifier l'état du conteneur :
-```bash
-docker compose ps
-```
+Attention: certains seeders mettent à jour ou suppriment/recréent des données sur leur périmètre. Vérifier la base cible via `DATABASE_URL` avant exécution.
 
-Ces commandes préservent les données car :
-- `stop` arrête proprement le conteneur sans supprimer les volumes
-- Les données sont persistées dans le volume `./database/data`
-- `start` redémarre le conteneur en utilisant les volumes existants
+## Limites actuelles
 
-## En Cas de Problème
+1. La chaîne d'alimentation reste manuelle et basée sur des CSV intermédiaires.
+2. Les scrapers Allocine/MUBI sont encore dans `database/data/`, même si la cible documentée prévoit une intégration future avec Airbyte ou une orchestration dédiée.
+3. Le backend lit encore les tables `ric_*` directement, pas des marts dbt curated.
+4. Les notebooks ne sont pas testes automatiquement.
+5. Les données versionnées incluent des exports intermédiaires qui peuvent devenir obsolètes.
 
-Pour réinitialiser complètement la base de données :
-```bash
-docker compose down -v
-docker compose up -d
-```
+## Referenced by
 
-## Contact
-
-Pour tout autre problème, vous pouvez me contacter à : joelteixeira26@gmail.com
+- [README.md](../README.md)
