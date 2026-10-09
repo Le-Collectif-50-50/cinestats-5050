@@ -16,6 +16,7 @@
 | 2   | 2026-05-26 | Joel Teixeira | Alignement avec le flow Prefect actuel et la phase dbt post-scraping exécutable |
 | 3   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement. Alignement des modèles dbt post-scraping sur le code actuel |
 | 4   | 2026-10-09 | Joel Teixeira | Correction du passage de configuration dans la commande `read`, qui échouait avec un `TypeError` avant le scraping |
+| 5   | 2026-10-09 | Joel Teixeira | Copie des helpers de date et durée dans ingestion pour démarrer sans package backend |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -26,10 +27,24 @@ Objectif: remplacer le handoff CSV historique dans `database/data/allocine/` par
 1. Lit actuellement les films candidats depuis `raw.id_matching`.
 2. Crée automatiquement la table mémoire de sortie si elle n'existe pas encore.
 3. Lit les lignes déjà réussies dans `raw.allocine_data` pour ignorer les enregistrements déjà traités.
-4. Réutilise le parseur HTML Allociné historique et la session navigateur Playwright:
-   - `database/data/allocine/allocine_scraper.py`
-   - `database/data/scraping_browser.py`
+4. Utilise le parseur HTML Allociné et la session navigateur Playwright du package ingestion :
+   - `ingestion/scraping/allocine/allocine_scraper.py`
+   - `ingestion/scraping/browser.py`
 5. Ecrit un enregistrement normalisé par film dans la table `allocine_data`.
+
+## Dépendances du runtime
+
+Le connecteur utilise `ingestion/scraping/date_utils.py` pour convertir les dates françaises et les durées. Ce module contient une copie de `parse_release_date` et `parse_duration` du backend, avec le même comportement. Les fonctions originales restent dans le backend pour ses consommateurs.
+
+Le démarrage du scraper ne nécessite pas le package `backend`. La dépendance `dateparser` est déjà déclarée dans `requirements.txt` et installée dans l'image Prefect. Toute évolution de ces conversions doit tenir compte des deux copies.
+
+Pour vérifier les conversions et le démarrage CLI avec une copie isolée du package ingestion, après installation des dépendances du scraper et de `pytest`, depuis la racine du dépôt :
+
+```bash
+python3 -m pytest -q tests/ingestion/test_allocine_date_utils.py
+```
+
+Ce test lance `spec` sans backend, sans connexion PostgreSQL et sans démarrer de navigateur.
 
 ## Contrat de sortie
 
