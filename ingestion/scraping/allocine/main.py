@@ -128,7 +128,7 @@ def main() -> int:
     catalog = _load_json(args.catalog_path)
     _ = _load_json(args.state_path)
 
-    for record in source.read(config=config, catalog=catalog):
+    for record in source.read(raw_config=config, catalog=catalog):
         _emit(
             {
                 "type": "RECORD",

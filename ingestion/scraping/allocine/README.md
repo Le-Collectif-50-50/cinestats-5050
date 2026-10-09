@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Last reviewed:** 2026-10-06
+**Last reviewed:** 2026-10-09
 
 **Status:** active
 
@@ -14,8 +14,8 @@
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-26 | Joel Teixeira | Alignement avec le flow Prefect actuel et la phase dbt post-scraping exécutable |
-| 3   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement |
-| 4   | 2026-10-06 | Joel Teixeira | Alignement des modèles dbt post-scraping sur le code actuel |
+| 3   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement. Alignement des modèles dbt post-scraping sur le code actuel |
+| 4   | 2026-10-09 | Joel Teixeira | Correction du passage de configuration dans la commande `read`, qui échouait avec un `TypeError` avant le scraping |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -108,6 +108,8 @@ Index créés au bootstrap:
 3. `extracted_at`
 
 ## Commands
+
+La commande `read` transmet la configuration au connecteur via son paramètre `raw_config` et émet les résultats en messages JSON `RECORD` sur la sortie standard. La commande `sync`, utilisée par Prefect, écrit les résultats en base.
 
 Depuis la racine du repo:
 

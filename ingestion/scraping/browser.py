@@ -217,6 +217,8 @@ class AsyncBrowserSession:
                     )
                 await asyncio.sleep(delay_seconds)
 
+        raise RuntimeError("CDP connection retries exhausted")
+
     async def __aenter__(self):
         """Setup browser session with anti-bot scripts and open a new page."""
         self.playwright = await async_playwright().start()
