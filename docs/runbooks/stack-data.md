@@ -1,6 +1,19 @@
 # Runbook — Stack data (VPS data)
 
-Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Elle vient de la branche `analytics/dbt_airbyte_setup` : son propre runbook (`docs/runbooks/ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md` sur cette branche) décrit le parcours, celui-ci en consigne les **écarts** et l'état réel.
+**Owner:** Nicolas Revel
+
+**Last reviewed:** 2026-10-09
+
+**Status:** active
+
+## Historique du document
+
+| # | Date | Author | Observations |
+|---|---|---|---|
+| 2 | 2026-10-09 | Nicolas Revel | Première version du runbook | 
+| 2 | 2026-10-09 | Data Team DataForGood | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
+
+Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 
 Prérequis : `00-base.sh`, `10-wireguard.sh spoke` et `20-docker.sh data` faits sur le VPS (voir `securisation-vps-prod.md`), ainsi que `30-postgres.sh` sur `db`.
 
@@ -22,6 +35,15 @@ Depuis ton poste, à la racine du dépôt :
 git fetch origin
 infra/data/deploy-ingestion.sh            # ou : infra/data/deploy-ingestion.sh <ref-git>
 ```
+
+Pour livrer les changements fusionnés dans `main`, passer explicitement cette référence :
+
+```bash
+git fetch origin main
+infra/data/deploy-ingestion.sh origin/main
+```
+
+La copie conserve aussi `__pycache__/`, `dbt/target/`, `dbt/logs/` et `airbyte/json_credentials/`. Les fichiers générés par Docker peuvent appartenir à root : leur exclusion évite les erreurs de suppression rsync et préserve les credentials Google. Le script copie le code ; reconstruire ensuite l'image et recréer les services concernés selon la section 4. Pour un worker déjà actif, attendre la fin des runs en cours avant son arrêt et son remplacement.
 
 Le script copie `ingestion/` d'un commit précis (par défaut `origin/analytics/dbt_airbyte_setup`) dans `~/cinestats-data/` et y ajoute `infra/data/docker-compose.override.yml`. Il note le commit dans `~/cinestats-data/DEPLOYED_REF`. Il ne démarre rien et n'écrase jamais le `.env`.
 

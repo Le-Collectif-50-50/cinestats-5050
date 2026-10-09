@@ -26,7 +26,14 @@ echo "==> Copie de ingestion/ (${SHA:0:7}) vers $HOST:~/$REMOTE_DIR"
 # REMOTE_DIR est une constante : le développement côté client est voulu.
 # shellcheck disable=SC2029
 ssh "$HOST" "mkdir -p ~/$REMOTE_DIR/ingestion"
-rsync -a --delete --exclude '.env' -e ssh "$TMP/ingestion/" "$HOST:$REMOTE_DIR/ingestion/"
+# Preserve runtime files created by containers (often owned by root) and secrets.
+rsync -a --delete \
+  --exclude '.env' \
+  --exclude '__pycache__/' \
+  --exclude '/dbt/target/' \
+  --exclude '/dbt/logs/' \
+  --exclude '/airbyte/json_credentials/' \
+  -e ssh "$TMP/ingestion/" "$HOST:$REMOTE_DIR/ingestion/"
 scp -q infra/data/docker-compose.override.yml "$HOST:$REMOTE_DIR/ingestion/docker-compose.override.yml"
 scp -q infra/data/.env.example "$HOST:$REMOTE_DIR/env.template"
 
