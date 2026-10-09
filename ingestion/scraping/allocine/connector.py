@@ -15,8 +15,8 @@ from urllib.parse import quote_plus
 
 from sqlalchemy import bindparam, create_engine, text
 
-from backend.utils.date_utils import parse_duration, parse_release_date
 from ingestion.scraping.browser import WebsiteBlockedError
+from ingestion.scraping.date_utils import parse_duration, parse_release_date
 
 print = partial(builtins.print, flush=True)
 
