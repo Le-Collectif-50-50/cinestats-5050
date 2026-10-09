@@ -2,17 +2,18 @@
 
 ## Metadata du document
 
-**Responsable:** Nicolas Revel
+**Owner:** Nicolas Revel
 
-**Dernière révision:** 2026-05-08
+**Last reviewed:** 2026-10-09
 
-**Statut:** actif
+**Status:** active
 
-### Historique du document
+## Historique du document
 
-| #   | Date       | Auteur        | Observations           |
+| #   | Date       | Author        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
+| 2   | 2026-10-09 | Joel Teixeira | Fond partagé avec sélection AVIF, WebP et repli JPEG |
 
 ## Prérequis
 
@@ -81,6 +82,30 @@ Next.js est un framework React qui fournit :
 - Les ressources statiques vont dans le répertoire `public`
 - Fractionnement automatique du code
 - Remplacement à chaud des modules
+
+## Image de fond
+
+Les pages d’accueil (`/`) et de présentation (`/about`) utilisent le composant
+`src/components/atoms/BackgroundImage.tsx`. Son élément `<picture>` propose,
+dans cet ordre, `public/home.avif`, `public/home.webp`, puis `public/home.jpg`.
+Le navigateur sélectionne le premier format pris en charge. Ce repli concerne
+la compatibilité des formats, pas les erreurs HTTP : les trois fichiers doivent
+être présents lors du déploiement.
+
+Les variantes conservent la résolution de 1920 × 1013 pixels. Le JPEG original
+pèse environ 1 992 kB, le WebP (qualité 90) 311 kB et l’AVIF (qualité 80) 287 kB.
+Ces deux variantes utilisent une compression avec perte ; elles ne sont pas
+strictement identiques au JPEG décodé. Le fond conserve son opacité de 0,3,
+son cadrage en haut et son positionnement fixe. L’image est décorative et son
+chargement est immédiat, avec une priorité élevée.
+
+Pour vérifier localement, ouvrir `/` et `/about`, puis filtrer les requêtes réseau
+sur `home.` : un navigateur compatible AVIF doit charger `home.avif` sans charger
+également les variantes WebP et JPEG. Vérifier le cadrage sur mobile et ordinateur.
+Pour contrôler les replis dans les outils de développement, retirer temporairement
+la source AVIF, puis la source WebP : l’image doit rester visible avec le format
+suivant. Cette manipulation vérifie la chaîne de sélection ; elle ne remplace pas
+un test sur un ancien navigateur.
 
 ## Guide de Développement
 

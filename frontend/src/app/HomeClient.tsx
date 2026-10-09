@@ -3,19 +3,13 @@
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useSearchContext } from "@/contexts/SearchContext";
+import BackgroundImage from "@/components/atoms/BackgroundImage";
 
 export default function HomeClient() {
   const { openSearch } = useSearchContext();
   return (
     <>
-      <div
-        className="background-image"
-        style={
-          {
-            "--background-image-url": `url('/home.jpg')`,
-          } as React.CSSProperties
-        }
-      ></div>
+      <BackgroundImage />
       <main
         className="container h-full mx-auto px-4 pt-64 md:pt-96 flex flex-col items-center justify-center text-center text-white"
         style={{ background: "unset" }}
