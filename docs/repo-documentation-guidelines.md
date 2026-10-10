@@ -4,15 +4,16 @@
 
 **Responsable:** Joel Teixeira
 
-**Dernière révision:** 2026-05-08
+**Dernière révision:** 2026-10-10
 
 **Statut:** actif
 
-### Historique du document
+## Historique du document
 
 | #   | Date       | Auteur        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
+| 2 | 2026-10-10 | Joel Teixeira | En-têtes d’historique en français : utiliser Auteur. |
 
 ## Introduction
 
@@ -92,9 +93,9 @@ Créer un nouveau document quand :
 Métadonnées requises en haut de chaque document :
 
 - `Owner`
-- `Last reviewed`
-- `Status` (`draft`, `active`, `deprecated`, `obsolete`)
-- Un historique du document sous forme de tableau avec les colonnes `#`, `Date`, `Author`, `Observations`. Ne jamais signer comme un assistant IA seulement. Utiliser plutot le format `John Doe` ou `John Doe (avec IA)` si assisté par IA. L'assistant IA doit demander confirmation avant d'ajouter l'indication IA.
+- `Dernière révision`
+- `Status` (`bouillon`, `actif`, `deprecated`, `obsolete`)
+- Un historique du document sous forme de tableau avec les colonnes `#`, `Date`, `Auteur`, `Observations`. Ne jamais signer comme un assistant IA seulement. Utiliser plutot le format `John Doe` ou `John Doe (avec IA)` si assisté par IA. L'assistant IA doit demander confirmation avant d'ajouter l'indication IA. On évite d'avoir plusieurs lignes avec la meme date. On complemente les observations déjà existantes si possible. 
 
 
 ### 4.2 Rédaction
@@ -184,7 +185,7 @@ Pour chaque PR de documentation :
 1. Revue technique par le responsable de la fonctionnalité.
 2. Revue de lisibilité par quelqu'un hors implémentation.
 3. Validation des liens / commandes.
-4. Vérification de la présence des métadonnées (`owner`, `last reviewed`, `status`).
+4. Vérification de la présence des métadonnées (`owner`, `Dernière révision`, `status`).
 
 ## 8. Modèles (Recommandé)
 
@@ -213,7 +214,7 @@ Utiliser des vérifications CI pour imposer la qualité documentaire :
 - Vérification des liens.
 - Vérification orthographique.
 - Vérification optionnelle de couverture documentaire (ex. : chaque service doit avoir un `README.md`).
-- Alertes optionnelles sur les docs obsolètes selon la date `Last reviewed`.
+- Alertes optionnelles sur les docs obsolètes selon la date `Dernière révision`.
 
 ## 10. Recommandations De Gouvernance
 

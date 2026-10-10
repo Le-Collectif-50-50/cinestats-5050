@@ -2,15 +2,15 @@
 
 ## Metadata du document
 
-**Owner:** Nicolas Revel
+**Resonsable** Nicolas Revel
 
-**Last reviewed:** 2026-10-09
+**Dernière révision:** 2026-10-09
 
 **Status:** active
 
 ## Historique du document
 
-| #   | Date       | Author        | Observations           |
+| #   | Date       | Auteur        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-10-09 | Joel Teixeira | Tests de compatibilité FastAPI/AnyIO et signature Metabase lors des mises à jour de dépendances |

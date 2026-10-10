@@ -1,12 +1,12 @@
 # Déploiement
 
-**Owner:** Data Team DataForGood
-**Last reviewed:** 2026-10-09
+**Resonsable** Data Team DataForGood
+**Dernière révision:** 2026-10-09
 **Status:** active
 
 ## Historique du document
 
-| # | Date | Author | Observations |
+| # | Date | Auteur | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-10-09 | Joel Teixeira | Ajout du parcours de validation en preview et clarification des branches sources de promotion. |
 

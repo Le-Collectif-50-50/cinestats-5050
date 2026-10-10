@@ -1,12 +1,12 @@
 # Valider en preview avant de promouvoir en production
 
-**Owner:** Data Team DataForGood
-**Last reviewed:** 2026-10-09
+**Resonsable** Data Team DataForGood
+**Dernière révision:** 2026-10-09
 **Status:** active
 
 ## Historique du document
 
-| # | Date | Author | Observations |
+| # | Date | Auteur | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-10-09 | Joel Teixeira | Procédure de promotion, validation en preview et contrôle du commit avant production. |
 

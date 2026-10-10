@@ -2,15 +2,15 @@
 
 ## Metadata du document
 
-**Owner:** Joel Teixeira
+**Resonsable** Joel Teixeira
 
-**Last reviewed:** 2026-10-06
+**Dernière révision:** 2026-10-06
 
 **Status:** active
 
 ## Historique du document
 
-| #   | Date       | Author        | Observations           |
+| #   | Date       | Auteur        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-26 | Joel Teixeira | Alignement avec l'orchestration Prefect actuelle, le poller Metabase et le statut Airbyte/dbt phase 2 |
