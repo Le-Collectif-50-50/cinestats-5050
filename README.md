@@ -4,7 +4,7 @@
 **Dernière révision:** 2026-10-10
 **Status:** active
 
-Projet Data For Good et Collectif 50/50 : informer le grand public et les institutions sur les inégalités de genre et raciales dans le cinéma français.
+Projet Data For Good et Collectif 50/50 : informer le grand public et les institutions sur les inégalités de genre dans le cinéma français.
 
 ## Architecture et documentation
 

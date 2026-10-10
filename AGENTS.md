@@ -6,7 +6,7 @@
 
 ## Contexte et lecture ciblée
 
-RIC révèle les inégalités de genre et raciales dans le cinéma français.
+RIC révèle les inégalités de genre dans le cinéma français.
 Ce fichier est la source commune des consignes ; `CLAUDE.md` l'importe.
 Lire le [README](README.md) pour la vue d'ensemble, puis uniquement les documents utiles à la tâche. Suivre leurs liens si nécessaire, sans charger toute la documentation.
 
