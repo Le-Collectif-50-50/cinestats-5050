@@ -1,355 +1,187 @@
-# ML Image Analysis Pipeline Documentation
-
-## Metadata du document
-
-**Responsable:** Julien Commes
-
-**Dernière révision:** 2026-05-08
-
-**Statut:** actif
-
-### Historique du document
-
-| #   | Date       | Auteur        | Observations           |
-| --- | ---------- | ------------- | ---------------------- |
-| 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
-
-## Overview
-
-This pipeline performs automated face detection, classification, and demographic analysis on movie trailers and posters. It uses computer vision and machine learning models to identify characters, cluster them across frames, and extract demographic information (gender, age, ethnicity).
-
-## Pipeline Architecture
-
-The pipeline consists of three main processing stages:
-
-1. **Trailer Analysis** - Process video frames to detect and classify faces
-2. **Poster Analysis** - Process poster images and match faces to trailer characters
-3. **Aggregation & Storage** - Combine results and save predictions
-
----
-
-## 1. Trailer Analysis Pipeline (`infer_on_trailer`)
-
-### Step 1: Frame Extraction
-
-- Extract all frames from the video trailer
-- Capture frame rate (fps) for temporal analysis normalisation (24 appearances at 24 fps is not the same as 24 appearances at 50fps)
-
-### Step 2: Constant Initialization
-
-- Calculate original video dimensions (height, width)
-- Compute effective detection area
-- Initialize parameters based on movie ID and mode (we compute video sharpness to compare later with detected face sharpness [NOT USED ACTUALLY])
-
-### Step 3: Face Detection
-
-- Use vision detection models (YOLO) to identify faces in all frames
-- Detect bounding boxes [with configurable expansion factor - to be merged]
-- Process in batches for efficiency (GPU/CPU)
-
-### Step 4: Filtering (Pre-Classification)
-
-We exclude here detected faces with very low quality.
-
-- Filter detections based on:
-  - Minimum area threshold
-  - Maximum area threshold
-  - Minimum confidence score
-- Exclude detections outside effective area
-- **Memory optimization**: Delete original detections
-
-### Step 5: Face Classification
-
-- Classify filtered faces for demographic attributes
-- Extract demographic features:
-  - Gender
-  - Age
-  - Ethnicity
-- **Memory optimization**: Clear filtered detections after classification
-
-### Step 6: Face Quality scoring
-
-- Compute quality scores based of the following criteria:
-  - Minimum classification confidence
-  - Minimum sharpness score
-  - Maximum "z-score" (person facing camera, or not, by calculating nose tip z-orientation) [to not be confused with z-score of statistical deviation]
-- These scores are used later (in Step 8.) for ponderation.
-
-### Step 7: Face Embedding
-
-- Generate embeddings for face recognition
-- Convert faces to high-dimensional vectors for clustering
-- **Memory optimization**: Delete flattened faces after embedding
-
-### Step 8: Face Clustering and Attributes Computing
-
-- Group faces belonging to the same character across frames
-- Use configurable clustering model (ChineseWhispers) and threshold
-- Aggregate predictions per character:
-  - Weighted Average demographic attributes (using scores weights from Step 6.)
-  - Track person IDs
-  - Calculate temporal presence (accordingly to video frame-rate)
-  - Compute screen time and area
-- Exclude clusters with very low number of faces detected (threshold as parameter)
-
-### Step 9: Visual Output (Optional)
-
-- If `store_visuals` is enabled:
-  - Draw bounding boxes on frames
-  - Annotate with demographic predictions
-  - Save annotated video
-
-### Step 10: Memory Cleanup
-
-- Delete intermediate variables
-- Clear CUDA cache (if using GPU)
-- Free memory for next processing
-
-### Output
-
-- `aggregated_estimations`: List of character clusters with demographic data
-- `embedded_faces`: Face embeddings generated in this pipeline will be reuse in poster matching
-- `flattened_faces_perso_ids`: Person IDs corresponding to each embedding
-
----
-
-## 2. Poster Analysis Pipeline (`infer_on_poster`)
-
-### Step 1: Constant Initialization
-
-- Calculate poster dimensions
-- Compute total area for area calculations
-
-### Step 2: Face Detection
-
-- Detect faces in poster image (YoLo)
-- Single batch processing (posters are static images)
-
-### Step 3: Filtering
-
-- Apply area and confidence thresholds
-- Remove very low-quality detections
-
-### Step 4: Face Embedding
-
-- Extract embeddings for detected poster faces
-- Prepare for matching with trailer embeddings characters
-
-### Step 5: Embedding Filtering
-
-- Extract person IDs from trailer aggregations
-- Filter trailer embeddings to only include selected characters (only those selected on Step8 of `infer_on_trailer`)
-- **Memory optimization**: Clear detection tensors and CUDA cache
-
-### Step 6: Assign Poster
-
-- Compare each poster detected face with each trailer detected embeddings
-
-##### Matching Process
-
-For each face detected in the poster:
-
-1. **Find Closest Match**
-   - Calculate Euclidean distance to all trailer embeddings
-   - Identify the closest character cluster
-
-2. **Assign Demographics**
-   - Match to aggregated trailer estimations
-   - Transfer demographic attributes:
-     - Gender
-     - Age
-     - Ethnicity
-
-3. **Calculate Occupied Area**
-   - Compute relative screen area occupied by face
-   - Normalize by total poster area
-
-4. **Handle Unmatched Faces**
-   - Track faces that don't match any trailer character
-   - Remove from final detections
-
-##### Visual Output (Optional)
-
-- If `store_visuals` is enabled:
-  - Draw predictions on poster
-  - Save annotated poster image
-
-### Output
-
-- `filtered_detections`: Poster faces with assigned demographics
-
----
-
-## 3. Single Item Prediction (`predict_one_item`)
-
-Orchestrates the complete analysis for one movie:
-
-### Steps
-
-1. **Data Loading**
-   - Load poster and trailer from paths or URLs
-   - Extract movie identifier
-
-2. **Device Selection**
-   - Auto-detect GPU availability
-   - Configure CUDA/CPU processing
-
-3. **Trailer Processing**
-   - Call `infer_on_trailer` with all parameters
-   - Get character clusters and embeddings
-
-4. **Poster Processing** (if available)
-   - Call `infer_on_poster` for face detection
-
-5. **Output**
-   - Return trailer aggregations and poster detections
-
----
-
-## 5. Batch Inference Pipeline (`infer_pipeline`)
-
-Processes multiple movies from a CSV file:
-
-### Workflow
-
-1. **Data Preparation**
-   - Load CSV with movie metadata
-   - Select subset based on `istart` and `istop` indices
-
-2. **Memory Profiling** (Optional)
-   - Track GPU memory usage
-   - Log allocation statistics
-
-3. **Batch Processing**
-   - Iterate through each movie row
-   - For each movie:
-     - Load poster and trailer
-     - Run `predict_one_item`
-     - Save predictions to pickle files:
-       - `{movie_id}_poster_predictions.pkl`
-       - `{movie_id}_trailer_predictions.pkl`
-     - Clean up downloaded media files
-     - Clear memory and CUDA cache
-
-4. **Error Handling**
-   - Log errors for individual movies
-   - Continue processing remaining movies
-   - Always clear CUDA cache on error
-
-5. **Final Aggregation**
-   - Gather all prediction files
-   - Combine into final output format
-   - Save consolidated predictions
-
-### Output Files
-
-- Individual predictions: `tmp/stored_predictions/{movie_id}_*.pkl`
-- Final aggregated: `outputs/final_predictions/`
-
----
-
-## Key Configuration Parameters
-
-### Detection Parameters
-
-- `min_area`: Minimum face area threshold
-- `max_area`: Maximum face area threshold
-- `min_conf`: Minimum detection confidence
-- `bbox_expand_factor`: Factor to expand bounding boxes (default: 0.3)
-
-### Classification Parameters
-
-- `min_conf_cla`: Minimum classification confidence
-- `min_sharpness_cla`: Minimum image sharpness
-- `max_z_cla`: Maximum score for nose point z-orientation
-- `min_mouth_opening_cla`: Minimum mouth opening threshold (not used)
-
-### Clustering Parameters
-
-- `cluster_model`: Clustering algorithm to use
-- `cluster_threshold`: Threshold for cluster assignment
-- `agr_method`: Aggregation method for cluster predictions
-
-### Processing Parameters
-
-- `batch_size`: Batch size for model inference
-- `device`: Processing device (auto/cuda/cpu)
-- `num_cpu`: Number of CPU threads
-- `store_visuals`: Whether to save annotated images/videos
-
----
-
-## Memory Management
-
-The pipeline implements aggressive memory management:
-
-1. **Explicit Deletion**
-   - Delete large arrays after use
-   - Clear intermediate results
-
-2. **CUDA Cache Management**
-   - Clear GPU cache after each movie
-   - Synchronize CUDA operations
-   - Monitor memory allocation
-
-3. **Batch Processing**
-   - Process images/frames in configurable batches
-   - Prevent out-of-memory errors
-
-4. **File Cleanup**
-   - Remove downloaded media after processing
-   - Use temporary storage for predictions
-
----
-
-## Output Data Structure
-
-### Trailer Predictions
-
-TODO: UPDATE
-
-```python
-{
-    "persons_ids": [list of frame indices],
-    "gender": "male/female",
-    "age": estimated_age,
-    "ethnicity": "ethnicity_label",
-    "screen_time": seconds,
-    "occupied_area": percentage
-}
+# Pipeline ML image : architecture implémentée et limites
+
+**Owner:** Julien Commes
+**Dernière révision:** 2026-10-10
+**Status:** actif
+
+## Périmètre et niveau de validation
+
+Le module `ml-image` réalise une inférence sur des bandes-annonces et des affiches. Il détecte les visages, estime des attributs, regroupe les détections vidéo et associe les visages d’affiche aux groupes vidéo. Il exporte des fichiers locaux ; il n’insère pas ses résultats en base et ne constitue pas un service API ou un job Prefect.
+
+Ce document décrit le code présent, y compris ses limitations. Pour installer les dépendances et exécuter les tests, suivre le [README ML](../../ml-image/README.md).
+
+| Fonctionnalité | État constaté |
+| --- | --- |
+| Détection, classification, embeddings et regroupement vidéo | Implémentés ; parcours CPU exécuté sur un extrait |
+| Rapprochement affiche/vidéo | Implémenté ; absence de seuil de rejet |
+| Vote pondéré et indicateurs de présence | Implémentés ; formules précisées ci-dessous |
+| Traitement CSV, pickle et exports CSV | Implémentés ; test d’export et test sur un film réussis |
+| Collecte de résultats pour évaluation | Code présent ; mode `eval` non validé de bout en bout |
+| Annotation manuelle et calcul de scores | Fonctions présentes ; intégration incomplète et appels obsolètes |
+| Vidéo annotée | Branche optionnelle présente, non validée |
+| Affiche annotée depuis la CLI | Désactivée dans l’appel de `predict_one_item` |
+| CUDA | Sélection automatique présente ; exécution non validée |
+| Apple MPS | Non implémenté |
+| Nettoyage/profilage explicite de mémoire CUDA | Non implémenté |
+| Validation du schéma CSV et reprise fiable des erreurs | Non implémentées |
+
+Le 10 octobre 2026, le test CPU sur macOS ARM64 a produit deux pickle, trois lignes de personnages vidéo et sept lignes de détections affiche pour un extrait de dix secondes / 240 images de **Natacha, hôtesse de l’air**. Le test confirme le fonctionnement de ce parcours, pas la qualité des classifications, des regroupements ou des correspondances. L’échantillon et les poids sont locaux et non versionnés.
+
+## Organisation du code
+
+| Fichier | Responsabilité |
+| --- | --- |
+| [main.py](../../ml-image/main.py) | Arguments CLI, répertoires et appel du gestionnaire |
+| [pipelines.py](../../ml-image/scripts/pipelines.py) | Modes `infer`/`eval`, traitement d’un film et orchestration vidéo/affiche |
+| [vision_detection.py](../../ml-image/scripts/vision_detection.py) | YOLO, redimensionnement et extraction des visages |
+| [vision_classifiers.py](../../ml-image/scripts/vision_classifiers.py) | FairFace et seuils d’attribution des classes |
+| [filter_detections.py](../../ml-image/scripts/filter_detections.py) | Filtres de sélection, pondération et pose MediaPipe |
+| [faces_clustering.py](../../ml-image/scripts/faces_clustering.py) | FaceNet, Chinese Whispers, vote et rapprochement affiche |
+| [utils.py](../../ml-image/scripts/utils.py) | Médias, extraction des images, calculs de surface et exports |
+| [evaluation_annotation.py](../../ml-image/scripts/evaluation_annotation.py) | Annotation, scores et enregistrement des résultats intermédiaires |
+| [smoke_test.py](../../ml-image/smoke_test.py) | Test CPU sur des copies isolées de deux médias locaux |
+
+`model_architectures.py` contient d’autres architectures, non utilisées par le parcours d’inférence actuel.
+
+## Entrées et orchestration
+
+Depuis `ml-image/`, avec les dépendances et poids disponibles :
+
+```bash
+.venv/bin/python main.py --source /chemin/films.csv --mode infer --istart 0 --istop 1
 ```
 
-### Poster Predictions
+`handler()` accepte uniquement un nom se terminant par `.csv` et les modes `infer` ou `eval`. `istart:istop` est une tranche de lignes, borne de fin exclue. L’aide CLI mentionne d’autres sources, mais le gestionnaire ne les accepte pas.
 
-TODO: UPDATE
+| Colonne | Utilisation |
+| --- | --- |
+| `visa_number` | Noms des médias en cache et rapprochement lors de l’export |
+| `allocine_id` | Identifiant exporté dans les CSV |
+| `allocine_url` | Métadonnée lue par le chargeur |
+| `trailer_url` | URL directe de la vidéo à télécharger |
+| `poster_url` | URL directe de l’affiche à télécharger |
 
-```python
-{
-    "bbox": [x, y, width, height],
-    "gender": "male/female",
-    "age": estimated_age,
-    "ethnicity": "ethnicity_label",
-    "occupied_area": percentage,
-    "cropped_face": numpy_array
-}
-```
+`--column_identifier` vaut `visa_number`. Le téléchargement et l’export continuent toutefois à supposer `visa_number` ; changer cet argument ne rend pas le parcours indépendant de cette colonne. Aucun validateur préalable ne contrôle les colonnes, leurs types ou les URL.
 
----
+`load_data_from_links()` réutilise les fichiers `{visa_number}.mp4` et `{visa_number}.jpg` déjà présents, sinon les télécharge. Il attend les deux médias ; l’affiche facultative décrite dans certains arguments n’est pas gérée par ce chargeur. Les téléchargements n’imposent ni délai maximal ni contrôle du statut HTTP.
 
-## Error Handling
+`predict_one_item()` choisit CUDA si `torch.cuda.is_available()`, sinon CPU. Il appelle successivement `infer_on_trailer()` puis `infer_on_poster()`. Le lanceur de test masque CUDA pour imposer le CPU. MediaPipe peut malgré cela nécessiter un contexte graphique macOS ; ce n’est pas une sélection MPS pour PyTorch.
 
-The pipeline includes robust error handling:
+## Analyse de la bande-annonce
 
-1. **Missing Data**: Skips movies without trailers
-2. **Processing Errors**: Logs errors and continues with next movie
-3. **Memory Errors**: Clears cache and attempts to continue
-4. **Invalid Input**: Validates CSV format and columns
+1. **Lecture complète.** `frame_capture()` charge toutes les images BGR dans un tableau NumPy et lit les FPS OpenCV. Il n’y a ni sous-échantillonnage ni lecture progressive dans la pipeline.
+2. **Surface de référence.** `compute_params()` utilise `largeur × (largeur / 2.478)`. La fonction de détection des bandes noires existe, mais n’est pas appelée ici. Aucun rejet spatial des visages situés hors de cette surface théorique n’est effectué. La netteté globale est calculée sans ajustement actif des seuils.
+3. **Détection.** YOLO Face reçoit des images RGB redimensionnées à 640 × 640, par lots. Les boîtes sont remises à l’échelle d’origine. Le détecteur initialise aussi YOLO personne, même pour une demande de visages. Aucun agrandissement configurable des boîtes n’est implémenté.
+4. **Sélection initiale.** `filter_detections_clustering()` conserve les visages satisfaisant le filtre de surface relative et celui de confiance YOLO.
+5. **Classification.** FairFace/ResNet34 produit des classes et probabilités. Une classe devient `unknown` sous son seuil propre. Les seuils sont des valeurs par défaut de `classify_faces()`, non des options CLI : genre ≈ 0,965932 ; âge ≈ 0,595667 ; ethnie ≈ 0,810392.
+6. **Pondération.** `filter_detections_classifications()` conserve les détections et leur attribue `classification_weight`, nombre de critères satisfaits parmi confiance, netteté et pose, donc de 0 à 3. Malgré le nom `min_conf_cla`, le critère de confiance lit `det['conf']` — la confiance YOLO — et non une probabilité FairFace. La pose utilise la coordonnée z du nez de MediaPipe ; ce n’est pas un z-score statistique. Le critère d’ouverture de bouche n’est pas actif.
+7. **Embeddings et groupes.** FaceNet/InceptionResnetV1, poids VGGFace2, encode les visages en 160 × 160. Chinese Whispers regroupe les vecteurs avec un seuil de 0,92 par défaut. Un groupe est conservé s’il représente au moins 3 % des détections regroupées. Ce minimum est défini dans la fonction, pas exposé dans la CLI.
+8. **Agrégation.** La méthode appelée `majority` additionne les poids par classe et choisit la classe de poids maximal. Il s’agit d’un vote pondéré, pas d’une moyenne de probabilités. `unknown` est retiré du vote dès qu’une autre classe existe. Les égalités, notamment entre poids nuls, n’ont pas de règle de fiabilité supplémentaire.
 
----
+Les crops transmis à FairFace et FaceNet restent BGR : contrairement au détecteur et à MediaPipe, leurs transformations n’effectuent pas explicitement la conversion RGB. Ce point doit être vérifié avant de conclure sur la qualité des prédictions.
 
-## Future Improvements
+### Indicateurs vidéo
 
-1. Evaluate improvements of expanded bounding boxes
-2. Main characters may be too frequent and poluate clusters
-3. Include humans-in-the-loop for labeling process
-4. CHECK FOR LINUX/WINDOWS TORCH ISSUE
+Pour un groupe de `N` détections, la durée exportée vaut `N / fps`. Elle compte les détections, pas les images distinctes. Elle ne mesure pas une durée continue et peut surcompter si plusieurs détections d’une même image sont regroupées.
+
+La surface exportée est `somme(surfaces des boîtes) / (surface de référence × N)`. C’est une fraction moyenne sur les détections du groupe, pas un pourcentage multiplié par 100 ni une moyenne sur toutes les images de la vidéo. `frames_bboxes` ne conserve qu’une boîte par indice d’image si plusieurs détections du groupe partagent cet indice.
+
+`infer_on_trailer()` retourne réellement trois objets : les groupes agrégés, les embeddings et leurs `perso_id`. Certaines annotations de retour du code sont obsolètes.
+
+## Analyse de l’affiche
+
+La détection utilise YOLO Face et la surface réelle `hauteur × largeur`. Le filtre affiche applique uniquement la confiance YOLO ; `min_area` est transmis, mais aucun filtre de surface n’est activé.
+
+Les embeddings d’affiche sont comparés aux embeddings des détections vidéo appartenant aux groupes conservés. Pour chaque visage, `assign_poster()` choisit la détection vidéo la plus proche en distance euclidienne et lui emprunte les attributs de son groupe. Il n’y a pas de classification FairFace indépendante de l’affiche dans ce parcours.
+
+Il n’existe aucun seuil maximal de distance ni contrainte d’association unique. Plusieurs visages d’affiche peuvent recevoir le même groupe. Un visage n’est supprimé comme non associé que lorsqu’aucun candidat n’a pu être choisi ; un candidat éloigné n’est pas rejeté pour cette raison.
+
+`occupied_area` vaut la surface de la boîte divisée par celle de l’affiche. `infer_on_poster()` retourne une liste de détections enrichies.
+
+## Sorties et stockage
+
+Les chemins par défaut sont construits par `main.py` :
+
+| Chemin | Contenu |
+| --- | --- |
+| `tmp/downloaded_media/` | Copies locales des vidéos et affiches |
+| `tmp/stored_predictions/{identifiant}_trailer_predictions.pkl` | Liste des groupes vidéo |
+| `tmp/stored_predictions/{identifiant}_poster_predictions.pkl` | Liste des détections affiche associées |
+| `outputs/final_predictions/predictions_on_trailers.csv` | Agrégation tabulaire vidéo |
+| `outputs/final_predictions/predictions_on_posters.csv` | Agrégation tabulaire affiche |
+| `outputs/intermediate_results/` | Enregistrements du mode `eval` |
+
+Les variables de répertoire sont décrites dans le [README](../../ml-image/README.md#entrée-csv-de-la-pipeline). `infer_pipeline()` sauvegarde les deux pickle avant de supprimer les copies des médias. Ce nettoyage n’est pas garanti en cas d’exception. Le lanceur local utilise un dossier unique par test pour éviter de mélanger les résultats.
+
+`gather_and_save_predictions()` parcourt les fichiers dont le nom contient `poster` ou `trailer` dans le répertoire de prédictions. Il ne limite pas explicitement cette collecte aux fichiers de l’exécution courante : réutiliser un dossier peut mélanger d’anciens résultats ou provoquer un échec de rapprochement avec le CSV source.
+
+### Schéma pickle vidéo
+
+Chaque groupe contient les clés suivantes, avec leur orthographe actuelle :
+
+| Clé | Contenu |
+| --- | --- |
+| `age`, `gender`, `ethnicity` | Classes agrégées, éventuellement `unknown` |
+| `occurence` | Nombre de détections divisé par les FPS |
+| `area occupied` | Fraction de surface moyenne décrite ci-dessus |
+| `label` | Identifiant local du groupe conservé |
+| `frames_bboxes` | Dictionnaire indice d’image → boîte `[x1, y1, x2, y2]` |
+| `perso_ids` | Identifiants des détections appartenant au groupe |
+
+### Schéma pickle affiche
+
+Chaque détection conserve `bbox`, `conf`, `cropped_face` (tableau NumPy BGR), `frame_id`, `perso_id`, `movie_id` et `poster_weight`. Le rapprochement ajoute `gender`, `age`, `ethnicity`, `label` et `occupied_area`. Les boîtes sont des coordonnées de coins, pas `[x, y, largeur, hauteur]`.
+
+### Schémas CSV
+
+Colonnes communes : `visa_number,allocine_id,gender,age_min,age_max,ethnicity`.
+
+- Affiche : colonne supplémentaire `poster_percentage`, fraction de surface malgré son nom.
+- Vidéo : colonnes supplémentaires `time_on_screen` en secondes et `average_size_on_screen` en fraction.
+
+Les identifiants de groupes et les confiances ne sont pas exportés dans ces CSV. `unknown` pour l’âge est converti en bornes `0,0`. L’âge `70+` provoque un échec dans le découpage actuel, qui suppose une chaîne contenant `-`.
+
+## Évaluation et visualisations
+
+`evaluate_pipeline()` appelle la prédiction en mode `eval`. Les fonctions d’enregistrement écrivent `intermediate_results_trailer.csv` et `intermediate_results_poster.csv` ; les attributs agrégés vidéo sont ensuite reportés dans le premier fichier. Ce mode n’appelle pas les exports finaux du mode `infer` et n’effectue pas le même nettoyage des médias.
+
+L’appel final au calcul des scores est commenté. Les helpers d’annotation ne forment pas un parcours validé : par exemple, `get_faces()` appelle `crop_areas_of_interest()` sans son argument requis `movie_id`. `compute_params()` attend le mode `evaluate` pour un export de paramètres, alors que la CLI transmet `eval`.
+
+`--store_visuals` déclenche la branche d’annotation vidéo, qui écrit dans `example/{movie_id}.avi`. Elle n’utilise pas le dossier `outputs/stored_visuals` créé par `main.py` et ne garantit pas la création de `example/`. L’appel affiche force `store_visuals=False` dans `predict_one_item()`. Les fonctions de dessin existent, mais ce parcours n’a pas été testé.
+
+## Paramètres réellement raccordés
+
+| Paramètre | Effet actuel |
+| --- | --- |
+| `--source`, `--mode`, `--istart`, `--istop` | CSV, mode et sélection de lignes |
+| `--batch_size` | Taille des lots de détection/classification/embedding ; défaut 64 |
+| `--num_cpu` | Nombre de threads donné au détecteur ; défaut 8. Le classifieur le remet à 1 par défaut : ce réglage n’est pas globalement stable |
+| `--min_area`, `--max_area` | Surface relative vidéo ; défauts ≈ 0,076229 et 1,0 |
+| `--min_conf` | Confiance de détection vidéo/affiche ; défaut 0,0 |
+| `--min_conf_cla` | Confiance YOLO dans la pondération ; défaut ≈ 0,805975 |
+| `--min_sharpness_cla`, `--max_z_cla` | Netteté et pose dans la pondération ; défauts ≈ 144,397649 et −0,181548 |
+| `--cluster_model`, `--cluster_threshold` | Seul `chinese_whispers` est implémenté ; seuil par défaut 0,92 |
+| `--agr_method` | Seul `majority`, vote pondéré, est implémenté |
+| `--store_visuals` | Vidéo seulement dans l’orchestration actuelle ; désactivé par défaut |
+| `--source_image`, `--min_sharpness`, `--max_z`, `--min_mouth_opening` | Déclarés dans la CLI, non utilisés par le gestionnaire |
+| `--min_mouth_opening_cla` | Transmis mais aucun filtre actif ne l’utilise |
+
+Il n’y a pas d’option CLI `--device` ni `--bbox_expand_factor`.
+
+## Fiabilité et travail restant
+
+Les points suivants sont des limites du code, pas des fonctionnalités disponibles :
+
+- Les vidéos vides, FPS nuls ou listes de détections vides ne sont pas traités systématiquement. Des accès `[0]` figurent même dans des chaînes de logs de niveau debug.
+- Les exceptions par film sont journalisées puis ignorées. Le message « All films … analyzed » peut donc apparaître malgré des films en échec. Il n’existe pas de bilan fiable des réussites et échecs ; le lanceur de test contrôle les fichiers produits.
+- Les images, détections et embeddings restent en mémoire. Les lots limitent certains calculs, mais pas le chargement initial. Aucun profilage GPU, `empty_cache()` ou nettoyage explicite par film n’est implémenté.
+- Les modèles sont recréés lors des appels de traitement ; leur réutilisation entre films n’est pas organisée.
+- Docker utilise les dépendances historiques, une installation CUDA 11.8 et le téléchargement des poids à la construction. Son `ENTRYPOINT` est commenté. Il n’a pas été validé par le test CPU local.
+- La validation qualitative nécessite des annotations de référence, des mesures d’erreur et une revue des conversions de couleurs, des seuils, des votes et des correspondances.
+
+## Historique du document
+
+| # | Date | Auteur | Observations |
+| --- | --- | --- | --- |
+| 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
+| 2 | 2026-10-10 | Joel Teixeira | Audit du code récupéré et du test CPU ; description en français des entrées, calculs, sorties, paramètres actifs et fonctionnalités incomplètes. |

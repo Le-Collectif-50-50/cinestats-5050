@@ -8,7 +8,21 @@
 
 Le module analyse les visages des bandes-annonces, regroupe les détections par personnage et rapproche les visages d’une affiche des personnages détectés. Il exporte des prédictions de genre, de tranche d’âge et d’ethnie. Ces sorties sont des estimations de modèles ; le test de fonctionnement ne mesure pas leur exactitude.
 
-La pipeline récupérée contient l’inférence et les exports. Son évaluation intégrée reste inachevée. La [description d’architecture](../docs/architecture/ml-image-architecture-description-pipeline-phase-1.md) contient encore des comportements non vérifiés, notamment le nettoyage GPU. Elle ne constitue pas une preuve d’exécution.
+L’inférence vidéo/affiche et les exports fonctionnent sur un extrait CPU de test. L’évaluation intégrée reste inachevée ; l’exactitude des prédictions n’a pas été mesurée. La [description d’architecture](../docs/architecture/ml-image-architecture-description-pipeline-phase-1.md) détaille le code implémenté, les schémas de sortie et les limites vérifiées.
+
+La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU. Le lanceur de test impose le CPU. Apple MPS, le profilage GPU et le nettoyage explicite du cache CUDA ne sont pas implémentés. Le module produit des fichiers locaux ; il ne les insère pas en base.
+
+## Repères dans le module
+
+| Fichier | Rôle |
+| --- | --- |
+| `main.py` | CLI et répertoires de travail |
+| `scripts/pipelines.py` | Orchestration par film, par lot et mode d’évaluation |
+| `scripts/vision_detection.py`, `vision_classifiers.py` | Détection YOLO et classification FairFace |
+| `scripts/filter_detections.py`, `faces_clustering.py` | Sélection, pondération, embeddings et regroupement |
+| `scripts/utils.py` | Médias et exports |
+| `scripts/evaluation_annotation.py` | Outils d’annotation et d’évaluation, intégration partielle |
+| `smoke_test.py`, `tests/test_exports.py` | Test sur un film et régression des exports |
 
 ## Installer l’environnement CPU
 
@@ -70,7 +84,7 @@ ml-image/.venv/bin/python ml-image/smoke_test.py \
 
 Le lanceur copie les deux médias dans un répertoire unique `ml-image/tmp/smoke-*`. Les originaux restent intacts, même si la pipeline supprime les copies. Les identifiants `visa_number=1` et `allocine_id=1` sont synthétiques. Aucune insertion en base n’est effectuée.
 
-Le test limite le traitement à un film, deux threads CPU et des lots de quatre images. Toutes les images vidéo sont toutefois chargées en mémoire. Il exige deux fichiers pickle et deux CSV non vides ; un message de succès de la pipeline seule ne suffit pas, car elle intercepte certaines erreurs.
+Le test limite le traitement à un film et des lots de quatre images. Il transmet deux threads CPU au détecteur ; le classifieur remet ensuite ce nombre à un, donc ce n’est pas une limite uniforme pour toutes les étapes. Toutes les images vidéo sont toutefois chargées en mémoire. Il exige deux fichiers pickle et deux CSV non vides ; un message de succès de la pipeline seule ne suffit pas, car elle intercepte certaines erreurs.
 
 Les CSV sont conservés sous `outputs/final_predictions/` dans le répertoire du test. Ils ne prouvent ni la qualité du regroupement ni celle des classifications.
 
@@ -78,7 +92,7 @@ Les CSV sont conservés sous `outputs/final_predictions/` dans le répertoire du
 
 Un accès en transaction SQL `READ ONLY` à la base `preview` a permis de sélectionner **Natacha, hôtesse de l’air** (visa 159573, Allociné 259157). L’affiche est stockée comme URL dans la colonne historique `image_base64`. Les médias et leur provenance sont conservés localement sous `tmp/staging-sample/`, ignoré par Git. La base n’a pas été modifiée.
 
-Après disponibilité du poids FairFace, depuis la racine :
+Avec les poids et cet échantillon local présents, depuis la racine :
 
 ```bash
 ml-image/.venv/bin/python ml-image/smoke_test.py \
@@ -96,9 +110,17 @@ La CLI actuelle accepte `--source fichier.csv --mode infer` ou `--mode eval`. El
 
 `visa_number,allocine_id,allocine_url,trailer_url,poster_url`
 
+Exécution directe depuis `ml-image/` :
+
+```bash
+.venv/bin/python main.py --source /chemin/films.csv --mode infer --istart 0 --istop 1
+```
+
+La borne `istop` est exclue. Le schéma CSV n’est pas validé avant traitement. Conserver `visa_number` comme identifiant : le téléchargement et l’export y font encore référence même si `--column_identifier` est modifié.
+
 `trailer_url` et `poster_url` doivent désigner les médias téléchargeables. Le lanceur local fournit des copies en cache et évite ces téléchargements. `--mode eval` collecte des résultats intermédiaires ; le calcul final des scores n’est pas raccordé.
 
-Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires racines. `PREDICTIONS_FOLDER`, `DOWNLOADED_MEDIA_FOLDER`, `FINAL_PREDICTIONS_FOLDER`, `INTERMEDIATE_FOLDER` et `VISUALS_FOLDER` choisissent leurs sous-répertoires. Le lanceur les isole automatiquement.
+Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires racines. `PREDICTIONS_FOLDER`, `DOWNLOADED_MEDIA_FOLDER`, `FINAL_PREDICTIONS_FOLDER`, `INTERMEDIATE_FOLDER` et `VISUALS_FOLDER` choisissent leurs sous-répertoires. Le lanceur les isole automatiquement. Exception : les fonctions de visualisation écrivent encore dans `example/`, sans utiliser `VISUALS_FOLDER`. La branche affiche force les visualisations à `False`.
 
 ## Limites et dépannage
 
@@ -106,7 +128,10 @@ Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires rac
 - MediaPipe requiert un contexte graphique macOS, même dans ce profil CPU. Le sandbox peut en empêcher la création ; le test natif a été exécuté hors sandbox.
 - Une vidéo vide ou des détections vides peuvent encore faire échouer la pipeline.
 - L’export de la catégorie d’âge `70+` reste à corriger ; l’export actuel attend une plage avec tiret.
-- Le rapprochement affiche/personnage ne dispose pas de seuil maximal de distance.
+- Le rapprochement affiche/personnage ne dispose pas de seuil maximal de distance. L’affiche hérite des attributs vidéo ; elle n’est pas classifiée indépendamment.
+- Les crops FairFace/FaceNet restent BGR sans conversion RGB explicite. La pondération réutilise la confiance YOLO, malgré le nom `min_conf_cla`. Ces points nécessitent une revue qualitative.
+- Réutiliser un dossier de prédictions peut mélanger des exports anciens et nouveaux. Utiliser un répertoire isolé par exécution.
+- Les scores finaux du mode `eval` ne sont pas raccordés ; certains helpers d’annotation utilisent des signatures obsolètes.
 - Le test local ne valide pas Docker ni les dépendances historiques.
 - En cas d’échec, consulter les logs et le répertoire `tmp/smoke-*` annoncé. Ne pas importer les sorties synthétiques dans une base réelle.
 
@@ -115,4 +140,4 @@ Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires rac
 | # | Date | Auteur | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
-| 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Réunification de toutes les branches isolés lié au travail ML. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace. |
+| 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties. |
