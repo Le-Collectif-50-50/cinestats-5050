@@ -94,7 +94,7 @@ Métadonnées requises en haut de chaque document :
 
 - `Owner`
 - `Dernière révision`
-- `Status` (`bouillon`, `actif`, `deprecated`, `obsolete`)
+- `Status` (`brouillon`, `actif`, `deprecated`, `obsolete`)
 - Un historique du document sous forme de tableau avec les colonnes `#`, `Date`, `Auteur`, `Observations`. Ne jamais signer comme un assistant IA seulement. Utiliser plutot le format `John Doe` ou `John Doe (avec IA)` si assisté par IA. L'assistant IA doit demander confirmation avant d'ajouter l'indication IA. On évite d'avoir plusieurs lignes avec la meme date. On complemente les observations déjà existantes si possible. 
 
 
