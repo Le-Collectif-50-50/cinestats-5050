@@ -209,6 +209,11 @@ def infer_pipeline(args, to_predict_df, paths):
                     args.cluster_threshold, args.agr_method, args.store_visuals, paths['dl_media'], poster_path, trailer_path, row=row
                 )
 
+                # Export pour l’éditeur avant suppression des médias et agrégation CSV.
+                if os.getenv("ANNOTATION_EXPORT_DIR"):
+                    from scripts.annotation_export import export_annotation
+                    export_annotation(poster_path, filtered_detections, row, args)
+
                 # Store poster predictions in .pkl file
                 with open(f"{paths['temp_preds']}/{row[args.column_identifier]}_poster_predictions.pkl", 'wb') as outfile:
                     pkl.dump(filtered_detections, outfile)

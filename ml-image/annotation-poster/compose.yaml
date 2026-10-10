@@ -1,0 +1,30 @@
+# Usage local uniquement ; données et configuration séparées du site public RIC.
+services:
+  annotation-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      ANNOTATION_ENABLED: "true"
+      ANNOTATION_DATA_DIR: /data
+      ANNOTATION_DATABASE_URL: ${ANNOTATION_DATABASE_URL:-}
+      ANNOTATION_IMAGE_HOSTS: ${ANNOTATION_IMAGE_HOSTS:-fr.web.img5.acsta.net,fr.web.img6.acsta.net,fr.web.img4.acsta.net}
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5010/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  annotation-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      ANNOTATION_ENABLED: "true"
+      ANNOTATION_API_URL: http://annotation-api:5010
+    ports:
+      - "127.0.0.1:${ANNOTATION_PORT:-3010}:3000"
+    depends_on:
+      annotation-api:
+        condition: service_healthy

@@ -1,0 +1,28 @@
+.editor { max-width: 1500px; margin: 0 auto; padding: 32px 24px; color: #f0f1f3; }
+.editor h1 { font-size: 2rem; font-weight: 650; margin: 8px 0; }
+.editor h2 { font-size: 1.4rem; font-weight: 600; }
+.editor h3 { font-weight: 600; }
+.eyebrow { color: #77decc; letter-spacing: .12em; font-size: .75rem; }
+.toolbar, .heading, .validation { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.heading { justify-content: space-between; }
+.editor label { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: .9rem; }
+.editor button, .editor select, .editor input:not([type=checkbox]):not([type=range]), .editor textarea, .editor a { background: #232931; border: 1px solid #505966; border-radius: 6px; padding: 8px 12px; color: #fff; }
+.editor button, .editor a { cursor: pointer; }
+.editor button:hover, .editor button[aria-pressed=true] { border-color: #77decc; background: #19483e; }
+.editor button:disabled { opacity: .4; cursor: default; }
+.editor :focus-visible { outline: 2px solid #77decc; outline-offset: 3px; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; }
+.viewport { height: 75vh; overflow: auto; background: #171b21; border: 1px solid #414955; border-radius: 8px; }
+.viewport svg { display: block; max-width: none; }
+.panel { background: #171b21; border: 1px solid #414955; border-radius: 8px; padding: 16px; max-height: 75vh; overflow: auto; }
+.faces { display: grid; gap: 6px; margin: 12px 0; }
+.faces button { text-align: left; font-size: .8rem; }
+.fields { display: grid; gap: 12px; border-top: 1px solid #414955; padding-top: 16px; }
+.fields label { justify-content: space-between; }
+.coordinates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.coordinates input { width: 92px; }
+.meta { color: #aeb9c7; font-size: .8rem; }
+.notice { border-left: 3px solid #eab862; background: #30281c; padding: 12px; margin: 12px 0; font-size: .9rem; }
+.error { background: #501f29; border: 1px solid #df7387; padding: 12px; border-radius: 6px; }
+.validation { padding: 20px; background: #171b21; border-radius: 8px; }
+@media(max-width: 900px) { .workspace { grid-template-columns: 1fr; } .viewport { height: 60vh; } .panel { max-height: none; } }

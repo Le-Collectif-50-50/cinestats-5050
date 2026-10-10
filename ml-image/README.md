@@ -12,6 +12,10 @@ L’inférence vidéo/affiche et les exports fonctionnent sur un extrait CPU de 
 
 La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU. Le lanceur de test impose le CPU. Apple MPS, le profilage GPU et le nettoyage explicite du cache CUDA ne sont pas implémentés. Le module produit des fichiers locaux ; il ne les insère pas en base.
 
+Pour préparer la mesure de qualité et les prochaines intégrations, voir le [cadrage du jeu d’évaluation](../docs/specifications/ml-image-evaluation-validation.md).
+
+L’outil autonome [annotation-poster](annotation-poster/README.md) permet de rechercher une affiche par identifiant Allociné, de corriger les préannotations et d’exporter une référence validée. Son lancement Docker est indépendant du site Cinestats ; la recherche en base reste optionnelle.
+
 ## Repères dans le module
 
 | Fichier | Rôle |
@@ -140,4 +144,4 @@ Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires rac
 | # | Date | Auteur | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
-| 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties. |
+| 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties ; lien vers le cadrage du jeu d’évaluation. |

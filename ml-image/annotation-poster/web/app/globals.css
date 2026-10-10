@@ -1,0 +1,5 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: #0b0f14; color: #f0f1f3; font-family: system-ui, sans-serif; }
+button, input, select, textarea { font: inherit; }
+button, input[type=checkbox] { accent-color: #77decc; }
+a { color: #77decc; }

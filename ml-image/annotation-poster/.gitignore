@@ -1,0 +1,9 @@
+.env
+.venv/
+data/
+web/node_modules/
+web/.next/
+web/next-env.d.ts
+web/*.tsbuildinfo
+__pycache__/
+.pytest_cache/

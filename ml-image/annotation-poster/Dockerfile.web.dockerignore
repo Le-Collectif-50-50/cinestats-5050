@@ -1,0 +1,7 @@
+**
+!web/
+!web/app/
+!web/app/**
+!web/package.json
+!web/pnpm-lock.yaml
+!web/tsconfig.json
