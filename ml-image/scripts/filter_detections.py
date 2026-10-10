@@ -1,4 +1,5 @@
 import cv2
+from functools import lru_cache
 import os
 import mediapipe as mp
 import numpy as np
@@ -87,11 +88,15 @@ def validates_sharpness_filter(det: Dict, **kwargs) -> bool:
     return sharpness >= min_sharpness
 
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.6)
+@lru_cache(maxsize=1)
+def get_face_mesh():
+    # Ne pas initialiser OpenGL pour --help ou les tests d’export.
+    return mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1,
+                                 refine_landmarks=True, min_detection_confidence=0.6)
 
 def get_face_landmarks(image: np.ndarray) -> tuple:
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(rgb_image)
+    results = get_face_mesh().process(rgb_image)
     
     if not results.multi_face_landmarks:
         return None
@@ -200,7 +205,7 @@ def draw_landmarks(image):
 
     # Conversion en RGB
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(rgb_image)
+    results = get_face_mesh().process(rgb_image)
 
     if not results.multi_face_landmarks:
         #print("Aucun visage détecté")
