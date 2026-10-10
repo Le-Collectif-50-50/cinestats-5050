@@ -1,7 +1,7 @@
 # Guide de finalisation de dbt
 
-**Owner:** Data Team DataForGood
-**Last reviewed:** 2026-10-10
+**Resonsable** Data Team DataForGood
+**Dernière révision:** 2026-10-10
 **Status:** active
 
 ## Historique du document

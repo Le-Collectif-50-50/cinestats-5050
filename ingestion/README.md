@@ -2,15 +2,15 @@
 
 ## Metadata du document
 
-**Owner:** Joel Teixeira
+**Resonsable** Joel Teixeira
 
-**Last reviewed:** 2026-10-09
+**Dernière révision:** 2026-10-09
 
 **Status:** active
 
 ## Historique du document
 
-| #   | Date       | Author        | Observations           |
+| #   | Date       | Auteur        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-21 | Joel Teixeira | Ajout du deployment Prefect dédié au scraping Allociné. Planification automatique du scraping Allociné toutes les 10 minutes |

@@ -1,17 +1,17 @@
 # Runbook — Stack data (VPS data)
 
-**Owner:** Nicolas Revel
+**Resonsable** Nicolas Revel
 
-**Last reviewed:** 2026-10-09
+**Dernière révision:** 2026-10-09
 
 **Status:** active
 
 ## Historique du document
 
-| # | Date | Author | Observations |
+| # | Date | Auteur | Observations |
 |---|---|---|---|
-| 2 | 2026-10-09 | Nicolas Revel | Première version du runbook | 
-| 2 | 2026-10-09 | Data Team DataForGood | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
+| 1 | 2026-10-06 | Nicolas Revel | Première version du runbook | 
+| 2 | 2026-10-09 | Joel Teixeira | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
 
 Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 

@@ -2,15 +2,15 @@
 
 ## Metadata du document
 
-**Owner:** Data Team DataForGood
+**Resonsable** Data Team DataForGood
 
-**Last reviewed:** 2026-10-10
+**Dernière révision:** 2026-10-06
 
 **Status:** active
 
 ## Historique du document
 
-| # | Date | Author | Observations |
+| # | Date | Auteur | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-05-26 | Joel Teixeira | Documentation du projet dbt ingestion, des tags phase1/phase2 et du schéma `ops` |
 | 2 | 2026-10-06 | Joel Teixeira | Suppression des déclarations de modèles absents et alignement des modèles documentés sur le code actuel |

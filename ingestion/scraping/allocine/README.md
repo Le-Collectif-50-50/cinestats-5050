@@ -2,15 +2,15 @@
 
 ## Metadata du document
 
-**Owner:** Joel Teixeira
+**Resonsable** Joel Teixeira
 
-**Last reviewed:** 2026-10-09
+**Dernière révision:** 2026-10-09
 
 **Status:** active
 
 ## Historique du document
 
-| #   | Date       | Author        | Observations           |
+| #   | Date       | Auteur        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-26 | Joel Teixeira | Alignement avec le flow Prefect actuel et la phase dbt post-scraping exécutable |

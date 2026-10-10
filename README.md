@@ -1,89 +1,71 @@
-# Data For Good #13 - Révéler les Inégalités dans le Cinéma (RIC)
+# Révéler les Inégalités dans le Cinéma (RIC)
 
-## Metadata du document
-
-**Owner:** Data Team DataForGood
-
-**Last reviewed:** 2026-10-09
-
+**Resonsable** Data Team DataForGood
+**Dernière révision:** 2026-10-10
 **Status:** active
+
+Projet Data For Good et Collectif 50/50 : informer le grand public et les institutions sur les inégalités de genre et raciales dans le cinéma français.
+
+## Architecture et documentation
+
+L'application associe Next.js, FastAPI et PostgreSQL (SQLAlchemy/Alembic).
+Lire uniquement le guide du composant concerné, puis suivre ses références selon la tâche.
+
+| Dossier | Rôle et documentation |
+| --- | --- |
+| `frontend/` | [Interface Next.js : installation et développement](frontend/README.md) |
+| `backend/` | [API FastAPI : lancement, accès aux données et tests](backend/README.md) |
+| `database/` | [PostgreSQL : modèles, migrations, seeds et données historiques](database/README.md) |
+| `ingestion/` | [Airbyte, dbt, Prefect et scraping : état actuel, configuration et architecture](ingestion/README.md) |
+| `ml-image/` | [Analyse d'images et bandes-annonces : installation et modèles](ml-image/README.md) |
+| `infra/`, `scripts/`, `.github/` | [Infrastructure et déploiement applicatif](docs/DEPLOYMENT.md), [exploitation de la stack data](docs/runbooks/stack-data.md) |
+| `docs/` | Architecture, spécifications et runbooks, référencés depuis les guides ci-dessus |
+
+## Démarrer en local
+
+Prérequis : Git et les outils du composant choisi. Voir le [guide d'installation](docs/repo-setup.md) pour Docker Compose et Poetry.
+
+Interface, avec Node.js et pnpm installés, depuis la racine :
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+Interface : `http://localhost:3000`. Configurer l'API et la base selon leurs guides pour accéder aux données.
+Pour Docker, renseigner `.env` depuis [.env.example](.env.example), puis utiliser [docker-compose.yaml](docker-compose.yaml).
+L'ingestion et le ML ont leurs propres prérequis et commandes.
+
+## Contribuer et vérifier
+
+Agents : [consignes communes](AGENTS.md), importées par [CLAUDE.md](CLAUDE.md).
+Documentation : suivre le [standard documentaire](docs/repo-documentation-guidelines.md).
+
+Pour le code Python, depuis la racine :
+
+```bash
+poetry install --with dev
+poetry run pre-commit run --all-files
+poetry run python -m pytest tests
+```
+
+Relancer `poetry install --with dev` après une modification de `poetry.lock`.
+[Tox](tox.ini) fournit aussi un environnement de test (`poetry run tox -vv`).
+Pour le frontend, depuis `frontend/` après installation : `pnpm type-check` et `pnpm build`.
+
+## Déployer et dépanner
+
+Les PR ciblent `main`. Pour déployer, suivre le [runbook de promotion](docs/runbooks/deploiement-promotion-preview-production.md) : validation en `preview`, puis promotion en `production`.
+
+- Application, configuration des environnements et rollback : [guide de déploiement](docs/DEPLOYMENT.md).
+- Ingestion, connexions Airbyte/dbt/PostgreSQL : [runbook de setup et dépannage](docs/runbooks/ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md).
+- Exploitation du VPS data : [runbook stack data](docs/runbooks/stack-data.md).
 
 ## Historique du document
 
-| #   | Date       | Author        | Observations                                  |
-| --- | ---------- | ------------- | --------------------------------------------- |
-| 1   | 2026-05-07 | Joel Teixeira | Révision post implementation module ingestion |
-| 2   | 2026-10-09 | Joel Teixeira | Ajout du guide de promotion preview vers production |
-
-L'objectif de ce projet est de créer une application web qui informera le grand public et les institutions sur les inégalités de genre et raciales dans le cinéma français.
-
-Techniquement, l'application sera composée de :
-
-- une application front-end Next.js accessible à tous pour afficher des graphiques sur les inégalités de genre et raciales
-- un backend FastAPI en Python qui fournira une API permettant au frontend d'accéder aux données à afficher dans les graphiques
-- une base de données PostgreSQL pour stocker les données pertinentes
-  - Pour interagir avec la base de données avec python, nous utiliserons un ORM (Object-relational mapping) - sqlalchemy
-  - Pour suivre l'évolution de la base de données, nous utiliserons un outil de migration de donnée - alembic
-- plusieurs scripts Python :
-  - Pour scraper des données à partir de différentes sources externes et les ajouter à la base de données
-  - Pour exécuter des scripts de machine learning sur des sources médiatiques afin de générer des KPI supplémentaires pertinents sur les films
-
-## Stack technique
-
-- Frontend: Next.js
-- Backend: FastAPI
-- Database: PostgreSQL
-- ORM: [SQLAlchemy](https://www.sqlalchemy.org/) (psycopg as adapter)
-- Outil de migration de db: [Alembic](https://github.com/sqlalchemy/alembic)
-
-### Prérequis
-
-- `git`
-- `docker` et `docker-compose` (voir [documentation d'installation](docs/repo-setup.md))
-
-## Documentation
-
-Points d'entrée principaux:
-
-1. [frontend/README.md](frontend/README.md): application Next.js, commandes locales, structure frontend.
-2. [backend/README.md](backend/README.md): API FastAPI, routes, variables d'environnement, acces base.
-3. [database/README.md](database/README.md): modèles SQLAlchemy, migrations Alembic, seeds et données historiques.
-4. [ingestion/README.md](ingestion/README.md): statut rapide du workspace Airbyte/dbt et commandes dbt courantes.
-5. [ml-image/README.md](ml-image/README.md): code de machine learning pour l'analyse automatique des différentes images (frames) de bande-annonces, modèles utilisés, installation et execution.
-6. [docs/repo-documentation-guidelines.md](docs/repo-documentation-guidelines.md): directives pour la documentation projet, structure recommandée, cycle de vie des documents.
-7. [AGENTS.md](AGENTS.md): guide de travail du repository, bonnes pratiques et documents à lire en priorité.
-8. [Promotion preview vers production](docs/runbooks/deploiement-promotion-preview-production.md): déployer en staging, vérifier l’application et promouvoir le commit validé en production.
-
-## Contribution
-
-### Utiliser un venv python
-
-    python3 -m venv .venv
-
-    source .venv/bin/activate
-
-## Utiliser Poetry
-
-Installer les dépendances:
-
-    poetry install
-
-Pour les outils de developpement fournis par Poetry, relancer `poetry install` apres mise a jour de `poetry.lock` ou apres un pull pour resynchroniser le venv local.
-
-Ajouter une dépendance:
-
-    poetry add pandas
-
-Mettre à jour les dépendances:
-
-    poetry update
-
-## Lancer les precommit-hook localement
-
-[Installer les precommit](https://pre-commit.com/)
-
-    poetry run pre-commit run --all-files
-
-## Utiliser Tox pour tester votre code
-
-    tox -vv
+| # | Date | Auteur | Observations |
+| --- | --- | --- | --- |
+| 1 | 2026-05-07 | Joel Teixeira | Révision post implementation module ingestion |
+| 2 | 2026-10-09 | Joel Teixeira | Ajout du guide de promotion preview vers production |
+| 3 | 2026-10-10 | Joel Teixeira | Vue d'ensemble condensée, parcours local et liens ciblés vers les guides de travail et d'exploitation. |
