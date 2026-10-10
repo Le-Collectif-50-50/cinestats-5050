@@ -14,6 +14,7 @@
 | --- | --- | --- | --- |
 | 1 | 2026-05-26 | Joel Teixeira | Documentation du projet dbt ingestion, des tags phase1/phase2 et du schéma `ops` |
 | 2 | 2026-10-06 | Joel Teixeira | Suppression des déclarations de modèles absents et alignement des modèles documentés sur le code actuel |
+| 3 | 2026-10-10 | Joel Teixeira | Ajout du runbook local macOS/WSL2 pour le debug et dbt Docs |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -26,6 +27,8 @@ Projet dbt Core exécuté depuis `prefect-worker`.
 5. Publier les vues opérationnelles dans `ops`.
 
 ## Exécution
+
+Pour travailler sans conteneur sur macOS ou Windows via WSL2, suivre le [runbook dbt local](runbook_dbt_local.md) : environnement `.venv-dbt`, connexion, tests et serveur dbt Docs.
 
 Depuis le container worker:
 
