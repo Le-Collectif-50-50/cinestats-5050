@@ -158,7 +158,7 @@ class IngestionRequestSettings:
             ),
             run_airbyte_sync_step=_parse_bool(
                 os.getenv("INGESTION_REQUEST_RUN_AIRBYTE_SYNC_STEP"),
-                default=False,
+                default=True,
             ),
             run_dbt_phase_2_step=_parse_bool(
                 os.getenv("INGESTION_REQUEST_RUN_DBT_PHASE_2_STEP"),
@@ -469,11 +469,15 @@ def _wait_for_airbyte_job(
 
 
 def _run_airbyte_sync_step(
-    enabled: bool = False,
+    enabled: bool = True,
     connection_names: list[str] | None = None,
 ) -> None:
     logger = get_run_logger()
-    requested_names = connection_names or []
+    requested_names = (
+        _parse_csv(os.getenv("INGESTION_REQUEST_AIRBYTE_CONNECTION_NAMES"))
+        if connection_names is None
+        else connection_names
+    )
     logger.info(
         "Task parameters: enabled=%s, connection_names=%s",
         enabled,
@@ -544,7 +548,7 @@ def _run_airbyte_sync_step(
     description="Declenche les synchronisations Airbyte lorsqu'elles sont activees pour ce run.",
 )
 def run_airbyte_sync(
-    enabled: bool = False,
+    enabled: bool = True,
     connection_names: list[str] | None = None,
 ) -> None:
     _run_airbyte_sync_step(
@@ -685,7 +689,7 @@ def run_dbt_phase_2() -> None:
 def main_ingestion_flow(
     request_id: str | None = None,
     config_path: str = str(ALLOCINE_CONFIG_PATH),
-    run_airbyte_sync_step: bool = False,
+    run_airbyte_sync_step: bool = True,
     run_dbt_phase_2_step: bool = True,
     airbyte_connection_names: list[str] | None = None,
 ) -> None:
@@ -829,8 +833,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--run-airbyte-sync",
-        action="store_true",
-        help="Exécute l'étape Airbyte sync. Sinon, elle est explicitement sautée.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Exécute Airbyte par défaut. Utiliser --no-run-airbyte-sync pour sauter cette étape.",
     )
     parser.add_argument(
         "--run-dbt-phase-2",
@@ -842,7 +847,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--airbyte-connection-name",
         action="append",
         dest="airbyte_connection_names",
-        default=[],
+        default=None,
         help="Nom d'une connexion Airbyte cible. Répéter l'option pour plusieurs connexions.",
     )
     parser.add_argument(

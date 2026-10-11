@@ -2,9 +2,9 @@
 
 ## Metadata du document
 
-**Resonsable** Joel Teixeira
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-10-09
+**Dernière révision:** 2026-10-11
 
 **Status:** active
 
@@ -18,6 +18,7 @@
 | 4   | 2026-05-26 | Joel Teixeira | Ajout du polling de file `ops.ingestion_run_requests` directement dans Prefect, du monitoring `ops.v_allocine_pipeline_status` et du wiring Docker Compose associé |
 | 5   | 2026-10-06 | Joel Teixeira | Séparation du compte Postgres des scrapers et paramétrage SSL commun. Alignement des noms de modèles dbt et clarification du périmètre des phases après suppression des déclarations obsolètes. Correction de l'appel à la phase dbt 2 : le flow principal contrôle son activation avant d'appeler le helper sans argument. Activation de la phase dbt 2 par défaut pour les runs manuels, le CLI et le poller Metabase, avec désactivation explicite possible |
 | 6   | 2026-10-09 | Joel Teixeira | Autorisation TLS du compte scraper_user depuis le VPS data dans pg_hba.conf et son générateur |
+| 7 | 2026-10-11 | Joel Teixeira | Activation Airbyte par défaut pour les runs manuels, le CLI et le poller ; noms de connexions partagés via environnement et désactivation explicite. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -45,7 +46,7 @@ Ce que cela implique:
 5. `Prefect` devient le point d'entrée opérationnel du flux complet, y compris pour déclencher les syncs Airbyte via API.
 6. le runtime Prefect expose un flow principal unique, un flow de scraping seul et un poller de demandes Metabase;
 7. côté exécution réelle, `dbt phase 1` et `scraping Allociné` sont finalisés;
-8. `airbyte sync` est maintenant exécutable dans Prefect à partir de noms de connexions explicites;
+8. `airbyte sync` est activé par défaut dans Prefect et exige des noms de connexions explicites;
 9. `dbt phase 2` est modélisé et activé par défaut après le scraping.
 
 Modèles implémentés:
@@ -94,7 +95,7 @@ Principe retenu:
 7. `airbyte/bootstrap.py` crée ou met à jour la source Google Sheets;
 8. `airbyte/bootstrap.py` crée ou met à jour la destination Postgres cible;
 9. `airbyte/bootstrap.py` crée ou met à jour la connexion source -> destination correspondante.
-10. les manifests `src_gsheet_*` alignés sur l'architecture cible sont déjà présents, mais leurs `spreadsheet_id` restent volontairement vides tant que les URLs réelles ne sont pas renseignées.
+10. les manifests `src_gsheet_*` contiennent les URLs Google Sheets ; leur application exige le compte de service Google et les credentials Airbyte/Postgres.
 
 Variables d'environnement Airbyte désormais attendues dans `.env`:
 
@@ -301,9 +302,10 @@ Important:
 2. `dbt phase 1` exécute `dbt build --select tag:phase1`;
 3. `allocine scraping` est opérationnel;
 4. `dbt phase 2` exécute `dbt build --select tag:phase2` et est activé par défaut. Pour le désactiver, utiliser le paramètre Prefect `run_dbt_phase_2_step=false`, le flag CLI `--no-run-dbt-phase-2` ou `INGESTION_REQUEST_RUN_DBT_PHASE_2_STEP=false` pour les demandes Metabase;
-5. `airbyte sync` exige `--run-airbyte-sync`, au moins un nom de connexion Airbyte explicite, et des valeurs `AIRBYTE_CLIENT_ID` / `AIRBYTE_CLIENT_SECRET` valides dans `.env`;
-6. l'étape Airbyte attend la fin de chaque job avant de passer à `dbt phase 1`;
-7. le flow principal exécute la bonne séquence et saute les étapes futures tant qu'elles ne sont pas activées.
+5. `airbyte sync` est activé par défaut. Il exige des valeurs `AIRBYTE_CLIENT_ID` / `AIRBYTE_CLIENT_SECRET` valides et au moins un nom de connexion. Sans paramètre explicite, les runs manuels et le CLI utilisent `INGESTION_REQUEST_AIRBYTE_CONNECTION_NAMES` (liste séparée par des virgules). Le poller utilise cette même liste. Un paramètre `airbyte_connection_names` ou un flag CLI `--airbyte-connection-name` remplace la liste de l’environnement ;
+6. pour désactiver Airbyte, utiliser `run_airbyte_sync_step=false` dans Prefect, `--no-run-airbyte-sync` en CLI, ou `INGESTION_REQUEST_RUN_AIRBYTE_SYNC_STEP=false` pour le poller. Sans noms de connexions ou credentials valides, la phase échoue avant dbt ;
+7. l'étape Airbyte attend la fin de chaque job avant de passer à `dbt phase 1`;
+8. le flow principal exécute la séquence et saute les étapes explicitement désactivées.
 
 ## Usage Poller
 
@@ -335,7 +337,7 @@ Artefacts associés:
 2. Pour la mise à jour de données, Airbyte exécute un sync séparé par onglet métier.
 3. `raw.id_matching` sert de table d'entrée canonique du scraping.
 4. Prefect expose maintenant trois deployments utiles: ingestion complète, scraping Allociné seul, et poller des demandes d'ingestion.
-5. Si l'option Airbyte est activée, Prefect déclenche les syncs demandés par noms de connexions et attend leur fin.
+5. Airbyte est activé par défaut : Prefect déclenche les syncs configurés par noms de connexions et attend leur fin.
 6. Dans ce flow, Prefect lance ensuite `dbt phase 1` avant scraping.
 7. Prefect lance ensuite le scraping Allociné.
 8. Prefect exécute enfin `dbt phase 2` par défaut, sauf désactivation explicite.
