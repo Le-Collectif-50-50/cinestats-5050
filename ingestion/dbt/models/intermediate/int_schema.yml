@@ -184,7 +184,7 @@ models:
   - name: int_fix_film_country_budget_allocation
     description: "Table intermédiaire issue de stg_fix_film_country_budget_allocation. Expose les corrections manuelles sur la répartition budgétaire par pays, sans les métadonnées techniques. En cas de corrections multiples sur un même id, seule la plus récente (order by updated_date DESC) est conservée."
     columns:
-      - name: id
+      - name: film_country_budget_allocation_id
         description: "Identifiant unique de l'allocation budgétaire par pays."
         tests:
           - not_null

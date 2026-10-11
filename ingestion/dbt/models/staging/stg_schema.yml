@@ -119,7 +119,7 @@ models:
   - name: stg_fix_film_country_budget_allocation
     description: "Table de staging issue du gsheet Cinéstats 50/50, permettant d'apporter des corrections à la répartition du budget des films par pays (fnl_film_country_budget_allocation)."
     columns:
-      - name: id
+      - name: film_country_budget_allocation_id
         description: "Identifiant unique de l’allocation budgétaire par pays."
         tests: 
           - not_null
