@@ -663,7 +663,7 @@ def _run_dbt_phase_2_step() -> None:
             "dbt",
             "build",
             "--select",
-            "tag:phase2",
+            "+tag:phase2",
             "--profile",
             "ric",
             "--project-dir",

@@ -4,9 +4,9 @@
 
 **Resonsable** Joel Teixeira
 
-**Dernière révision:** 2026-10-09
+**Dernière révision:** 2026-10-11
 
-**Status:** active
+**Status:** actif
 
 ## Historique du document
 
@@ -17,6 +17,7 @@
 | 3   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement. Alignement des modèles dbt post-scraping sur le code actuel |
 | 4   | 2026-10-09 | Joel Teixeira | Correction du passage de configuration dans la commande `read`, qui échouait avec un `TypeError` avant le scraping |
 | 5   | 2026-10-09 | Joel Teixeira | Copie des helpers de date et durée dans ingestion pour démarrer sans package backend |
+| 6 | 2026-10-11 | Joel Teixeira | Sélection dbt post-scraping incluant les modèles intermédiaires et finaux et leurs dépendances |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -166,7 +167,7 @@ Dans la stratégie retenue:
 Séparation assumée:
 
 1. la phase `dbt` avant scraping est finalisée côté Prefect;
-2. la phase `dbt` après scraping exécute `dbt build --select tag:phase2` quand elle est activée;
+2. la phase `dbt` après scraping exécute `dbt build --select +tag:phase2` quand elle est activée;
 3. le flow Prefect peut aussi déclencher les syncs Airbyte par noms de connexions explicites;
 4. ce job couvre uniquement la partie scraping Allocine.
 

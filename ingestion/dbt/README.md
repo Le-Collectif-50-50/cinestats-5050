@@ -2,11 +2,11 @@
 
 ## Metadata du document
 
-**Resonsable** Data Team DataForGood
+**Owner:** Data Team DataForGood
 
 **Dernière révision:** 2026-10-11
 
-**Status:** active
+**Status:** actif
 
 ## Historique du document
 
@@ -15,7 +15,7 @@
 | 1 | 2026-05-26 | Joel Teixeira | Documentation du projet dbt ingestion, des tags phase1/phase2 et du schéma `ops` |
 | 2 | 2026-10-06 | Joel Teixeira | Suppression des déclarations de modèles absents et alignement des modèles documentés sur le code actuel |
 | 3 | 2026-10-10 | Joel Teixeira | Ajout du runbook local macOS/WSL2 pour le debug et dbt Docs |
-| 4 | 2026-10-11 | GitHub Copilot | Normalisation des espaces dans les budgets CNC avant conversion numérique |
+| 4 | 2026-10-11 | Joel Teixeira | Normalisation des espaces dans les budgets CNC avant conversion numérique. Inclusion des modèles intermédiaires et finaux dans la phase 2, avec leurs dépendances amont |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -38,7 +38,7 @@ Depuis le container worker:
 ```bash
 dbt parse --profile ric --project-dir /app/ingestion/dbt
 dbt build --profile ric --project-dir /app/ingestion/dbt --select tag:phase1
-dbt build --profile ric --project-dir /app/ingestion/dbt --select tag:phase2
+dbt build --profile ric --project-dir /app/ingestion/dbt --select +tag:phase2
 ```
 
 Depuis la racine du repo:
@@ -46,17 +46,21 @@ Depuis la racine du repo:
 ```bash
 docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt parse --profile ric --project-dir /app/ingestion/dbt
 docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt build --profile ric --project-dir /app/ingestion/dbt --select tag:phase1
-docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt build --profile ric --project-dir /app/ingestion/dbt --select tag:phase2
+docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt build --profile ric --project-dir /app/ingestion/dbt --select +tag:phase2
 ```
 
 ## Tags
 
 1. `phase1`: `stg_cnc_films`, exécuté avant scraping Allociné.
-2. `phase2`: `stg_allocine_films` et `v_allocine_pipeline_status`, exécutés après scraping Allociné.
+2. `phase2`: `stg_allocine_films`, `v_allocine_pipeline_status` et tous les modèles des dossiers `intermediate/` et `fnl/`, exécutés après scraping Allociné. Les deux dossiers héritent du tag dans `dbt_project.yml`.
 
-Le flow Prefect principal exécute toujours `tag:phase1`. Il exécute `tag:phase2` seulement quand le paramètre `run_dbt_phase_2_step` est activé.
+Le flow Prefect principal exécute toujours `tag:phase1`. Il exécute `+tag:phase2` seulement quand le paramètre `run_dbt_phase_2_step` est activé.
 
-Ces sélections incluent les tests associés, mais ne couvrent pas tous les modèles `intermediate` et `fnl`. Leur réussite ne valide donc pas un build complet du projet.
+Le préfixe `+` inclut les dépendances amont, notamment les modèles de staging non taggés. La finalisation construit ainsi les modèles `intermediate` et `fnl` et exécute les tests associés. La phase 1 reste limitée à `stg_cnc_films`.
+
+Toutes les sources brutes référencées doivent exister et être lisibles par `dbt_user`, y compris les tables de corrections et les sorties Mubi. Le flow principal ne lance que le scraping Allociné ; les sources Mubi doivent être alimentées séparément. Un échec de construction ou de test fait échouer la finalisation.
+
+Pour vérifier le périmètre sans écrire en base, remplacer `dbt build` par `dbt ls --resource-type model` dans la commande de phase 2. Après déploiement du worker mis à jour, cette commande de build permet aussi de reconstruire les couches manquantes sans relancer Airbyte ni le scraping.
 
 ## Modèles opérationnels
 
