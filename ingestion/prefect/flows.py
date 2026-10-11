@@ -158,7 +158,7 @@ class IngestionRequestSettings:
             ),
             run_airbyte_sync_step=_parse_bool(
                 os.getenv("INGESTION_REQUEST_RUN_AIRBYTE_SYNC_STEP"),
-                default=False,
+                default=True,
             ),
             run_dbt_phase_2_step=_parse_bool(
                 os.getenv("INGESTION_REQUEST_RUN_DBT_PHASE_2_STEP"),
@@ -469,7 +469,7 @@ def _wait_for_airbyte_job(
 
 
 def _run_airbyte_sync_step(
-    enabled: bool = False,
+    enabled: bool = True,
     connection_names: list[str] | None = None,
 ) -> None:
     logger = get_run_logger()
@@ -685,7 +685,7 @@ def run_dbt_phase_2() -> None:
 def main_ingestion_flow(
     request_id: str | None = None,
     config_path: str = str(ALLOCINE_CONFIG_PATH),
-    run_airbyte_sync_step: bool = False,
+    run_airbyte_sync_step: bool = True,
     run_dbt_phase_2_step: bool = True,
     airbyte_connection_names: list[str] | None = None,
 ) -> None:
