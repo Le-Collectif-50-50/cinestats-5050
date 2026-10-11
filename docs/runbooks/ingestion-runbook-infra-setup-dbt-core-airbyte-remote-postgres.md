@@ -2,9 +2,9 @@
 
 ## Metadata du document
 
-**Resonsable** Joel Teixeira
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-10-09
+**Dernière révision:** 2026-10-11
 
 **Status:** active
 
@@ -17,6 +17,7 @@
 | 3   | 2026-05-26 | Joel Teixeira | Alignement avec les deployments Prefect actuels, le poller `ops.ingestion_run_requests` et les grants `ops` |
 | 4   | 2026-10-06 | Joel Teixeira | Borne SQLAlchemy sous 2.1 pour corriger les erreurs du scheduler Prefect et procédure de reconstruction de l'image partagée. Ajout du compte Postgres dédié aux scrapers et de ses privilèges limités à `raw` |
 | 5 | 2026-10-09 | Joel Teixeira | Formulaire Metabase natif avec identité déclarative et motif obligatoire, conservé dans la file d’ingestion. |
+| 6 | 2026-10-11 | Joel Teixeira | Privilèges SELECT par défaut pour scraper_user sur les futures tables raw créées par airbyte_user. |
 
 ## 1. Objectif
 
@@ -141,15 +142,19 @@ GRANT USAGE, CREATE ON SCHEMA intermediate TO dbt_user;
 GRANT USAGE, CREATE ON SCHEMA fnl TO dbt_user;
 GRANT USAGE, CREATE ON SCHEMA ops TO dbt_user;
 
--- Compte dédié aux scrapers : lecture source et écriture des seules sorties.
+-- Compte dédié aux scrapers : lecture source et écriture des sorties.
 GRANT USAGE, CREATE ON SCHEMA raw TO scraper_user;
 GRANT SELECT ON TABLE raw.id_matching TO scraper_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE airbyte_user IN SCHEMA raw
+  GRANT SELECT ON TABLES TO scraper_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.allocine_data TO scraper_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.mubi_festival_films TO scraper_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.mubi_film_awards TO scraper_user;
 ```
 
 Les trois derniers `GRANT` sont requis seulement si ces tables de sortie existent déjà et appartiennent à un autre rôle. Les tables créées par `scraper_user` lui appartiennent.
+
+`GRANT SELECT ON raw.id_matching` corrige la table existante. `ALTER DEFAULT PRIVILEGES FOR ROLE airbyte_user IN SCHEMA raw` conserve la lecture après les recréations Airbyte : il accorde `SELECT` à `scraper_user` sur toutes les futures tables créées par `airbyte_user` dans `raw`. Il ne couvre pas les tables existantes ni celles créées par un autre rôle. À exécuter dans la base cible avec un administrateur PostgreSQL.
 
 Base Prefect dédiée:
 
