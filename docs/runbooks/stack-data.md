@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 1 | 2026-10-06 | Nicolas Revel | Première version du runbook | 
 | 2 | 2026-10-09 | Joel Teixeira | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
-| 3 | 2026-10-11 | Joel Teixeira | Restauration de SELECT pour scraper_user et persistance de la lecture après recréation des tables Airbyte. |
+| 3 | 2026-10-11 | Joel Teixeira | Restauration de SELECT pour scraper_user et persistance de la lecture après recréation des tables Airbyte. Configuration requise pour Airbyte activé par défaut et migration du fichier .env existant. |
 
 Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 
@@ -129,3 +129,18 @@ Seuls Caddy (80 et 443) et SSH sont joignables depuis Internet : 8000 (Airbyte),
 - Compte de service Google (Sheets en lecture seule) et URL des 12 feuilles pour `airbyte/bootstrap.py`.
 - Corrections côté code de la branche : `sslmode` configurable dans les scrapers (aujourd'hui `disable` en dur), rôle dédié aux scrapers.
 - Décision sur le scraping planifié (voir §4).
+
+## 8. Configurer la phase Airbyte
+
+La phase Airbyte du pipeline complet est activée par défaut dans le code. Le déploiement conserve le `.env` existant : les anciennes valeurs `false` doivent donc être modifiées manuellement pour le poller.
+
+Avant de lancer une ingestion complète sur le VPS :
+
+1. Renseigner `AIRBYTE_CLIENT_ID` et `AIRBYTE_CLIENT_SECRET` dans `~/cinestats-data/ingestion/.env`.
+2. Créer ou vérifier les connexions Google Sheets vers Postgres dans Airbyte. Pour utiliser le bootstrap, déposer le compte de service Google dans `airbyte/json_credentials/` et renseigner `AIRBYTE_DESTINATION_POSTGRES_PASSWORD`.
+3. Renseigner `INGESTION_REQUEST_AIRBYTE_CONNECTION_NAMES` avec les noms exacts des connexions, séparés par des virgules. Exemple pour une connexion créée par le bootstrap : `src_gsheet_films -> dst_pg_raw`. Les runs manuels et le CLI réutilisent cette liste lorsqu’aucun nom n’est fourni explicitement.
+4. Passer `INGESTION_REQUEST_RUN_AIRBYTE_SYNC_STEP=true` pour les demandes Metabase. Cette variable contrôle le poller ; le paramètre `run_airbyte_sync_step` contrôle les runs manuels.
+5. Après livraison du code, recréer le worker pour charger le `.env` et republier les paramètres du deployment, en attendant la fin des runs en cours : `sudo docker compose up -d --force-recreate prefect-worker`.
+6. Vérifier dans Prefect que `lancer-ingestion-donnees` utilise `run_airbyte_sync_step=true`. Retirer toute ancienne surcharge `false` avant de lancer le run.
+
+Sans noms de connexions ou credentials valides, la phase Airbyte échoue avant dbt. Pour exécuter temporairement sans sync, utiliser `run_airbyte_sync_step=false` dans Prefect ou `--no-run-airbyte-sync` en CLI ; pour le poller, utiliser `INGESTION_REQUEST_RUN_AIRBYTE_SYNC_STEP=false`.

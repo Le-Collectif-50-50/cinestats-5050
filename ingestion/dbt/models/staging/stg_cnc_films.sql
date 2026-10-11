@@ -1,5 +1,5 @@
 {{
-  config(materialized = 'view')
+  config(materialized = 'table')
 }}
 
 SELECT
@@ -12,10 +12,7 @@ SELECT
         WHEN CAST("ANNEE_D_AGREMENT" AS INTEGER) >= 2013 THEN
             CAST(
                 REPLACE(
-                    REPLACE(
-                        REPLACE("DEVIS", ' ', ''),
-                        ' ', ''
-                    ),
+                    TRANSLATE("DEVIS", ' ' || CHR(160) || CHR(8239), ''),
                     ',', '.'
                 ) AS FLOAT
             ) * 1000000
@@ -23,10 +20,7 @@ SELECT
         ELSE
             CAST(
                 REPLACE(
-                    REPLACE(
-                        REPLACE("DEVIS", ' ', ''),
-                        ' ', ''
-                    ),
+                    TRANSLATE("DEVIS", ' ' || CHR(160) || CHR(8239), ''),
                     ',', '.'
                 ) AS FLOAT
             )
