@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 1 | 2026-10-06 | Nicolas Revel | Première version du runbook | 
 | 2 | 2026-10-09 | Joel Teixeira | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
-| 3 | 2026-10-11 | Joel Teixeira | Configuration requise pour Airbyte activé par défaut et migration du fichier .env existant. |
+| 3 | 2026-10-11 | Joel Teixeira | Restauration de SELECT pour scraper_user et persistance de la lecture après recréation des tables Airbyte. Configuration requise pour Airbyte activé par défaut et migration du fichier .env existant. |
 
 Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 
@@ -20,13 +20,31 @@ Prérequis : `00-base.sh`, `10-wireguard.sh spoke` et `20-docker.sh data` faits 
 
 ## 1. Côté base (VPS `db`) — fait
 
-- `roles.sql` (rejoué par `30-postgres.sh`) crée déjà les schémas `raw`, `staging`, `intermediate`, `fnl`, `ops`, leurs propriétaires et les droits de `airbyte_user`, `dbt_user` et `prefect_user`. C'est l'équivalent du §4.3 du runbook de la branche.
+- `roles.sql` (rejoué par `30-postgres.sh`) crée déjà les schémas `raw`, `staging`, `intermediate`, `fnl`, `ops`, leurs propriétaires et les droits de `airbyte_user`, `dbt_user`, `scraper_user` et `prefect_user`. C'est l'équivalent du §4.3 du runbook de la branche.
 - La table `ops.ingestion_run_requests` n'est pas dans `roles.sql` : elle se crée en `dbt_user` (pour que les droits par défaut des rôles Metabase s'appliquent), puis `roles.sql` se rejoue pour donner ses droits à `prefect_user` :
 
   ```bash
   sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d cinestats-5050-db < ops-ingestion-table.sql   # infra/data/ops-ingestion-table.sql, copié sur db
   sudo -u postgres psql -X -q -d cinestats-5050-db -v db_name=cinestats-5050-db < ~/vps/sql/roles.sql
   ```
+
+### Maintenir la lecture des scrapers après un sync Airbyte
+
+Sur `cinestats-db`, appliquer les droits dans la base production :
+
+```bash
+sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d cinestats-5050-db <<'SQL'
+GRANT SELECT ON TABLE raw.id_matching TO scraper_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE airbyte_user IN SCHEMA raw
+  GRANT SELECT ON TABLES TO scraper_user;
+SELECT has_schema_privilege('scraper_user', 'raw', 'USAGE') AS raw_usage,
+       has_table_privilege('scraper_user', 'raw.id_matching', 'SELECT') AS id_matching_select;
+SQL
+```
+
+Les deux contrôles doivent renvoyer `true`. Le premier `GRANT` restaure la table actuelle ; les privilèges par défaut couvrent toutes les futures tables créées par `airbyte_user` dans `raw`, sans droits d'écriture. Ils ne modifient pas les autres tables existantes et ne s'appliquent pas aux tables créées par un autre rôle. Le `DROP` puis `CREATE` effectué par Airbyte ne supprime ainsi plus la lecture des scrapers.
+
+Le provisionnement crée `scraper_user` dans `infra/vps/30-postgres.sh`. `infra/vps/sql/roles.sql` accorde aussi `USAGE`/`CREATE` sur `raw`, configure les privilèges par défaut et restaure `SELECT` sur `raw.id_matching` si la table existe. Copier la version actualisée de ce SQL sur le VPS avant de rejouer uniquement les droits ; ne pas relancer le provisionnement complet pour cette correction.
 
 ## 2. Copier la stack sur le VPS
 

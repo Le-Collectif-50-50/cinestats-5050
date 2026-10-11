@@ -18,7 +18,7 @@
 | 4   | 2026-05-26 | Joel Teixeira | Ajout du polling de file `ops.ingestion_run_requests` directement dans Prefect, du monitoring `ops.v_allocine_pipeline_status` et du wiring Docker Compose associé |
 | 5   | 2026-10-06 | Joel Teixeira | Séparation du compte Postgres des scrapers et paramétrage SSL commun. Alignement des noms de modèles dbt et clarification du périmètre des phases après suppression des déclarations obsolètes. Correction de l'appel à la phase dbt 2 : le flow principal contrôle son activation avant d'appeler le helper sans argument. Activation de la phase dbt 2 par défaut pour les runs manuels, le CLI et le poller Metabase, avec désactivation explicite possible |
 | 6   | 2026-10-09 | Joel Teixeira | Autorisation TLS du compte scraper_user depuis le VPS data dans pg_hba.conf et son générateur |
-| 7 | 2026-10-11 | Joel Teixeira | Activation Airbyte par défaut pour les runs manuels, le CLI et le poller ; noms de connexions partagés via environnement et désactivation explicite. |
+| 7 | 2026-10-11 | Joel Teixeira | Lecture de raw.id_matching restaurable et privilèges SELECT par défaut pour les futures tables créées par airbyte_user dans raw. Activation Airbyte par défaut pour les runs manuels, le CLI et le poller ; noms de connexions partagés via environnement et désactivation explicite. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -128,12 +128,16 @@ Exemple à exécuter avec un rôle d'administration PostgreSQL, en remplaçant l
 CREATE ROLE scraper_user LOGIN PASSWORD '<secret>';
 GRANT USAGE, CREATE ON SCHEMA raw TO scraper_user;
 GRANT SELECT ON TABLE raw.id_matching TO scraper_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE airbyte_user IN SCHEMA raw
+  GRANT SELECT ON TABLES TO scraper_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.allocine_data TO scraper_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.mubi_festival_films TO scraper_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw.mubi_film_awards TO scraper_user;
 ```
 
 Les trois dernières instructions ne sont nécessaires que si les tables de sortie existent déjà et appartiennent à un autre rôle. Les nouvelles tables créées par le scraper appartiennent à `scraper_user`.
+
+Le `GRANT` sur `raw.id_matching` répare une table existante. Le privilège par défaut couvre toutes les futures tables créées par `airbyte_user` dans `raw`, y compris une recréation de `id_matching` lors d’un sync Airbyte. Il ne modifie pas les tables déjà présentes ni les tables créées par un autre rôle. Exécuter ces instructions avec un administrateur PostgreSQL ; le rôle qui crée les tables doit bien être `airbyte_user`.
 
 Sur les VPS, le générateur `infra/vps/30-postgres.sh` autorise aussi ce rôle en TLS depuis le VPS data (`10.50.0.3/32`). La règle doit précéder les rejets globaux dans `/etc/postgresql/16/main/pg_hba.conf` :
 

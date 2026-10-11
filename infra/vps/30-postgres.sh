@@ -114,7 +114,7 @@ if [ "$METABASE_VIA" = "public" ]; then
 fi
 
 log "Rôles (mots de passe générés pour les nouveaux uniquement)"
-ROLES="app_migrator app_ro airbyte_user dbt_user prefect_user metabase_user metabase_ops_user"
+ROLES="app_migrator app_ro airbyte_user dbt_user scraper_user prefect_user metabase_user metabase_ops_user"
 for role in $ROLES; do
   if [ "$(psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$role'")" != "1" ]; then
     pw="$(random_password)"
