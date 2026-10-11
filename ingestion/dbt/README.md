@@ -4,7 +4,7 @@
 
 **Resonsable** Data Team DataForGood
 
-**Dernière révision:** 2026-10-06
+**Dernière révision:** 2026-10-11
 
 **Status:** active
 
@@ -15,6 +15,7 @@
 | 1 | 2026-05-26 | Joel Teixeira | Documentation du projet dbt ingestion, des tags phase1/phase2 et du schéma `ops` |
 | 2 | 2026-10-06 | Joel Teixeira | Suppression des déclarations de modèles absents et alignement des modèles documentés sur le code actuel |
 | 3 | 2026-10-10 | Joel Teixeira | Ajout du runbook local macOS/WSL2 pour le debug et dbt Docs |
+| 4 | 2026-10-11 | GitHub Copilot | Normalisation des espaces dans les budgets CNC avant conversion numérique |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -25,6 +26,8 @@ Projet dbt Core exécuté depuis `prefect-worker`.
 3. Consolider les vues intermédiaires dans `intermediate`.
 4. Publier les tables finales dans `fnl` quand elles existent.
 5. Publier les vues opérationnelles dans `ops`.
+
+Le staging `stg_cnc_films` retire les espaces classiques, insécables (U+00A0) et fines insécables (U+202F) de `DEVIS`, puis remplace la virgule décimale par un point avant conversion numérique. La multiplication par un million pour les années d'agrément à partir de 2013 reste inchangée.
 
 ## Exécution
 

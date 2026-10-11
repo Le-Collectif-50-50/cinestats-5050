@@ -72,12 +72,12 @@ models:
       (array de JSONB) pour obtenir une ligne par couple film × pays. Applique une normalisation 
       des noms de pays (gestion des abréviations, variantes orthographiques, accents et tirets).
     columns:
-      - name: id
+      - name: film_country_budget_allocation_id
         description: "Identifiant unique de l'allocation budgétaire par pays (généré via CONCATENATE de movie_id et country_id)."
         tests:
           - not_null
           - unique
-      - name: movie_id
+      - name: film_id
         description: "Identifiant technique interne du film (généré via ROW_NUMBER dans stg_films)."
         tests:
           - not_null
