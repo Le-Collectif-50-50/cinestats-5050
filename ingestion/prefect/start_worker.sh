@@ -59,15 +59,8 @@ prefect deploy "${FLOWS_FILE}:main_ingestion_flow" \
 #	exit 1
 #}
 
-prefect deploy "${FLOWS_FILE}:run_mubi_cnc_scraping" \
-	--name "lancer-scraping-mubi-cnc" \
-	--description "Execution du scraping Mubi restreint aux films du referentiel CNC: palmares par film puis editions de festivals concernees." \
-	--concurrency-limit 1 \
-	--interval 600 \
-	--pool "${POOL_NAME}" >/tmp/prefect-deploy-mubi-cnc.log 2>&1 || {
-	cat /tmp/prefect-deploy-mubi-cnc.log
-	exit 1
-}
+# Auto-run Mubi CNC desactive egalement. Le nettoyage ci-dessus supprime
+# son ancien deploiement au demarrage; aucun scraping Mubi n'est planifie.
 
 prefect deploy "${FLOWS_FILE}:dispatch_ingestion_requests" \
 	--name "traiter-les-demandes-ingestion" \
