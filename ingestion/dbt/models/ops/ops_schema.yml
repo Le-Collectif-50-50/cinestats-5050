@@ -1,6 +1,31 @@
 version: 2
 
 models:
+  - name: film_credits_unmatched
+    description: >
+      Quarantaine des crédits sans correspondance film. Ces lignes restent
+      disponibles pour revue mais sont exclues de fnl_film_credits.
+      Le test film_credits_unmatched_review les signale sans bloquer le build.
+    columns:
+      - name: allocine_id
+        description: Identifiant Allociné retourné par le scraper, absent du matching.
+      - name: credit_holder_id
+        description: Identifiant de la personne ou société créditée.
+      - name: role_id
+        description: Identifiant du rôle.
+      - name: type
+        description: Personne ou société.
+      - name: full_name
+        description: Nom de la personne créditée.
+      - name: legal_name
+        description: Raison sociale de la société créditée.
+      - name: role
+        description: Libellé du rôle.
+      - name: source_visas
+        description: Visas CNC des entrées de scraping associées à cet identifiant.
+      - name: source_titles
+        description: Titres CNC des entrées de scraping associées à cet identifiant.
+
   - name: v_allocine_pipeline_status
     config:
       tags: ["phase2"]

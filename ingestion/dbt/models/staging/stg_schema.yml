@@ -93,7 +93,7 @@ models:
   - name: stg_fix_film_credits
     description: "Table de staging issue du gsheet Cinéstats 50/50, permettant d’apporter des corrections aux crédits des films (associations entre films, rôles et personnes créditées)."
     columns:
-      - name: id
+      - name: film_credit_id
         description: "Identifiant unique du crédit de film."
         tests:
           - not_null
@@ -145,7 +145,7 @@ models:
   - name: stg_fix_film_genres
     description: "Table de staging issue du gsheet Cinéstats 50/50, permettant d'apporter des corrections aux associations entre films et genres (fnl_film_genres)."
     columns:
-      - name: id
+      - name: film_genre_id
         description: "Identifiant unique de la relation film-genre."
         tests: 
           - not_null
@@ -169,7 +169,7 @@ models:
   - name: stg_fix_award_nomination
     description: "Table de staging issue du gsheet Cinéstats 50/50, permettant de corriger les nominations et récompenses des films (fnl_award_nominations)."
     columns:
-      - name: id
+      - name: award_nomination_id
         description: "Identifiant unique de la nomination."
         tests: 
           - not_null

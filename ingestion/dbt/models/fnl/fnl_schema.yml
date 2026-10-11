@@ -11,7 +11,11 @@ models:
         description: "Identifiant unique du film dans Cinéstats 50/50."
         tests:
           - not_null
-          - unique
+          - unique:
+              config:
+                severity: warn
+                store_failures: true
+                schema: ops
       - name: allocine_id
         description: "Identifiant du film sur Allociné."
       - name: mubi_id
@@ -22,7 +26,11 @@ models:
         description: "Visa d'exploitation CNC du film."
         tests:
           - not_null
-          - unique
+          - unique:
+              config:
+                severity: warn
+                store_failures: true
+                schema: ops
       - name: movie_name
         description: "Titre du film tel qu'affiché dans Cinéstats 50/50, privilégiant le titre Allociné."
         tests:

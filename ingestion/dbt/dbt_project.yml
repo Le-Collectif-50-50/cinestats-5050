@@ -31,3 +31,6 @@ models:
       +schema: ops
       +grants:
         select: [metabase_ops_user]
+
+on-run-end:
+  - "{{ persist_dbt_results(results) }}"
