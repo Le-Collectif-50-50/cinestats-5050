@@ -1,7 +1,7 @@
 # Tester la pipeline image en local
 
 **Owner:** Julien Commes
-**Dernière révision:** 2026-10-10
+**Dernière révision:** 2026-10-15
 **Status:** actif
 
 ## Périmètre
@@ -13,6 +13,8 @@ L’inférence vidéo/affiche et les exports fonctionnent sur un extrait CPU de 
 La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU. Le lanceur de test impose le CPU. Apple MPS, le profilage GPU et le nettoyage explicite du cache CUDA ne sont pas implémentés. Le module produit des fichiers locaux ; il ne les insère pas en base.
 
 ## Repères dans le module
+
+Le [plan de déploiement PostgreSQL, Prefect et dbt](../docs/specifications/ml-image-plan-deploiement-prefect-dbt.md) décrit la cible de production à implémenter, avec une exécution Docker CPU ou CUDA et des entrées/sorties en base.
 
 | Fichier | Rôle |
 | --- | --- |
@@ -141,3 +143,4 @@ Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires rac
 | --- | --- | --- | --- |
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties. |
+| 3 | 2026-10-15 | Joel | Ajout du lien vers le plan de déploiement PostgreSQL, Prefect et dbt. |
