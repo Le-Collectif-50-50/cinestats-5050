@@ -18,7 +18,7 @@ class ExplorationTests(unittest.TestCase):
         old = detector.crop_areas_of_interest(123, frames, 100, 100)
         new = detector.crop_areas_of_interest(123, frames, 100, 100, bbox_expand_factor=.5)
         self.assertEqual([d['perso_id'] for d in new], [0, 1])
-        for before, after in zip(old, new):
+        for before, after in zip(old, new, strict=False):
             self.assertEqual(after['movie_id'], 123)
             self.assertEqual(after['bbox'], before['bbox'])
             self.assertEqual(after['crop_bbox'], [0, 0, 70, 70])

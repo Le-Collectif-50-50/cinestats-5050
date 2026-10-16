@@ -109,7 +109,7 @@ def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, embedded_fac
         all_indexes.update(video_person["perso_ids"])  # Add all indexes from perso_ids
 
     # Step 2: Filter embedded_faces to keep only the embeddings corresponding to the collected indexes
-    embedded_faces = [(i, embedding) for i, embedding in zip(embedded_faces_perso_ids, embedded_faces) if i in all_indexes]
+    embedded_faces = [(i, embedding) for i, embedding in zip(embedded_faces_perso_ids, embedded_faces, strict=False) if i in all_indexes]
 
     filtered_detections = faces_clustering.assign_poster(embedded_faces_poster, embedded_faces, aggregated_estimations, filtered_detections, total_area, poster, store_visuals, mode=mode, results_path=results_path)
     logger.debug(f"Keys for faces_clustering.assign_poster: {filtered_detections[0].keys()}")
@@ -210,7 +210,7 @@ def evaluate_pipeline(args, to_predict_df, paths):
         logger.success(f"All films from {args.source} have been analyzed.")
         
     except Exception as e:
-        raise ValueError(f'Could not infer on given csv: {e}')
+        raise ValueError(f'Could not infer on given csv: {e}') from e
     
     
     #score_tot, score_kept_frames = "WIP", "WIP" evaluation_annotation.evaluate_trailer_whole_pipeline(trailer_path, aggregated_estimations)
@@ -258,7 +258,7 @@ def infer_pipeline(args, to_predict_df, paths):
         utils.gather_and_save_predictions(to_predict_df, paths['temp_preds'], paths['final_preds'])
         
     except Exception as e:
-        raise ValueError(f'Could not infer on given csv: {e}')
+        raise ValueError(f'Could not infer on given csv: {e}') from e
         
 def handler(args, paths):
     if args.source[-4:] == ".csv":
