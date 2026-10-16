@@ -1,7 +1,7 @@
 # Tester la pipeline image en local
 
 **Owner:** Julien Commes
-**Dernière révision:** 2026-10-15
+**Dernière révision:** 2026-10-16
 **Status:** actif
 
 ## Périmètre
@@ -10,7 +10,7 @@ Le module analyse les visages des bandes-annonces, regroupe les détections par 
 
 L’inférence vidéo/affiche et les exports fonctionnent sur un extrait CPU de test. L’évaluation intégrée reste inachevée ; l’exactitude des prédictions n’a pas été mesurée. La [description d’architecture](../docs/architecture/ml-image-architecture-description-pipeline-phase-1.md) détaille le code implémenté, les schémas de sortie et les limites vérifiées.
 
-La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU. Le lanceur de test impose le CPU. Apple MPS, le profilage GPU et le nettoyage explicite du cache CUDA ne sont pas implémentés. Le module produit des fichiers locaux ; il ne les insère pas en base.
+La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU. Le lanceur de test impose le CPU. Apple MPS n’est pas implémenté. La précision mixte, le profilage GPU et le nettoyage du cache CUDA sont optionnels ; leur exécution matérielle reste à valider. Le module produit des fichiers locaux ; il ne les insère pas en base.
 
 ## Repères dans le module
 
@@ -124,6 +124,33 @@ La borne `istop` est exclue. Le schéma CSV n’est pas validé avant traitement
 
 Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires racines. `PREDICTIONS_FOLDER`, `DOWNLOADED_MEDIA_FOLDER`, `FINAL_PREDICTIONS_FOLDER`, `INTERMEDIATE_FOLDER` et `VISUALS_FOLDER` choisissent leurs sous-répertoires. Le lanceur les isole automatiquement. Exception : les fonctions de visualisation écrivent encore dans `example/`, sans utiliser `VISUALS_FOLDER`. La branche affiche force les visualisations à `False`.
 
+## Options CUDA expérimentales
+
+Cette reprise séparée des changements CUDA de la PR 27 conserve la sélection automatique CUDA/CPU actuelle. Les options suivantes sont désactivées par défaut et transmises dans les modes `infer` et `eval` :
+
+| Option | Effet sur CUDA |
+| --- | --- |
+| `--cuda_amp` | Autocast FP16 pour YOLO, FairFace et FaceNet ; les probabilités FairFace et les embeddings exportés sont convertis en FP32 |
+| `--profile_memory` | Synchronisation et remise à zéro des pics avant chaque film ; journalisation de la mémoire allouée/réservée et de leurs pics à la sortie, y compris après exception |
+| `--clear_cuda_cache` | Libération du cache inutilisé à la sortie du traitement d’un film, y compris après exception |
+
+Sur CPU, ces options n’appellent ni autocast ni API de mémoire CUDA. Les DataLoader utilisent la mémoire épinglée et les transferts non bloquants uniquement pour un périphérique CUDA. Les résultats YOLO sont transférés sur CPU après chaque lot au lieu de rester tous sur GPU. Les images vidéo restent entièrement chargées en RAM.
+
+`empty_cache()` ne libère pas les tenseurs encore référencés et n’évite pas un dépassement de mémoire pendant un film. Le nettoyage et les synchronisations peuvent ralentir le traitement. Aucune configuration globale de l’allocateur n’est imposée.
+
+Depuis `ml-image/`, sur une machine CUDA équipée des dépendances et poids :
+
+```bash
+TEMP_FOLDER=tmp/cuda-fp32 OUTPUTS_FOLDER=outputs/cuda-fp32 \
+  .venv/bin/python main.py --source /chemin/films.csv --istop 1 --profile_memory
+TEMP_FOLDER=tmp/cuda-amp OUTPUTS_FOLDER=outputs/cuda-amp \
+  .venv/bin/python main.py --source /chemin/films.csv --istop 1 --profile_memory --cuda_amp
+```
+
+Vérifier que CUDA est disponible avant ces comparaisons. Utiliser les mêmes médias, versions, poids, taille de lot et seuils. Comparer durée, pics mémoire, nombre de détections, classifications, probabilités, embeddings et groupes. La conversion finale en FP32 ne restaure pas la précision perdue pendant AMP : les seuils et regroupements peuvent changer. Tester séparément `--clear_cuda_cache` sur plusieurs films et sur un échec.
+
+Validation locale : tests CPU et CUDA simulé, exports synthétiques et aide CLI. Le test matériel CUDA de `tests/test_cuda_runtime.py` est ignoré sans GPU. Aucun gain de performance ni équivalence qualitative sur les modèles réels n’est établi.
+
 ## Limites et dépannage
 
 - MediaPipe 0.10.21 contient une bibliothèque universelle ARM64/x86_64, mais ses métadonnées de wheel annoncent x86_64. `uv pip check` et `pip check` signalent donc la plateforme ; le traitement natif d’une image a été vérifié sur ce Mac ARM64.
@@ -144,3 +171,4 @@ Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires rac
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties. |
 | 3 | 2026-10-15 | Joel | Ajout du lien vers le plan de déploiement PostgreSQL, Prefect et dbt. |
+| 4 | 2026-10-16 | Codex | Options CUDA expérimentales, transferts des résultats par lot et protocole de comparaison GPU. |

@@ -1,7 +1,7 @@
 # Pipeline ML image : architecture implémentée et limites
 
 **Owner:** Julien Commes
-**Dernière révision:** 2026-10-10
+**Dernière révision:** 2026-10-16
 **Status:** actif
 
 ## Périmètre et niveau de validation
@@ -22,7 +22,7 @@ Ce document décrit le code présent, y compris ses limitations. Pour installer 
 | Affiche annotée depuis la CLI | Désactivée dans l’appel de `predict_one_item` |
 | CUDA | Sélection automatique présente ; exécution non validée |
 | Apple MPS | Non implémenté |
-| Nettoyage/profilage explicite de mémoire CUDA | Non implémenté |
+| Nettoyage/profilage explicite de mémoire CUDA | Options par film implémentées ; validation matérielle restante |
 | Validation du schéma CSV et reprise fiable des erreurs | Non implémentées |
 
 Le 10 octobre 2026, le test CPU sur macOS ARM64 a produit deux pickle, trois lignes de personnages vidéo et sept lignes de détections affiche pour un extrait de dix secondes / 240 images de **Natacha, hôtesse de l’air**. Le test confirme le fonctionnement de ce parcours, pas la qualité des classifications, des regroupements ou des correspondances. L’échantillon et les poids sont locaux et non versionnés.
@@ -166,7 +166,15 @@ L’appel final au calcul des scores est commenté. Les helpers d’annotation n
 | `--source_image`, `--min_sharpness`, `--max_z`, `--min_mouth_opening` | Déclarés dans la CLI, non utilisés par le gestionnaire |
 | `--min_mouth_opening_cla` | Transmis mais aucun filtre actif ne l’utilise |
 
-Il n’y a pas d’option CLI `--device` ni `--bbox_expand_factor`.
+Il n’y a pas d’option CLI `--device` ni `--bbox_expand_factor` dans cette branche.
+
+### Options CUDA
+
+`predict_with_cuda_options()` enveloppe chaque prédiction des modes `infer` et `eval`. Le contexte `cuda_runtime.inference_options()` restaure l’option AMP dans un bloc `finally`, y compris en cas d’échec. Les options `--cuda_amp`, `--profile_memory` et `--clear_cuda_cache` sont désactivées par défaut et sans effet sur CPU.
+
+Sur CUDA, les DataLoader utilisent `pin_memory` et les transferts non bloquants. YOLO renvoie les résultats de chaque lot sur CPU ; FairFace y calcule ses probabilités en FP32 et FaceNet y stocke ses embeddings en FP32. Avec AMP, les passages de modèles s’exécutent sous autocast FP16. Cette conversion finale ne garantit pas des prédictions identiques au FP32.
+
+Le profilage synchronise CUDA, remet à zéro les pics avant le film et journalise les valeurs allouées/réservées et leurs pics à la sortie. Le nettoyage optionnel libère seulement le cache inutilisé. Aucun réglage global de l’allocateur n’est forcé. Les tests couvrent les contrats CPU et des appels CUDA simulés ; le test CUDA matériel est conditionnel. Le [README ML](../../ml-image/README.md#options-cuda-expérimentales) donne le protocole de comparaison restant.
 
 ## Fiabilité et travail restant
 
@@ -174,7 +182,7 @@ Les points suivants sont des limites du code, pas des fonctionnalités disponibl
 
 - Les vidéos vides, FPS nuls ou listes de détections vides ne sont pas traités systématiquement. Des accès `[0]` figurent même dans des chaînes de logs de niveau debug.
 - Les exceptions par film sont journalisées puis ignorées. Le message « All films … analyzed » peut donc apparaître malgré des films en échec. Il n’existe pas de bilan fiable des réussites et échecs ; le lanceur de test contrôle les fichiers produits.
-- Les images, détections et embeddings restent en mémoire. Les lots limitent certains calculs, mais pas le chargement initial. Aucun profilage GPU, `empty_cache()` ou nettoyage explicite par film n’est implémenté.
+- Les images, détections et embeddings restent en mémoire. Les lots limitent certains calculs, mais pas le chargement initial. Les options `--profile_memory` et `--clear_cuda_cache` mesurent les pics et libèrent le cache inutilisé par film. Elles ne libèrent pas les tenseurs encore référencés ni la RAM des images.
 - Les modèles sont recréés lors des appels de traitement ; leur réutilisation entre films n’est pas organisée.
 - Docker utilise les dépendances historiques, une installation CUDA 11.8 et le téléchargement des poids à la construction. Son `ENTRYPOINT` est commenté. Il n’a pas été validé par le test CPU local.
 - La validation qualitative nécessite des annotations de référence, des mesures d’erreur et une revue des conversions de couleurs, des seuils, des votes et des correspondances.
@@ -185,3 +193,4 @@ Les points suivants sont des limites du code, pas des fonctionnalités disponibl
 | --- | --- | --- | --- |
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2 | 2026-10-10 | Joel Teixeira | Audit du code récupéré et du test CPU ; description en français des entrées, calculs, sorties, paramètres actifs et fonctionnalités incomplètes. |
+| 3 | 2026-10-16 | Codex | Options CUDA par film, transfert CPU des résultats et limites de validation matérielle. |

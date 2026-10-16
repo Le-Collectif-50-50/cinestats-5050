@@ -87,4 +87,11 @@ if __name__ == '__main__':
     parser.add_argument("--istop", type=int, default=1e9,
                         help="Row index on which to stop dataframe analysis")
 
+    parser.add_argument("--cuda_amp", action=argparse.BooleanOptionalAction, default=False,
+                        help="Activer la précision mixte CUDA (expérimental)")
+    parser.add_argument("--profile_memory", action=argparse.BooleanOptionalAction, default=False,
+                        help="Journaliser mémoire CUDA et pics par film, dans infer et eval")
+    parser.add_argument("--clear_cuda_cache", action=argparse.BooleanOptionalAction, default=False,
+                        help="Libérer le cache CUDA inutilisé après chaque film")
+
     main(parser)

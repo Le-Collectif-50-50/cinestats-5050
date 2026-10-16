@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from . import cuda_runtime
+
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from facenet_pytorch import InceptionResnetV1
@@ -13,7 +15,7 @@ from scripts import evaluation_annotation
 
 class EmbeddingModel:
     def __init__(self, model: str = "facenet", device: str = 'cpu'):
-        self.device = device
+        self.device = torch.device(device)
         self.model_name = model
 
         match self.model_name:
@@ -37,15 +39,17 @@ class EmbeddingModel:
                 raise ValueError("Model not supported")
 
         dataset = utils.ImageDataset(detected_faces, face_transform)
-        dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=0)
+        dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=0, pin_memory=cuda_runtime.is_cuda(self.device))
 
         embeddings = []
 
         with torch.no_grad():
             for batch in dataloader:
-                batch = batch.to(self.device)
-                emb = self.model(batch)
-                embeddings.append(emb.cpu())
+                batch = batch.to(self.device, non_blocking=cuda_runtime.is_cuda(self.device))
+                with cuda_runtime.autocast_context(self.device):
+                    emb = self.model(batch)
+                embeddings.append(emb.float().cpu())
+                del batch, emb
 
         if len(embeddings) == 0:
             return np.array([])
