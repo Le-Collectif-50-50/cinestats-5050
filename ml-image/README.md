@@ -112,7 +112,7 @@ Le 16 octobre 2026, les médias ont été récupérés à nouveau depuis les URL
 | `--device cpu --bbox_expand_factor 0.3 --remove_overlaps` | 2 groupes vidéo, 7 détections affiche ; pickle et CSV présents |
 | Mode `eval` avec ces options | 826 lignes intermédiaires vidéo, 7 lignes affiche ; aucun score final calculé |
 
-Le notebook consolidé a aussi été exécuté avec les modèles réels : toutes les cellules de code passent, sans annotations de référence. L’affichage Jupyter a été remplacé par des PNG pour cette exécution hors notebook ; le noyau Jupyter lui-même n’a pas été testé. L’extrait récupéré comporte 237 images à 24 FPS (9,875 s).
+Le notebook consolidé a aussi été exécuté avec les modèles réels : toutes les cellules de code passent, sans annotations de référence. Une nouvelle exécution dans le noyau Jupyter `ric-ml-cpu` a validé les six cellules de code et produit six graphiques intégrés, sans erreur. Les annotations facultatives n’ont pas été testées. L’extrait récupéré comporte 237 images à 24 FPS (9,875 s).
 
 La variation du nombre de groupes justifie de conserver ces options désactivées par défaut. Ce contrôle porte sur l’exécution et les fichiers produits, pas sur l’exactitude des prédictions. Les six tests de régression sans modèles passent également.
 
@@ -138,7 +138,17 @@ Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires rac
 
 ## Exploration des détections et des groupes
 
-Le [notebook d’exploration](notebooks/explore_pipeline_clustering.ipynb) consolide les deux notebooks historiques de la PR 27. Il utilise les signatures actuelles, des chemins absolus et un répertoire de résultats distinct par exécution. Configurer une vidéo locale courte et sélectionner le noyau de `ml-image/.venv` ; installer Jupyter/ipykernel séparément si nécessaire. Aucun CSV historique privé n’est nécessaire. Les sorties ne sont pas préexécutées.
+Le [notebook d’exploration](notebooks/explore_pipeline_clustering.ipynb) consolide les deux notebooks historiques de la PR 27. Il utilise les signatures actuelles, des chemins absolus et un répertoire de résultats distinct par exécution. Configurer une vidéo locale courte et sélectionner le noyau **RIC ML (Python 3.11 CPU)**. Le `.venv` à la racine du dépôt est distinct ; ne pas le confondre avec `ml-image/.venv`. Aucun CSV historique privé n’est nécessaire. Les sorties ne sont pas préexécutées.
+
+Installer et enregistrer le noyau depuis la racine, après `bash ml-image/install/setup_local.sh` :
+
+```bash
+uv pip install --python ml-image/.venv/bin/python ipykernel
+ml-image/.venv/bin/python -m ipykernel install --user --name ric-ml-cpu --display-name "RIC ML (Python 3.11 CPU)"
+```
+
+Sélectionner ce noyau dans Jupyter/VS Code, redémarrer puis tout exécuter. Dans VS Code, il est aussi possible de sélectionner directement `ml-image/.venv/bin/python`. La première cellule affiche le Python actif et signale les dépendances manquantes avant les imports ML. `No module named 'cv2'` indique qu’OpenCV manque dans le noyau actif ; préparer l’environnement ML puis sélectionner son noyau.
+
 
 Il permet d’inspecter les images, les crops, les filtres, les classifications, les membres des groupes et leur temps de présence. Un CSV facultatif d’annotations (`gender,age,ethnicity,time_on_screen`) compare les distributions de temps sur le même extrait. Leur similarité n’est pas une mesure d’exactitude individuelle.
 
@@ -215,7 +225,5 @@ Ces contrôles valident le fonctionnement CPU et l’absence d’effet des optio
 | --- | --- | --- | --- |
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties. |
-| 3 | 2026-10-15 | Joel | Ajout du lien vers le plan de déploiement PostgreSQL, Prefect et dbt. |
-| 4 | 2026-10-16 | Codex | Reprise ciblée de la PR 27 : notebook consolidé, choix du périphérique, expansion des crops sans modification des surfaces et suppression optionnelle des chevauchements. |
-| 5 | 2026-10-16 | Codex | Validation CPU sur médias staging récupérés à nouveau : inférence par défaut et options, exports eval et notebook avec modèles réels. |
-| 6 | 2026-10-16 | Codex | Intégration PR 29 : options CUDA désactivées par défaut, prise en compte du périphérique explicite, validations CPU et protocole GPU restant. |
+| 3 | 2026-10-15 | Joel Teixeira| Ajout du lien vers le plan de déploiement PostgreSQL, Prefect et dbt. |
+| 4 | 2026-10-16 | Joel Teixeira | Reprise ciblée de la PR 27 : notebook consolidé, choix du périphérique, expansion des crops sans modification des surfaces et suppression optionnelle des chevauchements. Validation CPU sur médias staging récupérés à nouveau : inférence par défaut et options, exports eval et notebook avec modèles réels. Intégration PR 29 : options CUDA désactivées par défaut, prise en compte du périphérique explicite, validations CPU et protocole GPU restant. Installation du noyau Jupyter dédié et diagnostic du mauvais environnement Python dans le notebook. |
