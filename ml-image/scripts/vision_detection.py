@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import torch
+
+from . import cuda_runtime
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from ultralytics import YOLO
@@ -62,24 +64,29 @@ class VisionDetection:
         # Load frames in the dataloader
         dataset = ImageDataset(images, frames_transform)
         dataloader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+            dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=cuda_runtime.is_cuda(self.device))
 
         # Detect faces in all frames of the trailer
         results = []
         with torch.no_grad():
             if area_type == "face":
                 for batch in dataloader:
-                    batch = batch.to(self.device)
+                    batch = batch.to(self.device, non_blocking=cuda_runtime.is_cuda(self.device))
                     batch = torch.clamp(batch, 0, 1)  # Ensure values are in [0, 1] range
-                    detections = self.yolo_model_face(batch, verbose=False)
-                    results.extend(detections)
+                    with cuda_runtime.autocast_context(self.device):
+                        detections = self.yolo_model_face(batch, verbose=False)
+                    # Ne pas garder les résultats de toutes les images sur GPU.
+                    results.extend(result.cpu() for result in detections)
+                    del batch, detections
             else:
                 for batch in dataloader:
-                    batch = batch.to(self.device)
+                    batch = batch.to(self.device, non_blocking=cuda_runtime.is_cuda(self.device))
                     batch = torch.clamp(batch, 0, 1)  # Ensure values are in [0, 1] range
-                    detections = self.yolo_model_person(batch, verbose=False, classes=[
-                                                        0])
-                    results.extend(detections)
+                    with cuda_runtime.autocast_context(self.device):
+                        detections = self.yolo_model_person(batch, verbose=False, classes=[0])
+                    # Ne pas garder les résultats de toutes les images sur GPU.
+                    results.extend(result.cpu() for result in detections)
+                    del batch, detections
 
         return results
 

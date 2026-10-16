@@ -9,6 +9,7 @@ import torch
 from loguru import logger
 from tqdm import tqdm
 
+from scripts import cuda_runtime
 from scripts import faces_clustering
 from scripts import filter_detections
 from scripts import utils
@@ -184,6 +185,18 @@ def predict_one_item(
             
     return aggregated_estimations, filtered_detections
 
+def predict_with_cuda_options(args, *positional, **kwargs):
+    """Appliquer les options aux deux modes, sur le périphérique de la pipeline."""
+    device = resolve_device(kwargs.get('device_arg', getattr(args, 'device', 'auto')))
+    kwargs['device_arg'] = str(device)
+    with cuda_runtime.inference_options(
+        device, amp=getattr(args, 'cuda_amp', False),
+        profile_memory=getattr(args, 'profile_memory', False),
+        clear_cache=getattr(args, 'clear_cuda_cache', False),
+    ):
+        return predict_one_item(*positional, **kwargs)
+
+
 def evaluate_pipeline(args, to_predict_df, paths):
     options = exploration_options(args)
     try:
@@ -197,7 +210,8 @@ def evaluate_pipeline(args, to_predict_df, paths):
         for i, row in tqdm(to_predict_df.iterrows(), total=len(to_predict_df)):
             try : 
                 poster_path, trailer_path = f"{paths['dl_media']}/{row.visa_number}.jpg", f"{paths['dl_media']}/{row.visa_number}.mp4"
-                aggregated_estimations, filtered_detections = predict_one_item(
+                aggregated_estimations, filtered_detections = predict_with_cuda_options(
+                    args,
                     args.column_identifier, args.num_cpu, args.batch_size, args.min_area, args.max_area, args.min_conf, 
                     args.min_conf_cla, args.min_sharpness_cla, args.max_z_cla, args.min_mouth_opening_cla, args.cluster_model,
                     args.cluster_threshold, args.agr_method, args.store_visuals, paths['dl_media'], poster_path, trailer_path, row=row,
@@ -230,7 +244,8 @@ def infer_pipeline(args, to_predict_df, paths):
         for i, row in tqdm(to_predict_df.iterrows(), total=len(to_predict_df)):
             try : 
                 poster_path, trailer_path = f"{paths['dl_media']}/{row.visa_number}.jpg", f"{paths['dl_media']}/{row.visa_number}.mp4"
-                aggregated_estimations, filtered_detections = predict_one_item(
+                aggregated_estimations, filtered_detections = predict_with_cuda_options(
+                    args,
                     args.column_identifier, args.num_cpu, args.batch_size, args.min_area, args.max_area, args.min_conf, 
                     args.min_conf_cla, args.min_sharpness_cla, args.max_z_cla, args.min_mouth_opening_cla, args.cluster_model,
                     args.cluster_threshold, args.agr_method, args.store_visuals, paths['dl_media'], poster_path, trailer_path, row=row, **options

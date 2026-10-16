@@ -10,7 +10,7 @@ Le module analyse les visages des bandes-annonces, regroupe les détections par 
 
 L’inférence vidéo/affiche et les exports fonctionnent sur un extrait CPU de test. L’évaluation intégrée reste inachevée ; l’exactitude des prédictions n’a pas été mesurée. La [description d’architecture](../docs/architecture/ml-image-architecture-description-pipeline-phase-1.md) détaille le code implémenté, les schémas de sortie et les limites vérifiées.
 
-La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU ; `--device cpu` ou `--device cuda` impose le périphérique dans les modes `infer` et `eval`. Une demande CUDA indisponible échoue avant traitement. Le lanceur de test impose le CPU. Apple MPS, le profilage GPU et le nettoyage explicite du cache CUDA ne sont pas implémentés. Le module produit des fichiers locaux ; il ne les insère pas en base.
+La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU ; `--device cpu` ou `--device cuda` impose le périphérique dans les modes `infer` et `eval`. Une demande CUDA indisponible échoue avant traitement. Le lanceur de test impose le CPU. Apple MPS n’est pas implémenté. Précision mixte, profilage et nettoyage du cache CUDA sont optionnels ; leur exécution matérielle reste à valider. Le module produit des fichiers locaux ; il ne les insère pas en base.
 
 ## Repères dans le module
 
@@ -155,7 +155,46 @@ L’expansion s’applique aux crops vidéo et affiche. `bbox` reste la boîte d
 
 La suppression conserve les grandes boîtes et préserve l’ordre d’entrée et les identifiants. Elle n’est appliquée qu’une fois, avant la production des embeddings vidéo, pour conserver leur correspondance avec les détections. Elle peut supprimer des visages distincts proches et reste donc désactivée par défaut. Les détections supprimées sont enregistrées parmi les rejets du mode `eval`.
 
-Le classifieur d’attributs CelebA et les optimisations/profilages CUDA de la PR 27 sont différés : poids, ordre des labels, précision et performances restent à valider. Les correctifs actuels de téléchargement et d’export sont conservés.
+Le classifieur d’attributs CelebA reste différé : poids et ordre des labels restent à valider. Les options CUDA sont décrites ci-dessous. Les correctifs actuels de téléchargement et d’export sont conservés.
+
+## Options CUDA expérimentales
+
+Les options CUDA respectent `--device` dans les modes `infer` et `eval`, y compris CPU imposé sur une machine équipée de CUDA. Les options suivantes sont désactivées par défaut et transmises dans les modes `infer` et `eval` :
+
+| Option | Effet sur CUDA |
+| --- | --- |
+| `--cuda_amp` | Autocast FP16 pour YOLO, FairFace et FaceNet ; les probabilités FairFace et les embeddings exportés sont convertis en FP32 |
+| `--profile_memory` | Synchronisation et remise à zéro des pics avant chaque film ; journalisation de la mémoire allouée/réservée et de leurs pics à la sortie, y compris après exception |
+| `--clear_cuda_cache` | Libération du cache inutilisé à la sortie du traitement d’un film, y compris après exception |
+
+Sur CPU, ces options n’appellent ni autocast ni API de mémoire CUDA. Les DataLoader utilisent la mémoire épinglée et les transferts non bloquants uniquement pour un périphérique CUDA. Les résultats YOLO sont transférés sur CPU après chaque lot au lieu de rester tous sur GPU. Les images vidéo restent entièrement chargées en RAM.
+
+`empty_cache()` ne libère pas les tenseurs encore référencés et n’évite pas un dépassement de mémoire pendant un film. Le nettoyage et les synchronisations peuvent ralentir le traitement. Aucune configuration globale de l’allocateur n’est imposée.
+
+Depuis `ml-image/`, sur une machine CUDA équipée des dépendances et poids :
+
+```bash
+TEMP_FOLDER=tmp/cuda-fp32 OUTPUTS_FOLDER=outputs/cuda-fp32 \
+  .venv/bin/python main.py --source /chemin/films.csv --istop 1 --profile_memory
+TEMP_FOLDER=tmp/cuda-amp OUTPUTS_FOLDER=outputs/cuda-amp \
+  .venv/bin/python main.py --source /chemin/films.csv --istop 1 --profile_memory --cuda_amp
+```
+
+Vérifier que CUDA est disponible avant ces comparaisons. Utiliser les mêmes médias, versions, poids, taille de lot et seuils. Comparer durée, pics mémoire, nombre de détections, classifications, probabilités, embeddings et groupes. La conversion finale en FP32 ne restaure pas la précision perdue pendant AMP : les seuils et regroupements peuvent changer. Tester séparément `--clear_cuda_cache` sur plusieurs films et sur un échec.
+
+Validation locale : tests CPU et CUDA simulé, exports synthétiques, aide CLI et inférence réelle sur CPU. Le test matériel CUDA de `tests/test_cuda_runtime.py` est ignoré sans GPU. Aucun gain de performance ni équivalence qualitative sur les modèles réels n’est établi.
+
+### Validation CPU du 16 octobre 2026
+
+Sur macOS ARM64, PyTorch 2.2.2 sans CUDA, l’extrait staging récupéré à nouveau de **Natacha, hôtesse de l’air** contient 237 images à 24 FPS. L’inférence utilise les modèles réels et des lots de quatre images.
+
+- Le parcours par défaut produit 3 groupes vidéo et 7 détections affiche.
+- Avec `--cuda_amp --profile_memory --clear_cuda_cache`, les mêmes sorties sont produites. Les lignes CSV vidéo et affiche sont exactement identiques après tri, ainsi qu’à la référence CPU de PR 27 sans expansion ni suppression de chevauchements.
+- Le mode `eval`, avec les trois options activées, produit 826 lignes intermédiaires vidéo et 7 lignes affiche ; les scores finaux restent hors périmètre.
+- Après intégration de `main`, treize tests de régression passent ; le test matériel CUDA est ignoré faute de GPU.
+- Une nouvelle inférence avec `--device cpu --cuda_amp --profile_memory --clear_cuda_cache --bbox_expand_factor 0.3 --remove_overlaps` produit 2 groupes vidéo et 7 détections affiche, comme la validation PR 27 avec ces options de crops.
+
+Ces contrôles valident le fonctionnement CPU et l’absence d’effet des options CUDA sur cet échantillon. Ils ne mesurent ni la qualité des classifications, ni les performances, ni le fonctionnement matériel CUDA. Les logs, médias et sorties sont conservés localement dans les répertoires de test ignorés par Git.
 
 ## Limites et dépannage
 
@@ -179,3 +218,4 @@ Le classifieur d’attributs CelebA et les optimisations/profilages CUDA de la P
 | 3 | 2026-10-15 | Joel | Ajout du lien vers le plan de déploiement PostgreSQL, Prefect et dbt. |
 | 4 | 2026-10-16 | Codex | Reprise ciblée de la PR 27 : notebook consolidé, choix du périphérique, expansion des crops sans modification des surfaces et suppression optionnelle des chevauchements. |
 | 5 | 2026-10-16 | Codex | Validation CPU sur médias staging récupérés à nouveau : inférence par défaut et options, exports eval et notebook avec modèles réels. |
+| 6 | 2026-10-16 | Codex | Intégration PR 29 : options CUDA désactivées par défaut, prise en compte du périphérique explicite, validations CPU et protocole GPU restant. |
