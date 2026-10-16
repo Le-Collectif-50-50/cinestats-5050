@@ -149,7 +149,18 @@ TEMP_FOLDER=tmp/cuda-amp OUTPUTS_FOLDER=outputs/cuda-amp \
 
 Vérifier que CUDA est disponible avant ces comparaisons. Utiliser les mêmes médias, versions, poids, taille de lot et seuils. Comparer durée, pics mémoire, nombre de détections, classifications, probabilités, embeddings et groupes. La conversion finale en FP32 ne restaure pas la précision perdue pendant AMP : les seuils et regroupements peuvent changer. Tester séparément `--clear_cuda_cache` sur plusieurs films et sur un échec.
 
-Validation locale : tests CPU et CUDA simulé, exports synthétiques et aide CLI. Le test matériel CUDA de `tests/test_cuda_runtime.py` est ignoré sans GPU. Aucun gain de performance ni équivalence qualitative sur les modèles réels n’est établi.
+Validation locale : tests CPU et CUDA simulé, exports synthétiques, aide CLI et inférence réelle sur CPU. Le test matériel CUDA de `tests/test_cuda_runtime.py` est ignoré sans GPU. Aucun gain de performance ni équivalence qualitative sur les modèles réels n’est établi.
+
+### Validation CPU du 16 octobre 2026
+
+Sur macOS ARM64, PyTorch 2.2.2 sans CUDA, l’extrait staging récupéré à nouveau de **Natacha, hôtesse de l’air** contient 237 images à 24 FPS. L’inférence utilise les modèles réels et des lots de quatre images.
+
+- Le parcours par défaut produit 3 groupes vidéo et 7 détections affiche.
+- Avec `--cuda_amp --profile_memory --clear_cuda_cache`, les mêmes sorties sont produites. Les lignes CSV vidéo et affiche sont exactement identiques après tri, ainsi qu’à la référence CPU de PR 27 sans expansion ni suppression de chevauchements.
+- Le mode `eval`, avec les trois options activées, produit 826 lignes intermédiaires vidéo et 7 lignes affiche ; les scores finaux restent hors périmètre.
+- Sept tests de régression passent ; le test matériel CUDA est ignoré faute de GPU.
+
+Ces contrôles valident le fonctionnement CPU et l’absence d’effet des options CUDA sur cet échantillon. Ils ne mesurent ni la qualité des classifications, ni les performances, ni le fonctionnement matériel CUDA. Les logs, médias et sorties sont conservés localement dans les répertoires de test ignorés par Git.
 
 ## Limites et dépannage
 
@@ -172,3 +183,4 @@ Validation locale : tests CPU et CUDA simulé, exports synthétiques et aide CLI
 | 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties. |
 | 3 | 2026-10-15 | Joel | Ajout du lien vers le plan de déploiement PostgreSQL, Prefect et dbt. |
 | 4 | 2026-10-16 | Codex | Options CUDA expérimentales, transferts des résultats par lot et protocole de comparaison GPU. |
+| 5 | 2026-10-16 | Codex | Validation réelle CPU : sorties identiques avec options CUDA désactivées ou activées sur un extrait staging. |
