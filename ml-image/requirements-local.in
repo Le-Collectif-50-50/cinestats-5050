@@ -1,0 +1,19 @@
+# Environnement CPU de test : Python 3.11, macOS ARM64.
+# Dépendances d'inférence uniquement ; requirements.txt historique reste inchangé.
+beautifulsoup4==4.13.3
+dlib==19.24.6
+facenet-pytorch==2.6.0
+loguru==0.7.3
+mediapipe==0.10.21
+numpy==1.26.4
+opencv-python==4.11.0.86
+opencv-contrib-python==4.11.0.86
+pandas==2.2.3
+pillow==10.2.0
+psutil==7.0.0
+requests==2.32.3
+torch==2.2.2
+torchvision==0.17.2
+tqdm==4.67.1
+ultralytics==8.3.83
+urllib3==2.6.3
