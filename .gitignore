@@ -188,3 +188,6 @@ certbot/logs/*
 database/data/allocine/*.csv
 mubi_festivals_debug.csv
 *.dump
+
+# Exports SQL et logs des backfills locaux
+ingestion/scraping/allocine/local-runs/
