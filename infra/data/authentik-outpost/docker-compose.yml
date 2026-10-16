@@ -1,0 +1,26 @@
+# Outpost proxy Authentik (VPS data) : vérifie la connexion auprès du serveur Authentik
+# (auth.cinestats5050.fr) puis relaie vers Airbyte. Protégé par un blueprint de
+# cinestats-infra (authentik/blueprints/airbyte.yaml). Le token se copie dans
+# Authentik : Applications → Outposts → airbyte-outpost → View Deployment Info.
+#
+# Réseau hôte : l'outpost joint Airbyte sur 127.0.0.1:8000, et n'écoute lui-même qu'en
+# loopback (Caddy, sur l'hôte, est le seul à lui parler).
+services:
+  authentik-outpost:
+    image: ghcr.io/goauthentik/proxy:2025.4
+    container_name: authentik-outpost-airbyte
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      AUTHENTIK_HOST: https://auth.cinestats5050.fr
+      AUTHENTIK_TOKEN: ${AUTHENTIK_TOKEN:?le token de l'outpost, voir l'en-tête de ce fichier}
+      AUTHENTIK_INSECURE: "false"
+      AUTHENTIK_LISTEN__HTTP: 127.0.0.1:9000
+      AUTHENTIK_LISTEN__HTTPS: 127.0.0.1:9443
+      AUTHENTIK_LISTEN__METRICS: 127.0.0.1:9300
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,28 +1,16 @@
-import { Button } from "@/components/ui/button";
+import type { Metadata } from "next";
+import HomeClient from "./HomeClient";
+import { HOME_KEYWORDS, SITE_NAME } from "@/lib/seo";
 
-export default function Home() {
-  return (
-    <>
-      <div
-        className="background-image"
-        style={
-          {
-            "--background-image-url": `url('/home.jpeg')`,
-          } as React.CSSProperties
-        }
-      ></div>
-      <main className="container mx-auto px-4 py-16 flex flex-col items-center justify-center text-center text-white">
-        <div className=" animate-slide-up">
-          <div className="pt-30 pb-5">
-            <span className="text-6xl font-bold w-3/4">
-              <span className="text-violet-500">27%</span>
-              <span> des réalisateurs actifs ces 10 dernières années sont des </span>
-              <span className="text-violet-500">femmes</span>
-            </span>
-          </div>
-          <Button className="bg-violet-500">En savoir plus</Button>
-        </div>
-      </main>
-    </>
-  );
+export const metadata: Metadata = {
+  title: {
+    absolute: `${SITE_NAME} — Inégalités de parité dans l'industrie du cinéma`,
+  },
+  description:
+    "Explorez les inégalités de parité dans le cinéma : recherche par film, données sur les équipes techniques et artistiques, statistiques sur 20 ans. Un projet du Collectif 50/50 et Data for Good.",
+  keywords: HOME_KEYWORDS,
+};
+
+export default function Page() {
+  return <HomeClient />;
 }

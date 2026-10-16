@@ -1,0 +1,25 @@
+# Surcharge de ingestion/docker-compose.yml (branche analytics/dbt_airbyte_setup)
+# pour le VPS data. Compose la charge automatiquement : elle doit rester dans le
+# même dossier que le compose d'origine. Déployée par infra/data/deploy-ingestion.sh.
+#
+# Écarts volontaires avec la branche :
+# - Prefect n'est publié qu'en loopback (UI par tunnel SSH), Browserless n'est pas
+#   publié du tout (le worker l'atteint par le réseau interne de compose).
+# - Prefect garde sa base de métadonnées en local (SQLite, volume persistant) :
+#   prefect_user n'a pas le droit de créer une base sur le Postgres de prod.
+# - Browserless est limité à 2 sessions Chrome ; ses ressources se règlent dans .env
+#   (BROWSERLESS_CPUS, BROWSERLESS_MEM_LIMIT, ...), car le VPS n'a que 4 vCPU / 8 Go.
+services:
+  prefect-server:
+    ports: !override
+      - "127.0.0.1:${PREFECT_PORT:-4222}:4200"
+    volumes:
+      - prefect-data:/root/.prefect
+
+  browserless:
+    ports: !reset []
+    environment:
+      MAX_CONCURRENT_SESSIONS: "2"
+
+volumes:
+  prefect-data:

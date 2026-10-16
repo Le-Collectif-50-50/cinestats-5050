@@ -1,7 +1,6 @@
 "use client";
 
 import { toast } from "sonner";
-import { Button } from "../ui/button";
 import {
   Dialog,
   DialogContent,
@@ -9,22 +8,32 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "../ui/dialog";
+import Image from "next/image";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from "../ui/drawer";
+import { CheckIcon } from "lucide-react";
 
-const ShareDialog = ({ imageSource }: { imageSource: string }) => {
-  const shareUrl = window.location.href;
+const ShareDialog = ({
+  open,
+  setOpen,
+  imageSource
+}: {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  imageSource: string;
+}) => {
+  // `window` isn't defined during SSR — `window?.` doesn't guard against
+  // that (it's an undeclared identifier, not just a null/undefined value),
+  // so this crashed the server render of every /films/[slug] page. Only
+  // used inside click handlers below, so a plain "" placeholder on the
+  // server is safe.
+  const shareUrl = typeof window !== "undefined" ? window.location.href : "";
   const shareText = "Découvrez ce film incroyable !";
 
   const copyLink = () => {
     navigator.clipboard.writeText(shareUrl);
-    toast("Lien copié dans le presse-papier !",  {
-      description: "Sunday, December 03, 2023 at 9:00 AM",
-      action: {
-        label: "Undo",
-        onClick: () => console.log("Undo"),
-      },
-    });
+    toast(<div className="flex items-center"><CheckIcon/>Lien copié dans le presse-papier !</div>);
   };
 
   const openSocialShare = (platform: string) => {
@@ -51,14 +60,85 @@ const ShareDialog = ({ imageSource }: { imageSource: string }) => {
 
     window.open(shareLink, "_blank");
   };
+  const isMobile: boolean = useMediaQuery("(max-width: 768px)");
+  const safeImageSource = imageSource && imageSource !== "" ? imageSource : undefined;
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={setOpen}>
+        <DrawerContent
+          className="border-0 text-white"
+          style={{
+            backgroundColor: "rgb(30,30,30)",
+          }}
+        >
+          <DrawerHeader className="items-center text-center p-5 h-full">
+          <DrawerTitle className="font-bold text-white">Partager le film</DrawerTitle>
+          <DrawerDescription>
+            {safeImageSource ? (
+              <Image
+                loader={() => imageSource}
+                style={{ height: "fit-content", maxHeight: "50vh", objectFit: "contain" }}
+                src={imageSource}
+                alt="Affiche"
+                width={257.45}
+                height={0}
+              />
+            ) : (
+              <Image
+                style={{ height: "fit-content" }}
+                src="/placeholder_image.svg"
+                alt="Image indisponible"
+                width={257.45}
+                height={0}
+              />
+            )}
+          </DrawerDescription>
+          <DrawerFooter className="flex flex-row justify-between">
+            <div
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
+              onClick={copyLink}
+            >
+              <Image src="/copy_link.svg" alt="Copier le lien" height={48} width={48}/>
+              <span>Copier le lien</span>
+            </div>
+            <div
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
+              onClick={() => openSocialShare("mail")}
+            >
+              <Image src="/mail.svg" alt="Mail" height={48} width={48}/>
+              <span>Mail</span>
+            </div>
+            <div
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
+              onClick={() => openSocialShare("instagram")}
+            >
+              <Image src="/instagram.svg" alt="Instagram" height={48} width={48}/>
+              <span>Instagram</span>
+            </div>
+            <div
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
+              onClick={() => openSocialShare("twitter")}
+            >
+              <Image src="/twitter.svg" alt="Twitter" height={48} width={48}/>
+              <span>X (Twitter)</span>
+            </div>
+            <div
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
+              onClick={() => openSocialShare("whatsapp")}
+            >
+              <Image src="/whatsapp.svg" alt="WhatsApp" height={48} width={48}/>
+              <span>WhatsApp</span>
+            </div>
+          </DrawerFooter>
+        </DrawerHeader>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="icon" style={{ opacity: 0.8 }}>
-          <img src="/share.svg" alt="Rechercher" width={24} height={24} />
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         className="sm:max-w-[425px] border-0 text-white"
         style={{ backgroundColor: "rgb(30,30,30)" }}
@@ -66,47 +146,59 @@ const ShareDialog = ({ imageSource }: { imageSource: string }) => {
         <DialogHeader className="items-center text-center">
           <DialogTitle>Partager le film</DialogTitle>
           <DialogDescription>
-            <img
-              style={{ height: "fit-content" }}
-              src={imageSource}
-              alt="Affiche"
-              width={257.45}
-            />
+            {safeImageSource ? (
+              <Image
+                loader={() => imageSource}
+                style={{ height: "fit-content", maxHeight: "50vh", objectFit: "contain" }}
+                src={imageSource}
+                alt="Affiche"
+                width={257.45}
+                height={0}
+              />
+            ) : (
+              <Image
+                style={{ height: "fit-content" }}
+                src="/placeholder_image.svg"
+                alt="Image indisponible"
+                width={257.45}
+                height={0}
+              />
+            )}
           </DialogDescription>
-          <DialogFooter className="flex justify-between">
+          <DialogFooter className="flex flex-row justify-between">
             <div
-              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer"
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
               onClick={copyLink}
             >
-              <img src="/copy_link.svg" alt="Copier le lien" />
+              <Image src="/copy_link.svg" alt="Copier le lien" height={48} width={48}/>
               <span>Copier le lien</span>
             </div>
             <div
-              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer"
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
               onClick={() => openSocialShare("mail")}
             >
-              <img src="/mail.svg" alt="Mail" />
+              <Image src="/mail.svg" alt="Mail" height={48} width={48}/>
               <span>Mail</span>
             </div>
             <div
-              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer"
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
               onClick={() => openSocialShare("instagram")}
             >
-              <img src="/instagram.svg" alt="Instagram" />
+              <Image src="/instagram.svg" alt="Instagram" height={48} width={48}/>
               <span>Instagram</span>
             </div>
             <div
-              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer"
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
               onClick={() => openSocialShare("twitter")}
             >
-              <img src="/twitter.svg" alt="Twitter" />
-              <span>Twitter</span>
+              <Image src="/twitter.svg" alt="Twitter" height={48} width={48}/>
+              <span>X (Twitter)</span>
             </div>
             <div
-              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer"
+              className="flex flex-col items-center flex-1 text-xs text-center cursor-pointer relative"
               onClick={() => openSocialShare("whatsapp")}
             >
-              <img src="/whatsapp.svg" alt="WhatsApp" />
+              <Image src="/whatsapp.svg" alt="WhatsApp" height={48} width={48}/>
               <span>WhatsApp</span>
             </div>
           </DialogFooter>

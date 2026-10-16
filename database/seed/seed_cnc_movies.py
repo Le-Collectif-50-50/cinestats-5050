@@ -1,3 +1,4 @@
+import logging
 from tqdm import tqdm # Progress bar for long-running tasks
 from database.database import SessionLocal
 from database.data.cnc.extract_cnc_data_from_excel import ExtractCncDataFromExcel
@@ -9,6 +10,7 @@ from backend.repositories import (
     credit_holder_repository,
     role_repository
 )
+from backend.entities.film_entity import FilmEntity
 
 def seed_cnc_movies():
     """
@@ -19,11 +21,12 @@ def seed_cnc_movies():
     data = extractor.clean_data()
 
     session = SessionLocal()
+    processed = 0
     try:
         with session.begin():  # starts a transaction, will rollback on error
             for _, row in tqdm(data.iterrows(), total=len(data), desc="Seeding CNC films"):
                 visa_number = row["visa_number"]
-                if film_repository.find_film(session, visa_number) is not None:
+                if film_repository.find_film_by_visa(session, visa_number) is not None:
                     continue  # Skip if already seeded
 
                 film_data = {
@@ -38,6 +41,9 @@ def seed_cnc_movies():
                     "regional_funding": row["regional_funding"],
                     "cnc_agrement_year": row["cnc_agrement_year"],
                     "budget": row["budget"],
+                    "budget_category": FilmEntity.budget_category(row["budget"]),
+                    "is_french_financed": FilmEntity.is_french_financed(row.get("film_country_budget_allocation_rates", {})),
+                    "broadcasters": FilmEntity.broadcasters(row.get("paying_broadcasters", []), row.get("free_broadcasters", []))
                 }
 
                 film = film_repository.create_film(session, film_data)
@@ -47,26 +53,26 @@ def seed_cnc_movies():
                     country = country_repository.find_or_create_country(session, country_name)
                     film_country_budget_allocation_repository.create_budget_allocation(session, film.id, country.id, allocation)
 
-                # Adding the distributors to the film credits
-                for distributor_type, role_name in [
-                    ("paying_distributors", "paying_distributor"),
-                    ("free_distributors", "free_distributor")
+                # Adding the broadcasters to the film credits
+                for broadcaster_type, role_name in [
+                    ("paying_broadcasters", "paying_broadcaster"),
+                    ("free_broadcasters", "free_broadcaster"),
                 ]:
-                    distributors = row.get(distributor_type) or []
-                    role = role_repository.find_or_create_role(session, role_name)
+                    broadcasters = row.get(broadcaster_type) or []
+                    role = role_repository.find_or_create_role(session, name=role_name)
 
-                    for distributor_name in distributors:
-                        credit_holder_data = {
-                            "legal_name": distributor_name,
-                            "type": "Company"
-                        }
-                        holder = credit_holder_repository.find_or_create_credit_holder(session, credit_holder_data)
-                        film_credit_repository.create_film_credit(session, film.id, role.id, holder.id)
+                    for broadcaster_name in broadcasters:
+                        holder = credit_holder_repository.find_or_create_credit_holder(session, full_name=broadcaster_name, type="Company")
+                        film_credit_repository.find_or_create_film_credit(session, film.id, role.id, holder.id)
+                processed += 1
             session.commit()
             print(f"Seeded {len(data)} films.")
-    except Exception as e:
+    except Exception:
         session.rollback()
-        print("Error while seeding CNC movies:", e)
+        logging.exception(
+            "seed_cnc_movies crashed after processing %d/%d rows — visa_number of the failing row: %r",
+            processed, len(data), row.get("visa_number") if 'row' in locals() else None,
+        )
     finally:
         session.close()
 

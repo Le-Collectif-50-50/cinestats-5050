@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Sauvegarde pgBackRest sur chaque dépôt configuré, puis ping healthchecks.io.
+# Installé par infra/vps/40-pgbackrest.sh, lancé par cron en utilisateur postgres.
+# Usage : cinestats-pgbackrest-backup <full|diff>
+set -uo pipefail
+
+TYPE="${1:?Usage : $0 <full|diff>}"
+# pgBackRest refuse de tourner en root : on se relance en postgres.
+if [ "$(id -u)" -eq 0 ]; then
+  exec sudo -u postgres "$0" "$@"
+fi
+PGBACKREST_REPOS=1
+HEALTHCHECK_URL=""
+# shellcheck source=/dev/null
+[ -f /etc/default/cinestats-pgbackrest ] && . /etc/default/cinestats-pgbackrest
+
+ping_healthcheck() { # [suffixe : /start, /fail]
+  [ -n "$HEALTHCHECK_URL" ] || return 0
+  curl -fsS -m 10 --retry 3 -o /dev/null "$HEALTHCHECK_URL$1" || true
+}
+
+ping_healthcheck /start
+rc=0
+for repo in $PGBACKREST_REPOS; do
+  pgbackrest --stanza=main --repo="$repo" --type="$TYPE" backup || rc=1
+done
+if [ "$rc" -eq 0 ]; then ping_healthcheck ""; else ping_healthcheck /fail; fi
+exit "$rc"

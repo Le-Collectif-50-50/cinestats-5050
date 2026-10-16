@@ -4,7 +4,8 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from ultralytics import YOLO
-from torch.cuda.amp import autocast
+
+from loguru import logger
 
 from .utils import ImageDataset
 
@@ -42,6 +43,7 @@ class VisionDetection:
         # Transformation for YOLO model
         if len(images.shape) == 3:  # Single image: [H, W, C]
             images = np.expand_dims(images, axis=0)  # Convert to batch: [1, H, W, C]
+            logger.debug(images.shape)
 
         if len(images.shape) != 4:  # Ensure batch format: [N, H, W, C]
             raise ValueError("Input images must have shape [H, W, C] or [N, H, W, C]")
@@ -59,50 +61,35 @@ class VisionDetection:
 
         # Load frames in the dataloader
         dataset = ImageDataset(images, frames_transform)
-        # Use pin_memory for faster GPU transfer
-        pin_mem = self.device.type == 'cuda'
         dataloader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_mem)
+            dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
         # Detect faces in all frames of the trailer
         results = []
-        use_amp = self.device.type == 'cuda'  # Use mixed precision on CUDA
-        
         with torch.no_grad():
             if area_type == "face":
                 for batch in dataloader:
-                    batch = batch.to(self.device, non_blocking=True)
+                    batch = batch.to(self.device)
                     batch = torch.clamp(batch, 0, 1)  # Ensure values are in [0, 1] range
-                    with autocast(enabled=use_amp):
-                        detections = self.yolo_model_face(batch, verbose=False)
+                    detections = self.yolo_model_face(batch, verbose=False)
                     results.extend(detections)
-                    # Clear batch from memory
-                    del batch
             else:
                 for batch in dataloader:
-                    batch = batch.to(self.device, non_blocking=True)
+                    batch = batch.to(self.device)
                     batch = torch.clamp(batch, 0, 1)  # Ensure values are in [0, 1] range
-                    with autocast(enabled=use_amp):
-                        detections = self.yolo_model_person(batch, verbose=False, classes=[0])
+                    detections = self.yolo_model_person(batch, verbose=False, classes=[
+                                                        0])
                     results.extend(detections)
-                    # Clear batch from memory
-                    del batch
-        
-        # Clear cache after detection
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
         return results
 
     def crop_areas_of_interest(
-            self, images: np.ndarray, H_original: int, W_original: int, area_type: str = 'face', batch_size: int = 64, bbox_expand_factor: float = 0) -> list[dict]:
+            self, movie_id: str | int, images: np.ndarray, H_original: int, W_original: int, area_type: str = 'face', batch_size: int = 64, bbox_expand_factor: float = 0.0) -> list[dict]:
         """
         Create individual subimages for all areas of interest in one image
-        
-        Parameters:
-            bbox_expand_factor: Factor to expand bounding boxes (e.g., 0.3 = 30% expansion on each side)
-                               This helps include more context like hair for face crops
         """
+        if not np.isfinite(bbox_expand_factor) or bbox_expand_factor < 0:
+            raise ValueError("bbox_expand_factor doit être fini et positif ou nul")
         areas_of_interest = self.get_areas_of_interest(
             images, area_type, batch_size=batch_size)
 
@@ -111,43 +98,59 @@ class VisionDetection:
         scale_y = H_original / self.H_resized
 
         detections = []
+        perso_id = 0
         for k, area in enumerate(areas_of_interest):
             for i in range(len(area.boxes)):
                 x1, y1, x2, y2 = map(int, area.boxes[i].xyxy[0])
                 # Bounding boxes need to be rescaled as we previously changed frames size
                 x1, x2, y1, y2 = int(
                      x1 * scale_x), int(x2 * scale_x), int(y1 * scale_y), int(y2 * scale_y)
-                
-                # Expand bounding box to include more context (e.g., hair)
-                if bbox_expand_factor > 0:
-                    width = x2 - x1
-                    height = y2 - y1
-                    expand_x = int(width * bbox_expand_factor)
-                    expand_y = int(height * bbox_expand_factor)
-                    
-                    # Expand and clip to image boundaries
-                    x1_expanded = max(0, x1 - expand_x)
-                    y1_expanded = max(0, y1 - expand_y)
-                    x2_expanded = min(W_original, x2 + expand_x)
-                    y2_expanded = min(H_original, y2 + expand_y)
-                else:
-                    x1_expanded, y1_expanded = x1, y1
-                    x2_expanded, y2_expanded = x2, y2
-                
+                # Garder la boîte détectée pour les surfaces et les annotations.
+                dx = int((x2 - x1) * bbox_expand_factor)
+                dy = int((y2 - y1) * bbox_expand_factor)
+                cx1, cy1 = max(0, x1 - dx), max(0, y1 - dy)
+                cx2, cy2 = min(W_original, x2 + dx), min(H_original, y2 + dy)
                 conf = area.boxes[i].conf.item()
                 match len(images.shape):
                     case 3:
-                        cropped_image = images[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
+                        cropped_image = images[cy1:cy2, cx1:cx2]
                     case 4:
-                        cropped_image = images[k][y1_expanded:y2_expanded, x1_expanded:x2_expanded]
+                        cropped_image = images[k][cy1:cy2, cx1:cx2]
                     case _:
                         raise ValueError("Input images must have shape [H, W, C] or [N, H, W, C]")
-                detections.append({"bbox": [
-                     x1_expanded, y1_expanded, x2_expanded, y2_expanded], "conf": conf, "frame_id": k, "perso_id": i, f"cropped_{area_type}": cropped_image})
+                detections.append({
+                    "bbox": [x1, y1, x2, y2], "crop_bbox": [cx1, cy1, cx2, cy2], "conf": conf, f"cropped_{area_type}": cropped_image,
+                    "frame_id": k, "perso_id": perso_id, "movie_id": movie_id})
+                perso_id += 1 
     
         return detections
 
-    
+def detect_faces(
+        movie_id: str | int, frames: np.array, H_original: int, W_original: int, batch_size: int, device: str, num_cpu_threads: int, bbox_expand_factor: float = 0.0) -> list[dict]:
+    """
+    Detect faces in the video.
+    Args:
+        - frames: an array of the frames in the video
+        - H_original: original height of the frames
+        - W_original: original width of the frames
+        - batch_size: The batch size (i.e. nb of frames which we infer on in one go)
+        - device: cuda or cpu
+        - num_cpu_threads : only used if device==cpu
+    Returns: 
+        - detections: a list of faces detected in the frames. 
+        Each item contains: 'bbox'=bounding box of the face; 'conf'=model confidence in the detection; 'frame_id'=nb of the frame in the video; 
+                            'perso_id'=unic identifier for the detected face; 'cropped_face'=the image (np.ndarray) of the face alone
+    """
+    # Detect faces in the video
+    vision_detector = VisionDetection(
+        device=device, num_cpu_threads=num_cpu_threads)
+    detections = vision_detector.crop_areas_of_interest(
+        movie_id, frames, H_original, W_original, area_type='face', batch_size=batch_size, bbox_expand_factor=bbox_expand_factor)
+
+    return detections
+
+### Unused utils for vision detection ###
+
 def link_faces_to_bodies(detections, body_detections):
     """
     Link faces to bodies based on bounding box overlap.
@@ -231,21 +234,3 @@ def compute_I_o_U(face_bbox, body_bbox):
     iou = inter_area / union_area if union_area > 0 else 0
 
     return iou
-
-
-def detect_faces(
-        frames: np.array, H_original: int, W_original: int, area_type: str, batch_size: int, device: str, num_cpu_threads: int, bbox_expand_factor: float = 0) -> list[dict]:
-    """
-    Detect faces in the video
-    
-    Parameters:
-        bbox_expand_factor: Factor to expand bounding boxes (default 0 = no expansion)
-                           Set higher (e.g., 0.5) to include more hair/context
-    """
-    # Detect faces in the video
-    vision_detector = VisionDetection(
-        device=device, num_cpu_threads=num_cpu_threads)
-    detections = vision_detector.crop_areas_of_interest(
-        frames, H_original, W_original, area_type=area_type, batch_size=batch_size, bbox_expand_factor=bbox_expand_factor)
-
-    return detections

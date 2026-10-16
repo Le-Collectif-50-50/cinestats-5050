@@ -3,33 +3,35 @@ import os
 
 from scripts import pipelines
 
-# Set PyTorch CUDA memory allocation configuration to reduce fragmentation
-os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
-
 PREDICTIONS_FOLDER = os.environ.get('PREDICTIONS_FOLDER', 'stored_predictions')
 DOWNLOADED_MEDIA_FOLDER =  os.environ.get('DOWNLOADED_MEDIA_FOLDER', 'downloaded_media')
 TEMP_FOLDER = os.environ.get('TEMP_FOLDER', 'tmp')
 OUTPUTS_FOLDER = os.environ.get('OUTPUTS_FOLDER', 'outputs')
 FINAL_PREDICTIONS_FOLDER = os.environ.get('FINAL_PREDICTIONS_FOLDER', 'final_predictions')
+INTERMEDIATE_FOLDER = os.environ.get('INTERMEDIATE_FOLDER', 'intermediate_results')
+VISUALS_FOLDER = os.environ.get('VISUALS_FOLDER', 'stored_visuals')
 
 def main(parser):
     args = parser.parse_args()
     
     os.makedirs(TEMP_FOLDER, exist_ok=True)
-    visuals_path = os.path.join(TEMP_FOLDER, args.visuals_path) #FIXME: use this arg or delete it
-    os.makedirs(visuals_path, exist_ok=True)
     temp_predictions_path = os.path.join(TEMP_FOLDER, PREDICTIONS_FOLDER)
     os.makedirs(temp_predictions_path, exist_ok=True)
     downloaded_media_path = os.path.join(TEMP_FOLDER, DOWNLOADED_MEDIA_FOLDER)
     os.makedirs(downloaded_media_path, exist_ok=True)
     final_predictions_path = os.path.join(OUTPUTS_FOLDER, FINAL_PREDICTIONS_FOLDER)
     os.makedirs(final_predictions_path, exist_ok=True)
+    intermediate_results_path = os.path.join(OUTPUTS_FOLDER, INTERMEDIATE_FOLDER)
+    os.makedirs(intermediate_results_path, exist_ok=True)
+    visuals_path = os.path.join(OUTPUTS_FOLDER, VISUALS_FOLDER) #FIXME: use this arg or delete it
+    os.makedirs(visuals_path, exist_ok=True)
 
     paths = {
         'dl_media': downloaded_media_path,
         'final_preds': final_predictions_path,
         'temp_preds': temp_predictions_path,
-        'visuals': visuals_path
+        'visuals': visuals_path,
+        'all_results': intermediate_results_path
     }
 
     pipelines.handler(args, paths)
@@ -80,17 +82,18 @@ if __name__ == '__main__':
                         help="Method for aggregating predictions")
     parser.add_argument("--store_visuals", action=argparse.BooleanOptionalAction,
                         default=False, help="Store trailer and poster with visual predictions")
-    parser.add_argument("--visuals_path", type=str, default="stored_visuals/",
-                        help="Path to store trailers and posters with visual predictions")
     parser.add_argument("--istart", type=int, default=0,
                         help="Row index from which to start dataframe analysis")
     parser.add_argument("--istop", type=int, default=1e9,
                         help="Row index on which to stop dataframe analysis")
-    parser.add_argument("--device", type=str, default="auto",
-                        help="Device to use for inference: 'cuda', 'cpu', or 'auto' (default: auto)")
-    parser.add_argument("--profile_memory", action=argparse.BooleanOptionalAction,
-                        default=False, help="Enable GPU memory profiling and logging")
-    parser.add_argument("--bbox_expand_factor", type=float, default=0,
-                        help="Factor to expand face bounding boxes (e.g., 0.3 = 30%% expansion to include hair)")
+
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto",
+                        help="Périphérique pour infer et eval")
+    parser.add_argument("--bbox_expand_factor", type=float, default=0.0,
+                        help="Marge par côté du crop ; ne modifie pas les surfaces mesurées")
+    parser.add_argument("--remove_overlaps", action=argparse.BooleanOptionalAction, default=False,
+                        help="Supprimer les boîtes vidéo redondantes avant classification")
+    parser.add_argument("--iou_threshold", type=float, default=0.5,
+                        help="Seuil IoU de suppression, entre 0 et 1")
 
     main(parser)

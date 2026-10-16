@@ -1,18 +1,43 @@
-from sqlalchemy.orm import Session
-from database.models import Film
+from sqlalchemy.orm import Session, selectinload
+from database.models import Film, FilmCredit, AwardNomination, FestivalAward, FilmCountryBudgetAllocation
+from backend.services.film_metrics_calculator import FilmMetricsCalculator
+from backend.entities.credit_holder_entity import CreditHolderEntity
+from backend.entities.trailer_entity import TrailerEntity
+from backend.entities.poster_entity import PosterEntity
+from backend.entities.festival_award_entity import FestivalAwardEntity
 
 class GetFilmDetails:
     def __init__(self, db: Session):
         self.db = db
 
     def execute(self, film_id: int) -> dict:
-        film = self.db.query(Film).filter(Film.id == film_id).first()
+        # Eagerly load the film with its related data
+        film = self.db.query(Film).options(
+            # Film credits with roles and credit holders
+            selectinload(Film.film_credits)
+                .selectinload(FilmCredit.role),
+            selectinload(Film.film_credits)
+                .selectinload(FilmCredit.credit_holder),
+
+            # Award nominations with award and festival
+            selectinload(Film.award_nominations)
+                .selectinload(AwardNomination.festival_award)
+                .selectinload(FestivalAward.festival),
+
+            # Country budget allocations with related country and allocation
+            selectinload(Film.country_budget_allocations)
+                .selectinload(FilmCountryBudgetAllocation.country),
+
+            # Genres (typically many-to-many)
+            selectinload(Film.genres)
+        ).get(film_id)
+
         if not film:
             return None
 
         film_attributes_displayed = [
-            "id", "original_name", "release_date", "duration",
-            "first_language", "parity_bonus", "cnc_agrement_year", "budget"
+            "id", "original_name", "release_date",
+            "parity_bonus", "cnc_agrement_year", "budget"
         ]
 
         # Get the film basic details
@@ -22,38 +47,76 @@ class GetFilmDetails:
             if hasattr(film, attr)
         }
 
+        # Get the film duration in correct format
+        if film.duration_minutes is not None:
+            hours = film.duration_minutes // 60
+            minutes = film.duration_minutes % 60
+            film_data["duration"] = f"{hours}h{minutes:02d}"
+        else:
+            film_data["duration"] = None
+
         # Get the film genres
-        film_data["genres"] = [genre.name for genre in film.genres]
+        film_data["genres"] = [genre.name.capitalize() for genre in film.genres]
 
         # Get the film poster and trailer
         film_data["poster_image_base64"] = film.poster[0].image_base64 if film.poster else None
         film_data["trailer_url"] = film.trailer[0].url if film.trailer else None
 
-        # Get the film country
-        max_allocation = None
-        top_country = None
-
-        for alloc in film.country_budget_allocations:
-            if alloc.budget_allocation is not None:
-                if max_allocation is None or alloc.budget_allocation > max_allocation:
-                    max_allocation = alloc.budget_allocation
-                    top_country = alloc.country  # assuming a .country relationship
-
-        film_data["top_budget_country"] = top_country.name if top_country else None
+        # Get the film countries by order of budget invested
+        allocations = [
+            alloc for alloc in film.country_budget_allocations
+            if alloc.budget_allocation is not None and alloc.country is not None
+        ]
+        sorted_allocations = sorted(allocations, key=lambda a: a.budget_allocation, reverse=True)
+        film_data["countries_sorted_by_budget"] = [alloc.country.name for alloc in sorted_allocations]
 
         # Get the film credits
-        film_data["credits"] = []
+        film_data["credits"] = {
+            "casting": [],
+            "key_roles": [],
+            "distribution": {
+                "distribution": [],
+                "production": [],
+                "co-production": [],
+                "financiers": [],
+                "budget": film.budget if film.budget else None
+            },
+        }
+
         for credit in film.film_credits:
-            holder = credit.credit_holder
+            holder = CreditHolderEntity(credit.credit_holder)
             role = credit.role
-            film_data["credits"].append({
+
+            credit_info = {
                 "role": role.name if role else None,
                 "is_key_role": role.is_key_role if role else None,
-                "type": holder.type,
-                "name": f"{holder.first_name} {holder.last_name}" if holder else None,
-                "legal_name": holder.legal_name,
-                "gender": holder.gender,
-            })
+                "is_company": holder.is_company() if holder else None,
+                "name": holder.full_name() if holder else None,
+                "gender": credit.credit_holder.gender
+            }
+
+            # Casting: role == 'actor'
+            if role and role.name == "actor":
+                film_data["credits"]["casting"].append(credit_info)
+
+            # Key roles: is_key_role == True
+            if role and role.is_key_role:
+                film_data["credits"]["key_roles"].append(credit_info)
+
+            # Distribution: several categories based on role
+            # - distribution
+            # - production
+            # - co-production
+            # - financiers (free_broadcaster, paying_broadcaster)
+            if role and holder.is_company():
+                if role.name in ["distribution"]:
+                    film_data["credits"]["distribution"]["distribution"].append(credit_info)
+                elif role.name in ["production"]:
+                    film_data["credits"]["distribution"]["production"].append(credit_info)
+                elif role.name in ["co_production"]:
+                    film_data["credits"]["distribution"]["co-production"].append(credit_info)
+                elif role.name in ["free_broadcaster", "paying_broadcaster"]:
+                    film_data["credits"]["distribution"]["financiers"].append(credit_info)
 
         # Get the film awards
         film_data["awards"] = []
@@ -61,55 +124,27 @@ class GetFilmDetails:
             award = nomination.festival_award
             festival = award.festival if award else None
             film_data["awards"].append({
+                "festival_id": festival.id if festival else None,
                 "festival_name": festival.name if festival else None,
-                "award_name": award.name if award else None,
+                "award_name": FestivalAwardEntity(award).display_name(),
                 "date": nomination.date.isoformat() if nomination.date else None,
                 "is_winner": nomination.is_winner,
             })
 
-        # Get the film female reprsentation key metrics
-        film_data["female_representation_in_key_roles"] = self.calculate_female_representation_in_key_roles(film)
-        film_data["female_representation_in_casting"] = self.calculate_female_representation_in_casting(film)
+        # Get the film key metrics
+        metrics = FilmMetricsCalculator(film)
+        trailer = TrailerEntity(film.trailer[0] if film.trailer else None)
+        poster = PosterEntity(film.poster[0] if film.poster else None)
+        film_data["metrics"] = {
+            # Get the film main metrics
+            "female_representation_in_key_roles": metrics.calculate_female_representation_in_key_roles(),
+            "female_representation_in_casting": metrics.calculate_female_representation_in_casting(),
+            # Get the film trailer metrics
+            "female_screen_time_in_trailer": trailer.female_screen_time(),
+            "non_white_screen_time_in_trailer": trailer.non_white_screen_time(),
+            # Get the film poster metrics
+            "female_visible_ratio_on_poster": poster.female_average_ratio_on_poster(),
+            "non_white_visible_ratio_on_poster": poster.non_white_average_ratio_on_poster()
+        }
 
         return film_data
-    
-
-    def calculate_female_representation_in_key_roles(self, film) -> float | None:
-        key_roles = [
-            credit for credit in film.film_credits
-            if credit.role and credit.role.is_key_role and credit.credit_holder.type == 'Individual'
-        ]
-
-        female_key_roles = [
-            credit for credit in key_roles
-            if credit.credit_holder and credit.credit_holder.gender == "female"
-        ]
-
-        total_key_roles = len(key_roles)
-        female_count = len(female_key_roles)
-
-        if total_key_roles == 0:
-            return None
-
-        return round((female_count / total_key_roles) * 100, 2)
-
-
-    def calculate_female_representation_in_casting(self, film) -> float | None:
-        actor_credits = [
-            credit for credit in film.film_credits
-            if credit.role and credit.role.name.lower() == "actor" and credit.credit_holder.type == 'Individual'
-        ]
-
-        female_actors = [
-            credit for credit in actor_credits
-            if credit.credit_holder and credit.credit_holder.gender == "female"
-        ]
-
-        total_actors = len(actor_credits)
-        female_count = len(female_actors)
-
-        if total_actors == 0:
-            return None
-
-        return round((female_count / total_actors) * 100, 2)
-

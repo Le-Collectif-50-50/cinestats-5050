@@ -28,9 +28,15 @@ services:
     ports:
       - "5001:5001"
       - "8888:8888" # Expose Jupyter's port - dev mode only
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1 # Ensures unbuffered output (useful for logging)
-      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/ric_db
+      - DATABASE_URL
+      - ALLOWED_ORIGINS
+      - METABASE_SITE_URL
+      - METABASE_SECRET_KEY
+      - METABASE_DASHBOARD_ID
     depends_on:
       - db
 
@@ -44,7 +50,9 @@ services:
       - ./frontend:/app
       - frontend-node-modules:/app/node_modules
     environment:
-      - NODE_ENV=development
+      - ENV
+      - NEXT_PUBLIC_API_URL
+      - INTERNAL_API_URL=http://backend:5001
     depends_on:
       - backend
 

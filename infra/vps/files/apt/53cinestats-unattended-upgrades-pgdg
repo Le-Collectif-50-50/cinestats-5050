@@ -1,0 +1,5 @@
+// Installé par infra/vps/30-postgres.sh : versions mineures Postgres (correctifs
+// de sécurité) depuis apt.postgresql.org. Les versions majeures restent manuelles.
+Unattended-Upgrade::Origins-Pattern {
+        "origin=apt.postgresql.org,codename=${distro_codename}-pgdg";
+};

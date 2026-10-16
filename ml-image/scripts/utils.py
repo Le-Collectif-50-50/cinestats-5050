@@ -1,16 +1,20 @@
 import cv2
 import json
-import numpy as np
 import os
-import pandas as pd
-import pickle as pkl
+import csv
+from pathlib import Path
 import requests
 
+import numpy as np
+import pandas as pd
+import pickle as pkl
+
 from bs4 import BeautifulSoup
-from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 from loguru import logger
+
+from scripts import filter_detections
 
 class ImageDataset(Dataset):
     # Dataset builder for array images for specific PyTorch model compliance
@@ -246,7 +250,7 @@ def gather_and_save_predictions(source:pd.DataFrame, path_to_outputs: str, final
             data = pkl.load(infile)
         infile.close()
         logger.debug(f'la tête du path des prédictions: {prediction}')
-        visa_number = int(Path(prediction).stem.split('_')[0])
+        visa_number = int(Path(prediction).name.split('_')[0])
         logger.debug(f'Le numéro de visa récupéré dans le path: {visa_number}')
         allocine_id = int(source[source.visa_number == visa_number].iloc[0]['allocine_id'])
         for char in data :
@@ -259,7 +263,7 @@ def gather_and_save_predictions(source:pd.DataFrame, path_to_outputs: str, final
             logger.debug(f'Gathering predictions from {prediction}')
             data = pkl.load(infile)
         infile.close()
-        visa_number = int(Path(prediction).stem.split('_')[0])
+        visa_number = int(Path(prediction).name.split('_')[0])
         allocine_id = int(source[source.visa_number == visa_number].iloc[0]['allocine_id'])
         for char in data :
             dict_trailer_predictions = format_prediction_results('trailer', char, allocine_id, visa_number, dict_trailer_predictions)
@@ -322,37 +326,56 @@ def load_data_from_links(row, downloaded_media_path, poster_path, trailer_path) 
     return data, source_type
 
 
-def compute_constants(frames, movie_id: str, source_type: str = "trailer", sharpness_factor: float = 1.0, sharpness_factor_cla: float = 1.0, aspect_ratio: float = 2.478, mode: str = "evaluate") -> tuple:
-    # Compute constants for whole pipeline
-
+def compute_params(frames: np.ndarray, movie_id: str, source_type: str="trailer", sharpness_factor: float=1.0, sharpness_factor_cla: float=1.0, aspect_ratio: float=2.478, mode: str="evaluate", results_path: str="") -> tuple:
+    """
+    Compute parameters of the given material (e.g., sharpness of frames)
+    Args: 
+        - frames: an array of the frames in the video. P.S.: a poster is considered as a trailer w/ one frame only.
+        - movie_id: unique identifier of the movie which we infer on.
+        - source_type: trailer or poster
+        - sharpness_factor:
+        - sharpness_factor_cla:
+        - aspect_ratio: effective area of the video ratio W/H (i.e., the area where the content is present)
+        - mode: evaluation or infer
+    Returns: 
+        - H_original: original height of the frames
+        - W_original: original width of the frames
+        - total_area:
+        - min_sharpness:
+        - min_sharpness_cla:
+    """
     match source_type:
         case "trailer":
-            '''
             overall_sharpness = 0
             for frame in frames:
-                overall_sharpness += filter_det.compute_sharpness(frame)/len(frames)
+                overall_sharpness += filter_detections.compute_sharpness(frame)/len(frames)
 
-            min_sharpness = overall_sharpness / sharpness_factor
-            min_sharpness_cla = overall_sharpness / sharpness_factor_cla
-            '''
+            #min_sharpness = overall_sharpness / sharpness_factor
+            #min_sharpness_cla = overall_sharpness / sharpness_factor_cla
             min_sharpness, min_sharpness_cla = 0, 0
 
             H_original, W_original = frames[0].shape[:2] 
-            effective_height = W_original / aspect_ratio # The aspect ratio of the video is the effective area of the video (i.e., the area where the content is present)
+            effective_height = W_original / aspect_ratio
             total_area = effective_height * W_original
 
             if mode == "evaluate":
-                movie_folder = os.path.join("visualize_parameters", movie_id)
-                constants_path = os.path.join(movie_folder, "constants.txt")
-                os.makedirs("visualize_parameters", exist_ok=True)
-                os.makedirs(movie_folder, exist_ok=True)
+                csv_path = os.path.join(results_path,'trailers_params.csv')
+                file_exists = os.path.isfile(csv_path)
 
-                with open(constants_path, mode='w') as constants_file:
-                    #constants_file.write(f"overall sharpness : {overall_sharpness}\n")
-                    constants_file.write(f"minimal sharpness : {min_sharpness}")
-                    constants_file.write(f"total area : {total_area}")
-                    constants_file.close()
-        
+                with open(csv_path, mode='a', newline='') as csvfile:
+                    fieldnames = ['movie_id', 'overall_sharpness', 'total_area', 'effective_height']
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    
+                    if not file_exists:
+                        writer.writeheader()
+                    
+                    writer.writerow({
+                        'movie_id': movie_id,
+                        'overall_sharpness': min_sharpness,
+                        'total_area': total_area,
+                        'effective_height': effective_height
+                    })
+                
         case "poster":
             H_original, W_original = frames.shape[:2]
             total_area = H_original * W_original

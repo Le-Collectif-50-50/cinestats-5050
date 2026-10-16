@@ -1,0 +1,175 @@
+version: 2
+
+models:
+  - name: fnl_films
+    description: >
+      Table finale des films constituant la table centrale de Cinéstats 50/50. 
+      Consolide les données CNC, Allociné et le financement français pour permettre 
+      l'analyse des inégalités de genre dans le cinéma français.
+    columns:
+      - name: movie_id
+        description: "Identifiant unique du film dans Cinéstats 50/50."
+        tests:
+          - not_null
+          - unique
+      - name: allocine_id
+        description: "Identifiant du film sur Allociné."
+      - name: mubi_id
+        description: "Identifiant du film sur Mubi."
+      - name: tmdb_id
+        description: "Identifiant du film sur TMDB."
+      - name: cnc_visa
+        description: "Visa d'exploitation CNC du film."
+        tests:
+          - not_null
+          - unique
+      - name: movie_name
+        description: "Titre du film tel qu'affiché dans Cinéstats 50/50, privilégiant le titre Allociné."
+        tests:
+          - not_null
+      - name: cnc_agreement_year
+        description: "Année d'agrément CNC du film, utilisée comme référence temporelle pour les analyses."
+      - name: release_date
+        description: "Date de sortie en salle du film."
+      - name: duration_mn
+        description: "Durée du film en minutes."
+      - name: budget
+        description: "Budget du film en euros."
+      - name: budget_category
+        description: "Tranche de budget du film (ex: petit, moyen, grand budget)."
+      - name: genre_category
+        description: "Genre cinématographique du film."
+      - name: broadcasters
+        description: "Diffuseurs TV associés au film (chaînes payantes et gratuites)."
+      - name: is_french_financed
+        description: "Vrai si la France finance au moins 50% du budget du film."
+      - name: has_parity_bonus
+        description: "Vrai si le film a bénéficié du bonus parité CNC, récompensant les productions respectant l'égalité femmes-hommes."
+      - name: has_eof
+        description: "Vrai si le film bénéficie du soutien EOF (Europa Organisation des Films)."
+      - name: has_sofica_funding
+        description: "Vrai si le film a été financé par une SOFICA (Société de Financement du Cinéma et de l'Audiovisuel)."
+      - name: has_tax_credit
+        description: "Vrai si le film bénéficie d'un crédit d'impôt cinéma."
+      - name: has_regional_funding
+        description: "Vrai si le film a reçu une aide financière d'une collectivité régionale."
+      - name: filmography_rank
+        description: "Position du film dans la carrière du ou des réalisateur(s), indicateur d'expérience pertinent pour l'analyse des inégalités d'accès à la réalisation."
+      - name: has_asr
+        description: "Vrai si le film bénéficie de l'aide sélective à la réalisation (ASR) du CNC."
+
+  - name: fnl_film_country_budget_allocation
+    description: >
+      Table finale de la répartition du financement des films par pays de coproduction. 
+      Permet d'analyser la dimension internationale des productions.
+    columns:
+      - name: id
+        description: "Identifiant unique de la ligne (couple film × pays)."
+        tests:
+          - not_null
+          - unique
+      - name: movie_id
+        description: "Identifiant du film associé."
+        tests:
+          - not_null
+      - name: cnc_visa
+        description: "Visa d'exploitation CNC du film."
+        tests:
+          - not_null
+      - name: country_id
+        description: "Identifiant du pays de coproduction."
+        tests:
+          - not_null
+      - name: country_name
+        description: "Nom du pays de coproduction."
+        tests:
+          - not_null
+      - name: budget_allocation
+        description: "Part du financement apportée par ce pays, exprimée en pourcentage du budget total du film."
+
+  - name: fnl_credit_holders
+    description: >
+      Table finale des personnes et entités créditées sur les films, avec leur genre.
+      Référentiel central des credit holders pour l'analyse des inégalités de
+      représentation par genre dans les métiers du cinéma.
+    columns:
+      - name: credit_holder_id
+        description: "Identifiant unique de la personne ou entité créditée."
+        tests:
+          - not_null
+      - name: type
+        description: "Type de crédit (personne physique, société, etc.)."
+      - name: first_name
+        description: "Prénom de la personne créditée."
+      - name: last_name
+        description: "Nom de famille de la personne créditée."
+      - name: legal_name
+        description: "Nom légal ou complet de la personne ou entité créditée."
+      - name: gender
+        description: "Genre de la personne, en priorisant la correction manuelle du gsheet puis le rapprochement par nom complet, utilisé pour l'analyse des inégalités de représentation."
+      - name: birthdate
+        description: "Date de naissance de la personne créditée."
+
+  - name: fnl_film_credits
+    description: >
+      Table finale associant chaque film à ses personnes créditées et au rôle occupé.
+      Base de l'analyse de la répartition des rôles par genre dans les productions
+      cinématographiques françaises.
+    columns:
+      - name: film_id
+        description: "Identifiant du film concerné."
+        tests:
+          - not_null
+      - name: role_id
+        description: "Identifiant du rôle occupé sur le film."
+        tests:
+          - not_null
+      - name: credit_holder_id
+        description: "Identifiant de la personne ou entité créditée."
+        tests:
+          - not_null
+
+  - name: fnl_film_genre
+    description: "Table finale associant chaque film à son ou ses genres cinématographiques."
+    columns:
+      - name: film_id
+        description: "Identifiant du film concerné."
+        tests:
+          - not_null
+      - name: genre_id
+        description: "Identifiant du genre cinématographique associé au film."
+        tests:
+          - not_null
+
+  - name: fnl_genre
+    description: "Table finale référençant les genres cinématographiques, après application des corrections manuelles du gsheet."
+    columns:
+      - name: genre_id
+        description: "Identifiant unique du genre cinématographique."
+        tests:
+          - not_null
+          - unique
+      - name: genre_name
+        description: "Nom du genre cinématographique, corrigé si applicable."
+        tests:
+          - not_null
+
+  - name: fnl_role
+    description: >
+      Table finale référençant les rôles occupés sur les productions cinématographiques,
+      avec leur libellé inclusif et leur statut de rôle clé, utilisés pour l'analyse
+      des inégalités de représentation par métier.
+    columns:
+      - name: role_id
+        description: "Identifiant unique du rôle."
+        tests:
+          - not_null
+          - unique
+      - name: role_name
+        description: "Nom du rôle tel qu'issu de la source d'origine (Allociné/CNC)."
+        tests:
+          - not_null
+      - name: role_inclusive_name
+        description: "Libellé inclusif (écriture épicène) du rôle, dérivé du nom d'origine."
+      - name: is_key_role
+        description: "Indique si le rôle est considéré comme un rôle clé (ex: réalisateur·rice, scénariste, directeur·rice de la photographie) pour l'analyse des inégalités."

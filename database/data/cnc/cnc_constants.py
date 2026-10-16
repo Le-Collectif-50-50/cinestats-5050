@@ -10,15 +10,15 @@ COLUMNS_MAPPING = {
     'RANG': 'cnc_rank',
     'BONUS PARITE ': 'parity_bonus',
     'ASR': 'asr',
-    'PAYANTE': 'paying_distributors',
-    'CLAIR': 'free_distributors',
+    'PAYANTE': 'paying_broadcasters',
+    'CLAIR': 'free_broadcasters',
     'SOFICA': 'sofica_funding',
     "CREDIT D'IMPOT": 'tax_credit',
     'AIDE REGIONALE': 'regional_funding',
     'NATIONALITE': 'film_country_budget_allocation_rates'
 }
 
-FREE_DISTRIBUTORS_MAPPING = {
+FREE_BROADCASTERS_MAPPING = {
     'tf1': 'TF1',
     'france2': 'France2',
     '2': 'France2',
@@ -59,11 +59,10 @@ FREE_DISTRIBUTORS_MAPPING = {
     'nrj12': 'NRJ12',
     'rmc': 'RMC',
     'tv5': 'TV5',
-    'story': 'STORY',
-    'tv': 'TV'
+    'story': 'STORY'
 }
 
-PAYING_DISTRIBUTORS_MAPPING = {
+PAYING_BORADCASTERS_MAPPING = {
     'canal': 'Canal+',
     'canal+': 'Canal+',
     'c+': 'Canal+',

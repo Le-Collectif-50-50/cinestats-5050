@@ -1,0 +1,2 @@
+# Installé par infra/vps/50-monitoring.sh.
+*/15 * * * * root /usr/local/sbin/cinestats-disk-check

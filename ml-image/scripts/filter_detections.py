@@ -1,38 +1,31 @@
 import cv2
+from functools import lru_cache
+import os
 import mediapipe as mp
 import numpy as np
-import os
+
 from typing import List, Dict, Callable
+from loguru import logger
+
+from scripts import evaluation_annotation
 
 ### Review: je verrais bien une classe pr chaque filtre (qui hériteraient d'une meme classe abstraite) mais peut etre pas la priorité du projet :p
 
 class DetectionFilter:
-    def __init__(self, simple_filters: List[Callable[[Dict], bool]], complex_filters: List[Callable[[Dict], bool]], area_type : str = 'face', **kwargs) -> None:
-        self.simple_filters = simple_filters
-        self.complex_filters = complex_filters
+    def __init__(self, filters: List[Callable[[Dict], bool]], area_type : str = 'face', **kwargs) -> None:
+        self.filters = filters
+        #self.complex_filters = complex_filters
         self.area_type = area_type # not used for now
         self.kwargs = kwargs
 
-    def apply(self, detections: List[Dict], mode: str = "clustering") -> List[Dict]:
-        #print(f"{len(detections)} detections before filtering")
-        match mode:
-            case "clustering":
-                filtered_detections = detections
-                for filter in self.simple_filters + self.complex_filters:
-                    filtered_detections = [det for det in filtered_detections if filter(det, **self.kwargs)]
-                    #print(f"{len(filtered_detections)} detections remaining after filtering {filter.__name__}")
-                
-                return filtered_detections
-            
-            case "classification":
-                detections_vote_weight = np.zeros_like(detections)
-                # Add 1 to count for each passed filters
-                for filter in self.simple_filters + self.complex_filters:
-                    detections_vote_weight = np.add(detections_vote_weight, np.array([filter(det, **self.kwargs) for det in detections]))
-
-                for det, weight in zip(detections, detections_vote_weight, strict=False) :
-                    det["weight"] = weight
-                return detections
+    def apply(self, detections: List[Dict], mode: str="clustering") -> List[Dict]:
+        logger.debug(f"{len(detections)} detections before filtering")
+        detections_vote_weight = np.zeros_like(detections)
+        for filter in self.filters: # Add 1 to count for each passed filters
+            detections_vote_weight = np.add(detections_vote_weight, np.array([filter(det, **self.kwargs) for det in detections]))
+        for det, weight in zip(detections, detections_vote_weight, strict=False) :
+            det[f"{mode}_weight"] = weight
+        return detections
     
     def visualize_detection_parameters(self, movie_id: str, detections: List[Dict], storage_folder: str='visualize_parameters') -> None:
         movie_path = os.path.join(storage_folder, movie_id)
@@ -77,6 +70,7 @@ def validates_area_filter(det: Dict, **kwargs) -> bool:
     max_area = kwargs.get("max_area", 1.0)
     total_area = kwargs.get("total_area", 1.0)
     area = compute_area(det["bbox"], total_area)
+    det['area'] = area
     return min_area <= area <= max_area 
 
 def validates_confidence_filter(det: Dict, **kwargs) -> bool:
@@ -90,14 +84,19 @@ def compute_sharpness(image: np.ndarray) -> float:
 def validates_sharpness_filter(det: Dict, **kwargs) -> bool:
     min_sharpness = kwargs.get("min_sharpness", 35.0)
     sharpness = compute_sharpness(det["cropped_face"])
+    det['sharpness'] = sharpness
     return sharpness >= min_sharpness
 
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.6)
+@lru_cache(maxsize=1)
+def get_face_mesh():
+    # Ne pas initialiser OpenGL pour --help ou les tests d’export.
+    return mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1,
+                                 refine_landmarks=True, min_detection_confidence=0.6)
 
 def get_face_landmarks(image: np.ndarray) -> tuple:
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(rgb_image)
+    results = get_face_mesh().process(rgb_image)
     
     if not results.multi_face_landmarks:
         return None
@@ -118,6 +117,7 @@ def validates_pose_filter(det: Dict, **kwargs) -> bool:
     
     nose_z = pose
     
+    det['pose'] = pose
     return nose_z <= max_z
 
 def is_face_not_occluded(det: Dict, **kwargs) -> bool:
@@ -135,124 +135,90 @@ def is_face_not_occluded(det: Dict, **kwargs) -> bool:
     return True
 
 
-def compute_iou(bbox1: List[float], bbox2: List[float]) -> float:
-    """Compute Intersection over Union (IoU) between two bounding boxes."""
-    x1_min, y1_min, x1_max, y1_max = bbox1
-    x2_min, y2_min, x2_max, y2_max = bbox2
-    
-    # Compute intersection area
-    inter_x_min = max(x1_min, x2_min)
-    inter_y_min = max(y1_min, y2_min)
-    inter_x_max = min(x1_max, x2_max)
-    inter_y_max = min(y1_max, y2_max)
-    
-    if inter_x_max < inter_x_min or inter_y_max < inter_y_min:
-        return 0.0
-    
-    inter_area = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min)
-    
-    # Compute union area
-    area1 = (x1_max - x1_min) * (y1_max - y1_min)
-    area2 = (x2_max - x2_min) * (y2_max - y2_min)
-    union_area = area1 + area2 - inter_area
-    
-    return inter_area / union_area if union_area > 0 else 0.0
+def compute_iou(bbox1, bbox2):
+    """Intersection sur union de deux boîtes de coins."""
+    def area(box):
+        return max(0, box[2] - box[0]) * max(0, box[3] - box[1])
+    intersection = area([max(bbox1[0], bbox2[0]), max(bbox1[1], bbox2[1]),
+                         min(bbox1[2], bbox2[2]), min(bbox1[3], bbox2[3])])
+    union = area(bbox1) + area(bbox2) - intersection
+    return intersection / union if union > 0 else 0.0
 
 
-def remove_overlapping_faces_per_frame(detections: List[Dict], iou_threshold: float = 0.5) -> List[Dict]:
-    """
-    Remove overlapping face detections within each frame, keeping the larger bbox.
-    
-    Args:
-        detections: List of detection dictionaries with 'bbox' and 'frame_id' keys
-        iou_threshold: IoU threshold above which detections are considered overlapping
-        
-    Returns:
-        Filtered list of detections with overlaps removed per frame
-    """
-    if len(detections) == 0:
-        return detections
-    
-    # Group detections by frame_id
-    from collections import defaultdict
-    frames = defaultdict(list)
-    for det in detections:
-        frames[det['frame_id']].append(det)
-    
-    # Process each frame independently
-    all_kept = []
-    for frame_id, frame_detections in frames.items():
-        # Sort detections by area (largest first) within this frame
-        detections_with_area = []
-        for det in frame_detections:
-            bbox = det["bbox"]
-            area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-            detections_with_area.append((det, area))
-        
-        detections_with_area.sort(key=lambda x: x[1], reverse=True)
-        
-        # Keep track of which detections to keep for this frame
-        keep = []
-        
-        for det_i, _ in detections_with_area:
-            should_keep = True
-            
-            # Check against all already kept detections in this frame
-            for kept_det in keep:
-                iou = compute_iou(det_i["bbox"], kept_det["bbox"])
-                if iou > iou_threshold:
-                    should_keep = False
-                    break
-            
-            if should_keep:
-                keep.append(det_i)
-        
-        all_kept.extend(keep)
-    
-    return all_kept
+def remove_overlapping_faces_per_frame(detections, iou_threshold=0.5):
+    """Garder les grandes boîtes par image, sans changer l'ordre ni les IDs."""
+    if not 0 <= iou_threshold <= 1:
+        raise ValueError("iou_threshold doit être compris entre 0 et 1")
+    frames = {}
+    for index, det in enumerate(detections):
+        frames.setdefault(det["frame_id"], []).append(index)
+    kept = set()
+    for indices in frames.values():
+        ordered = sorted(indices, key=lambda i: compute_area(detections[i]["bbox"], 1), reverse=True)
+        selected = []
+        for index in ordered:
+            if all(compute_iou(detections[index]["bbox"], detections[i]["bbox"]) <= iou_threshold
+                   for i in selected):
+                selected.append(index)
+        kept.update(selected)
+    return [det for index, det in enumerate(detections) if index in kept]
 
 
-def filter_detections_poster(detections: list[dict], total_area: float, min_area: float, min_conf: float) -> list[dict]: 
+def filter_detections_poster(detections: list[dict], total_area: float, min_area: float, min_conf: float, mode: str='infer', results_path: str="") -> list[dict]: 
     # Filter detections for poster
-    filters = DetectionFilter(
-        simple_filters=[validates_confidence_filter],
-        complex_filters=[],
+    filters = [validates_confidence_filter]
+    poster_filters = DetectionFilter(
+        filters=filters,
         area_type='face',
         total_area=total_area,
         min_area=min_area,
         min_conf=min_conf
     )    
-    filtered_detections = filters.apply(detections)
+    detections = poster_filters.apply(detections, mode="poster")
+    filtered_detections = [d for d in detections if d["poster_weight"] == len(filters)]
+    not_kept_detections = [d for d in detections if d["poster_weight"] != len(filters)]
 
+    if mode == "eval":
+        evaluation_annotation.register_faces_intermediate_results_poster(results_path, not_kept_detections)
+
+    logger.debug(f"{len(filtered_detections)} detections after filtering")
     return filtered_detections
 
 
-def filter_detections_clustering(detections: list[dict], effective_area: float, min_area: float, max_area: float, min_conf: float, remove_overlaps: bool = True, iou_threshold: float = 0.5) -> list[dict]:
+def filter_detections_clustering(detections: list[dict], effective_area: float, min_area: float, max_area: float, min_conf: float, mode: str='infer', results_path: str="", remove_overlaps: bool=False, iou_threshold: float=0.5) -> list[dict]:
     # Filter detections
-    filters = DetectionFilter(
-        simple_filters=[validates_area_filter,
-                        validates_confidence_filter],
-        complex_filters=[],
+    filters = [validates_area_filter, validates_confidence_filter]
+
+    clustering_filters = DetectionFilter(
+        filters=filters,
         area_type='face',
         total_area=effective_area,
         min_area=min_area,
         max_area=max_area,
         min_conf=min_conf
     )
-    filtered_detections = filters.apply(detections)
-    
-    # Remove overlapping faces within each frame
+    detections = clustering_filters.apply(detections)
+    filtered_detections = [d for d in detections if d["clustering_weight"] == len(filters)]
+    not_kept_detections = [d for d in detections if d["clustering_weight"] != len(filters)]
     if remove_overlaps:
         filtered_detections = remove_overlapping_faces_per_frame(filtered_detections, iou_threshold)
+        kept_ids = {d["perso_id"] for d in filtered_detections}
+        not_kept_detections = [d for d in detections if d["perso_id"] not in kept_ids]
 
+
+    if mode == "eval":
+        evaluation_annotation.register_faces_intermediate_results(results_path, not_kept_detections)
+
+    logger.debug(f"{len(filtered_detections)} detections after filtering")
     return filtered_detections
 
 
-def filter_detections_classifications(detections: list[dict], effective_area: float, min_conf: float, min_sharpness: float, max_z: float, min_mouth_opening: float, movie_id: int | str=None, mode: str="infer", remove_overlaps: bool = True, iou_threshold: float = 0.5) -> list[dict]:
+def filter_detections_classifications(detections: list[dict], effective_area: float, min_conf: float, min_sharpness: float, max_z: float, min_mouth_opening: float, movie_id: int | str=None, mode: str="infer", results_path: str ="") -> list[dict]:
     # Filter detections
-    filters = DetectionFilter(
-        simple_filters=[validates_confidence_filter],
-        complex_filters=[validates_sharpness_filter, validates_pose_filter],
+    filters=[validates_confidence_filter, validates_sharpness_filter, validates_pose_filter]
+
+    classification_filters = DetectionFilter(
+        filters=filters,
         area_type='face',
         total_area=effective_area,
         min_conf=min_conf,
@@ -260,24 +226,20 @@ def filter_detections_classifications(detections: list[dict], effective_area: fl
         max_z=max_z,
         min_mouth_opening=min_mouth_opening
     )    
-    filtered_detections = filters.apply(detections, mode = "classification")
+    filtered_detections = classification_filters.apply(detections, mode = "classification")
     
-    # Remove overlapping faces within each frame
-    if remove_overlaps:
-        filtered_detections = remove_overlapping_faces_per_frame(filtered_detections, iou_threshold)
-
-    if mode == "evaluate":
-        filters.visualize_detection_parameters(movie_id=movie_id, detections=detections, storage_folder='visualize_parameters')
+    if mode == "eval":
+        evaluation_annotation.register_faces_intermediate_results(results_path, filtered_detections)
+        #classification_filters.visualize_detection_parameters(movie_id=movie_id, detections=detections, storage_folder='visualize_parameters')
 
     return filtered_detections
-
 
 def draw_landmarks(image):
     h, w, _ = image.shape  # Dimensions de l'image
 
     # Conversion en RGB
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(rgb_image)
+    results = get_face_mesh().process(rgb_image)
 
     if not results.multi_face_landmarks:
         #print("Aucun visage détecté")
