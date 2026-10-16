@@ -19,7 +19,31 @@ from scripts import vision_detection
 logger.remove(0)
 logger.add(sys.stderr, level="INFO")
 
-def infer_on_trailer(trailer_path: str, cluster_model: str, cluster_threshold: float, agr_method: str, min_area: float, max_area: float, min_conf: float, min_conf_cla: float, min_sharpness_cla: float, max_z_cla: float, min_mouth_opening_cla : float, batch_size: int, device: str, num_cpu: int, store_visuals: bool, movie_id: str | int=None, mode: str='infer', results_path: str='') -> tuple[list[dict], np.ndarray]:
+def resolve_device(device_arg="auto"):
+    """Valider le périphérique avant les téléchargements et l'inférence."""
+    if device_arg not in ("auto", "cpu", "cuda"):
+        raise ValueError("device doit être auto, cpu ou cuda")
+    if device_arg == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA demandé mais indisponible")
+    return torch.device("cuda" if device_arg == "auto" and torch.cuda.is_available()
+                        else "cpu" if device_arg == "auto" else device_arg)
+
+
+def exploration_options(args):
+    """Compatibilité avec les anciens appelants utilisant un Namespace."""
+    options = dict(device_arg=getattr(args, "device", "auto"),
+                   bbox_expand_factor=getattr(args, "bbox_expand_factor", 0.0),
+                   remove_overlaps=getattr(args, "remove_overlaps", False),
+                   iou_threshold=getattr(args, "iou_threshold", 0.5))
+    resolve_device(options["device_arg"])
+    if not np.isfinite(options["bbox_expand_factor"]) or options["bbox_expand_factor"] < 0:
+        raise ValueError("bbox_expand_factor doit être fini et positif ou nul")
+    if not 0 <= options["iou_threshold"] <= 1:
+        raise ValueError("iou_threshold doit être compris entre 0 et 1")
+    return options
+
+
+def infer_on_trailer(trailer_path: str, cluster_model: str, cluster_threshold: float, agr_method: str, min_area: float, max_area: float, min_conf: float, min_conf_cla: float, min_sharpness_cla: float, max_z_cla: float, min_mouth_opening_cla : float, batch_size: int, device: str, num_cpu: int, store_visuals: bool, movie_id: str | int=None, mode: str='infer', results_path: str='', bbox_expand_factor: float=0.0, remove_overlaps: bool=False, iou_threshold: float=0.5) -> tuple[list[dict], np.ndarray]:
     """
     Description of the function
     """
@@ -31,12 +55,12 @@ def infer_on_trailer(trailer_path: str, cluster_model: str, cluster_threshold: f
 
     # Detect faces in the video
     detections = vision_detection.detect_faces(movie_id, frames, H_original, W_original,
-                              batch_size=batch_size, device=device, num_cpu_threads=num_cpu)
+                              batch_size=batch_size, device=device, num_cpu_threads=num_cpu, bbox_expand_factor=bbox_expand_factor)
     logger.debug(f"Keys for vision_detection.detect_faces: {detections[0].keys()}")
     
     # Filter detections for classification
     filtered_detections = filter_detections.filter_detections_clustering(
-        detections, effective_area, min_area, max_area, min_conf, mode=mode, results_path=results_path)
+        detections, effective_area, min_area, max_area, min_conf, mode=mode, results_path=results_path, remove_overlaps=remove_overlaps, iou_threshold=iou_threshold)
     logger.debug(f"Keys for filter_detections.filter_detections_clustering: {filtered_detections[0].keys()}")
     
     # Classify all filtered faces
@@ -64,7 +88,7 @@ def infer_on_trailer(trailer_path: str, cluster_model: str, cluster_threshold: f
     return aggregated_estimations, embedded_faces, flattened_faces_perso_ids
 
 
-def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, embedded_faces_perso_ids: list, aggregated_estimations: list[dict], min_area: float, min_conf: float, movie_id: str | int, batch_size: int, device: str, num_cpu: int, store_visuals: bool=False, mode: str="infer", results_path: str="") -> tuple[list[dict], list[np.ndarray], list[dict], float]:
+def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, embedded_faces_perso_ids: list, aggregated_estimations: list[dict], min_area: float, min_conf: float, movie_id: str | int, batch_size: int, device: str, num_cpu: int, store_visuals: bool=False, mode: str="infer", results_path: str="", bbox_expand_factor: float=0.0) -> tuple[list[dict], list[np.ndarray], list[dict], float]:
     """
     Description of the function
     """
@@ -73,7 +97,7 @@ def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, embedded_fac
 
     # Detect faces in the poster
     detections = vision_detection.detect_faces(movie_id, poster, H_original, W_original,
-                              batch_size=1, device=device, num_cpu_threads=num_cpu)
+                              batch_size=1, device=device, num_cpu_threads=num_cpu, bbox_expand_factor=bbox_expand_factor)
 
     # Filter detections
     filtered_detections = filter_detections.filter_detections_poster(detections, total_area, min_area, min_conf, mode=mode, results_path=results_path) #FIXME
@@ -86,7 +110,7 @@ def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, embedded_fac
         all_indexes.update(video_person["perso_ids"])  # Add all indexes from perso_ids
 
     # Step 2: Filter embedded_faces to keep only the embeddings corresponding to the collected indexes
-    embedded_faces = [(i, embedding) for i, embedding in zip(embedded_faces_perso_ids, embedded_faces) if i in all_indexes]
+    embedded_faces = [(i, embedding) for i, embedding in zip(embedded_faces_perso_ids, embedded_faces, strict=False) if i in all_indexes]
 
     filtered_detections = faces_clustering.assign_poster(embedded_faces_poster, embedded_faces, aggregated_estimations, filtered_detections, total_area, poster, store_visuals, mode=mode, results_path=results_path)
     logger.debug(f"Keys for faces_clustering.assign_poster: {filtered_detections[0].keys()}")
@@ -96,11 +120,12 @@ def infer_on_poster(poster: np.ndarray, embedded_faces: np.ndarray, embedded_fac
 def predict_one_item(
         column_identifier, num_cpu, batch_size, min_area, max_area, min_conf, min_conf_cla, min_sharpness_cla, max_z_cla,
         min_mouth_opening_cla, cluster_model, cluster_threshold, agr_method, store_visuals, downloaded_media_path,
-        poster_path, trailer_path, mode='inference', poster_source='None', row=None, results_path=''
+        poster_path, trailer_path, mode='inference', poster_source='None', row=None, results_path='', device_arg='auto', bbox_expand_factor=0.0, remove_overlaps=False, iou_threshold=0.5
         ) -> None:
     """
     Predict all handled metrics over a selected movie (trailer + poster)
     """ 
+    device = resolve_device(device_arg)
     movie_id = row[column_identifier]
 
     # Load data
@@ -117,7 +142,6 @@ def predict_one_item(
         logger.error(f"No trailer found for movie id: {movie_id}. Skipping this row")
         raise
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Infer on trailer
     aggregated_estimations, embedded_faces, embedded_faces_perso_ids = infer_on_trailer(trailer_path,
@@ -137,7 +161,8 @@ def predict_one_item(
                                                                                         store_visuals,
                                                                                         movie_id=movie_id,
                                                                                         mode=mode,
-                                                                                        results_path=results_path)
+                                                                                        results_path=results_path, bbox_expand_factor=bbox_expand_factor,
+                                                                                        remove_overlaps=remove_overlaps, iou_threshold=iou_threshold)
                                               
     
     # Infer on poster
@@ -154,7 +179,7 @@ def predict_one_item(
                                               num_cpu,
                                               store_visuals=False,
                                               mode=mode,
-                                              results_path=results_path)                                                                                   
+                                              results_path=results_path, bbox_expand_factor=bbox_expand_factor)
     else :
         filtered_detections = []
             
@@ -162,7 +187,8 @@ def predict_one_item(
 
 def predict_with_cuda_options(args, *positional, **kwargs):
     """Appliquer les options aux deux modes, sur le périphérique de la pipeline."""
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(kwargs.get('device_arg', getattr(args, 'device', 'auto')))
+    kwargs['device_arg'] = str(device)
     with cuda_runtime.inference_options(
         device, amp=getattr(args, 'cuda_amp', False),
         profile_memory=getattr(args, 'profile_memory', False),
@@ -172,6 +198,7 @@ def predict_with_cuda_options(args, *positional, **kwargs):
 
 
 def evaluate_pipeline(args, to_predict_df, paths):
+    options = exploration_options(args)
     try:
         # take selected subset of items to infer on        
         istart = args.istart
@@ -188,7 +215,7 @@ def evaluate_pipeline(args, to_predict_df, paths):
                     args.column_identifier, args.num_cpu, args.batch_size, args.min_area, args.max_area, args.min_conf, 
                     args.min_conf_cla, args.min_sharpness_cla, args.max_z_cla, args.min_mouth_opening_cla, args.cluster_model,
                     args.cluster_threshold, args.agr_method, args.store_visuals, paths['dl_media'], poster_path, trailer_path, row=row,
-                    mode='eval', results_path=paths['all_results']
+                    mode='eval', results_path=paths['all_results'], **options
                 )
             
             except Exception as e:
@@ -197,7 +224,7 @@ def evaluate_pipeline(args, to_predict_df, paths):
         logger.success(f"All films from {args.source} have been analyzed.")
         
     except Exception as e:
-        raise ValueError(f'Could not infer on given csv: {e}')
+        raise ValueError(f'Could not infer on given csv: {e}') from e
     
     
     #score_tot, score_kept_frames = "WIP", "WIP" evaluation_annotation.evaluate_trailer_whole_pipeline(trailer_path, aggregated_estimations)
@@ -205,6 +232,7 @@ def evaluate_pipeline(args, to_predict_df, paths):
     #return score_tot, score_kept_frames
     
 def infer_pipeline(args, to_predict_df, paths):
+    options = exploration_options(args)
     try:
         # take selected subset of items to infer on        
         istart = args.istart
@@ -220,7 +248,7 @@ def infer_pipeline(args, to_predict_df, paths):
                     args,
                     args.column_identifier, args.num_cpu, args.batch_size, args.min_area, args.max_area, args.min_conf, 
                     args.min_conf_cla, args.min_sharpness_cla, args.max_z_cla, args.min_mouth_opening_cla, args.cluster_model,
-                    args.cluster_threshold, args.agr_method, args.store_visuals, paths['dl_media'], poster_path, trailer_path, row=row
+                    args.cluster_threshold, args.agr_method, args.store_visuals, paths['dl_media'], poster_path, trailer_path, row=row, **options
                 )
 
                 # Store poster predictions in .pkl file
@@ -245,7 +273,7 @@ def infer_pipeline(args, to_predict_df, paths):
         utils.gather_and_save_predictions(to_predict_df, paths['temp_preds'], paths['final_preds'])
         
     except Exception as e:
-        raise ValueError(f'Could not infer on given csv: {e}')
+        raise ValueError(f'Could not infer on given csv: {e}') from e
         
 def handler(args, paths):
     if args.source[-4:] == ".csv":

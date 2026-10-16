@@ -91,10 +91,12 @@ class VisionDetection:
         return results
 
     def crop_areas_of_interest(
-            self, movie_id: str | int, images: np.ndarray, H_original: int, W_original: int, area_type: str = 'face', batch_size: int = 64) -> list[dict]:
+            self, movie_id: str | int, images: np.ndarray, H_original: int, W_original: int, area_type: str = 'face', batch_size: int = 64, bbox_expand_factor: float = 0.0) -> list[dict]:
         """
         Create individual subimages for all areas of interest in one image
         """
+        if not np.isfinite(bbox_expand_factor) or bbox_expand_factor < 0:
+            raise ValueError("bbox_expand_factor doit être fini et positif ou nul")
         areas_of_interest = self.get_areas_of_interest(
             images, area_type, batch_size=batch_size)
 
@@ -110,23 +112,28 @@ class VisionDetection:
                 # Bounding boxes need to be rescaled as we previously changed frames size
                 x1, x2, y1, y2 = int(
                      x1 * scale_x), int(x2 * scale_x), int(y1 * scale_y), int(y2 * scale_y)
+                # Garder la boîte détectée pour les surfaces et les annotations.
+                dx = int((x2 - x1) * bbox_expand_factor)
+                dy = int((y2 - y1) * bbox_expand_factor)
+                cx1, cy1 = max(0, x1 - dx), max(0, y1 - dy)
+                cx2, cy2 = min(W_original, x2 + dx), min(H_original, y2 + dy)
                 conf = area.boxes[i].conf.item()
                 match len(images.shape):
                     case 3:
-                        cropped_image = images[y1:y2, x1:x2]
+                        cropped_image = images[cy1:cy2, cx1:cx2]
                     case 4:
-                        cropped_image = images[k][y1:y2, x1:x2]
+                        cropped_image = images[k][cy1:cy2, cx1:cx2]
                     case _:
                         raise ValueError("Input images must have shape [H, W, C] or [N, H, W, C]")
                 detections.append({
-                    "bbox": [x1, y1, x2, y2], "conf": conf, f"cropped_{area_type}": cropped_image,
+                    "bbox": [x1, y1, x2, y2], "crop_bbox": [cx1, cy1, cx2, cy2], "conf": conf, f"cropped_{area_type}": cropped_image,
                     "frame_id": k, "perso_id": perso_id, "movie_id": movie_id})
                 perso_id += 1 
     
         return detections
 
 def detect_faces(
-        movie_id: str | int, frames: np.array, H_original: int, W_original: int, batch_size: int, device: str, num_cpu_threads: int) -> list[dict]:
+        movie_id: str | int, frames: np.array, H_original: int, W_original: int, batch_size: int, device: str, num_cpu_threads: int, bbox_expand_factor: float = 0.0) -> list[dict]:
     """
     Detect faces in the video.
     Args:
@@ -145,7 +152,7 @@ def detect_faces(
     vision_detector = VisionDetection(
         device=device, num_cpu_threads=num_cpu_threads)
     detections = vision_detector.crop_areas_of_interest(
-        movie_id, frames, H_original, W_original, area_type='face', batch_size=batch_size)
+        movie_id, frames, H_original, W_original, area_type='face', batch_size=batch_size, bbox_expand_factor=bbox_expand_factor)
 
     return detections
 

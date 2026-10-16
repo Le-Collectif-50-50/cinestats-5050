@@ -4,9 +4,9 @@
 
 **Resonsable** Joel Teixeira
 
-**Dernière révision:** 2026-10-06
+**Dernière révision:** 2026-10-11
 
-**Status:** active
+**Status:** actif
 
 ## Historique du document
 
@@ -15,6 +15,7 @@
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-26 | Joel Teixeira | Alignement avec l'orchestration Prefect actuelle, le poller Metabase et le statut Airbyte/dbt phase 2 |
 | 3   | 2026-10-06 | Joel Teixeira | Alignement des modèles CNC/Allociné actuels et clarification des sélections dbt par phase |
+| 4 | 2026-10-11 | Joel Teixeira | Extension de la phase 2 aux modèles intermédiaires et finaux et à leurs dépendances |
 
 ## Statut de référence
 
@@ -370,10 +371,10 @@ flowchart LR
 3. Le flow versionné Prefect exposé à l'utilisateur est désormais un flow principal unique; les étapes `airbyte sync`, `dbt phase 1`, `scraping Allociné` et `dbt phase 2` sont exécutées en séquence dans le même flow run.
 4. `dbt phase 1` et `scraping Allociné` sont opérationnels.
 5. `dbt phase 1` et le runtime du scraping Allociné s'exécutent désormais directement dans `prefect-worker`.
-6. `airbyte sync` est fonctionnel quand des noms de connexions Airbyte explicites sont fournis; `dbt phase 2` est exécutable mais désactivé par défaut dans le flow principal.
+6. `airbyte sync` est fonctionnel quand des noms de connexions Airbyte explicites sont fournis; `dbt phase 2` est activé par défaut dans le flow principal et peut être désactivé avec `run_dbt_phase_2_step=false`.
 7. Le flow principal chaîne déjà les quatre étapes dans l'ordre cible.
 8. Le job standalone Allociné existe dans `ingestion/scraping/allocine/` et suit déjà la logique `id_matching -> allocine_data`.
-9. Les modèles `stg_cnc_films`, `stg_allocine_films`, `int_cnc_films` et `int_allocine_films` existent. `phase1` sélectionne uniquement `stg_cnc_films`; `phase2` sélectionne `stg_allocine_films` et `v_allocine_pipeline_status`, avec leurs tests associés. Ces phases ne valident pas tous les modèles intermédiaires et finaux. Les anciens modèles de déduplication ne sont plus présents dans le code.
+9. Les modèles `stg_cnc_films`, `stg_allocine_films`, `int_cnc_films` et `int_allocine_films` existent. `phase1` sélectionne uniquement `stg_cnc_films`; `phase2` couvre `stg_allocine_films`, `v_allocine_pipeline_status` et tous les modèles des dossiers `intermediate/` et `fnl/`. La finalisation sélectionne `+tag:phase2` pour inclure leurs dépendances amont et les tests associés. Les anciens modèles de déduplication ne sont plus présents dans le code.
 10. Le schéma `ops` contient la file `ops.ingestion_run_requests` et la vue dbt `ops.v_allocine_pipeline_status` pour le déclenchement Metabase et le suivi Allociné.
 11. Le poller Prefect `Traiter les demandes d'ingestion` claim une ligne `pending`, déclenche le deployment principal, puis le flow principal écrit `success` ou `failed`.
 12. Les tables finales `fnl_*` du schéma cible restent largement à construire.

@@ -1,6 +1,6 @@
 {{
   config(
-    materialized = 'view',
+    materialized = 'table',
     tags = ['mubi']
   )
 }}
@@ -30,4 +30,4 @@ FROM {{ ref('stg_mubi_festival_films') }} f
 LEFT JOIN film_ids ids
     ON f.film_link = ids.film_link
 LEFT JOIN {{ ref('int_id_matching') }} m
-    ON ids.mubi_id = m.mubi_id
+    ON CAST(ids.mubi_id AS TEXT) = m.mubi_id

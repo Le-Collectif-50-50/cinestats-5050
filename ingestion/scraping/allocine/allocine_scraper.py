@@ -118,7 +118,7 @@ class AllocineScraper:
 
         film_details = {
             "allocine_visa_number": allocine_visa_div.find('span', class_='that').text.strip() if allocine_visa_div else None,
-            "poster_url": poster_url["src"] if poster_url else None,
+            "poster_url": (poster_url.get("src") or None) if poster_url else None,
             "release_date": release_date.get_text(strip=True) if release_date else None,
             "duration": duration,
             "genres": [genre.get_text(strip=True) for genre in genres] if genres else None,

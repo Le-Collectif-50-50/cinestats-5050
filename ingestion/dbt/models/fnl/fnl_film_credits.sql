@@ -4,4 +4,5 @@ SELECT
     chr.credit_holder_id
 FROM {{ ref('int_credit_holders_role') }} AS chr
 LEFT JOIN {{ ref('int_id_matching') }} AS matching
-    ON chr.allocine_id = matching.allocine_id
+    ON chr.film_id = matching.film_id
+WHERE chr.film_id IS NOT NULL

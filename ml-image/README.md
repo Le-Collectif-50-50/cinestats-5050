@@ -10,7 +10,7 @@ Le module analyse les visages des bandes-annonces, regroupe les détections par 
 
 L’inférence vidéo/affiche et les exports fonctionnent sur un extrait CPU de test. L’évaluation intégrée reste inachevée ; l’exactitude des prédictions n’a pas été mesurée. La [description d’architecture](../docs/architecture/ml-image-architecture-description-pipeline-phase-1.md) détaille le code implémenté, les schémas de sortie et les limites vérifiées.
 
-La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU. Le lanceur de test impose le CPU. Apple MPS n’est pas implémenté. La précision mixte, le profilage GPU et le nettoyage du cache CUDA sont optionnels ; leur exécution matérielle reste à valider. Le module produit des fichiers locaux ; il ne les insère pas en base.
+La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU ; `--device cpu` ou `--device cuda` impose le périphérique dans les modes `infer` et `eval`. Une demande CUDA indisponible échoue avant traitement. Le lanceur de test impose le CPU. Apple MPS n’est pas implémenté. Précision mixte, profilage et nettoyage du cache CUDA sont optionnels ; leur exécution matérielle reste à valider. Le module produit des fichiers locaux ; il ne les insère pas en base.
 
 ## Repères dans le module
 
@@ -56,7 +56,7 @@ export YOLO_CONFIG_DIR="$PWD/tmp/ultralytics"
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Le test d’export utilise des prédictions synthétiques. Il vérifie les chemins natifs et les valeurs CSV. Il n’exécute aucun modèle et n’écrit pas en base.
+Les tests utilisent des prédictions synthétiques et des modèles simulés. Ils vérifient les exports, les crops bornés, les surfaces et identifiants conservés, la suppression optionnelle des chevauchements et la transmission des options dans les deux modes. Ils n’exécutent aucun modèle et n’écrivent pas en base.
 
 ## Télécharger les poids
 
@@ -104,6 +104,18 @@ ml-image/.venv/bin/python ml-image/smoke_test.py \
 
 Le test du 10 octobre 2026 a terminé avec trois lignes de personnages pour la vidéo et sept lignes de détections pour l’affiche, ainsi que les deux fichiers pickle attendus. Il valide l’exécution de bout en bout sur cet extrait uniquement ; les classifications et les correspondances de visages n’ont pas été évaluées.
 
+Le 16 octobre 2026, les médias ont été récupérés à nouveau depuis les URL du même film en base `preview`, dans une transaction `READ ONLY`. Les poids auxiliaires ResNet34 et FaceNet ont été téléchargés dans le cache local. La validation CPU de la reprise de PR 27 a produit :
+
+| Parcours | Résultat sur cet extrait |
+| --- | --- |
+| Inférence par défaut | 3 groupes vidéo, 7 détections affiche ; pickle et CSV présents |
+| `--device cpu --bbox_expand_factor 0.3 --remove_overlaps` | 2 groupes vidéo, 7 détections affiche ; pickle et CSV présents |
+| Mode `eval` avec ces options | 826 lignes intermédiaires vidéo, 7 lignes affiche ; aucun score final calculé |
+
+Le notebook consolidé a aussi été exécuté avec les modèles réels : toutes les cellules de code passent, sans annotations de référence. L’affichage Jupyter a été remplacé par des PNG pour cette exécution hors notebook ; le noyau Jupyter lui-même n’a pas été testé. L’extrait récupéré comporte 237 images à 24 FPS (9,875 s).
+
+La variation du nombre de groupes justifie de conserver ces options désactivées par défaut. Ce contrôle porte sur l’exécution et les fichiers produits, pas sur l’exactitude des prédictions. Les six tests de régression sans modèles passent également.
+
 Le fichier `trailer-short.mp4` est un extrait de dix secondes à partir de la trentième seconde. Ce fixture local n’est pas distribué avec le dépôt. Les identifiants des sorties du lanceur restent synthétiques.
 
 ## Entrée CSV de la pipeline
@@ -124,9 +136,30 @@ La borne `istop` est exclue. Le schéma CSV n’est pas validé avant traitement
 
 Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires racines. `PREDICTIONS_FOLDER`, `DOWNLOADED_MEDIA_FOLDER`, `FINAL_PREDICTIONS_FOLDER`, `INTERMEDIATE_FOLDER` et `VISUALS_FOLDER` choisissent leurs sous-répertoires. Le lanceur les isole automatiquement. Exception : les fonctions de visualisation écrivent encore dans `example/`, sans utiliser `VISUALS_FOLDER`. La branche affiche force les visualisations à `False`.
 
+## Exploration des détections et des groupes
+
+Le [notebook d’exploration](notebooks/explore_pipeline_clustering.ipynb) consolide les deux notebooks historiques de la PR 27. Il utilise les signatures actuelles, des chemins absolus et un répertoire de résultats distinct par exécution. Configurer une vidéo locale courte et sélectionner le noyau de `ml-image/.venv` ; installer Jupyter/ipykernel séparément si nécessaire. Aucun CSV historique privé n’est nécessaire. Les sorties ne sont pas préexécutées.
+
+Il permet d’inspecter les images, les crops, les filtres, les classifications, les membres des groupes et leur temps de présence. Un CSV facultatif d’annotations (`gender,age,ethnicity,time_on_screen`) compare les distributions de temps sur le même extrait. Leur similarité n’est pas une mesure d’exactitude individuelle.
+
+Options disponibles dans les modes `infer` et `eval` :
+
+| Option | Défaut | Effet |
+| --- | --- | --- |
+| `--device` | `auto` | `auto`, `cpu` ou `cuda` ; CUDA explicite indisponible provoque une erreur |
+| `--bbox_expand_factor` | `0.0` | Marge par côté du crop, positive ou nulle ; `0.3` ajoute 30 % de largeur/hauteur sur chaque côté avant bornage |
+| `--remove_overlaps` | désactivé | Supprime les boîtes vidéo redondantes d’une même image avant classification et embeddings |
+| `--iou_threshold` | `0.5` | Supprime une boîte si son IoU avec une boîte conservée dépasse ce seuil, compris entre 0 et 1 |
+
+L’expansion s’applique aux crops vidéo et affiche. `bbox` reste la boîte détectée, utilisée pour les surfaces, les filtres et les annotations ; `crop_bbox` décrit le crop borné à l’image. L’expansion peut modifier les classifications, embeddings et critères de qualité : elle n’est pas validée comme amélioration.
+
+La suppression conserve les grandes boîtes et préserve l’ordre d’entrée et les identifiants. Elle n’est appliquée qu’une fois, avant la production des embeddings vidéo, pour conserver leur correspondance avec les détections. Elle peut supprimer des visages distincts proches et reste donc désactivée par défaut. Les détections supprimées sont enregistrées parmi les rejets du mode `eval`.
+
+Le classifieur d’attributs CelebA reste différé : poids et ordre des labels restent à valider. Les options CUDA sont décrites ci-dessous. Les correctifs actuels de téléchargement et d’export sont conservés.
+
 ## Options CUDA expérimentales
 
-Cette reprise séparée des changements CUDA de la PR 27 conserve la sélection automatique CUDA/CPU actuelle. Les options suivantes sont désactivées par défaut et transmises dans les modes `infer` et `eval` :
+Les options CUDA respectent `--device` dans les modes `infer` et `eval`, y compris CPU imposé sur une machine équipée de CUDA. Les options suivantes sont désactivées par défaut et transmises dans les modes `infer` et `eval` :
 
 | Option | Effet sur CUDA |
 | --- | --- |
@@ -158,7 +191,8 @@ Sur macOS ARM64, PyTorch 2.2.2 sans CUDA, l’extrait staging récupéré à nou
 - Le parcours par défaut produit 3 groupes vidéo et 7 détections affiche.
 - Avec `--cuda_amp --profile_memory --clear_cuda_cache`, les mêmes sorties sont produites. Les lignes CSV vidéo et affiche sont exactement identiques après tri, ainsi qu’à la référence CPU de PR 27 sans expansion ni suppression de chevauchements.
 - Le mode `eval`, avec les trois options activées, produit 826 lignes intermédiaires vidéo et 7 lignes affiche ; les scores finaux restent hors périmètre.
-- Sept tests de régression passent ; le test matériel CUDA est ignoré faute de GPU.
+- Après intégration de `main`, treize tests de régression passent ; le test matériel CUDA est ignoré faute de GPU.
+- Une nouvelle inférence avec `--device cpu --cuda_amp --profile_memory --clear_cuda_cache --bbox_expand_factor 0.3 --remove_overlaps` produit 2 groupes vidéo et 7 détections affiche, comme la validation PR 27 avec ces options de crops.
 
 Ces contrôles valident le fonctionnement CPU et l’absence d’effet des options CUDA sur cet échantillon. Ils ne mesurent ni la qualité des classifications, ni les performances, ni le fonctionnement matériel CUDA. Les logs, médias et sorties sont conservés localement dans les répertoires de test ignorés par Git.
 
@@ -182,5 +216,6 @@ Ces contrôles valident le fonctionnement CPU et l’absence d’effet des optio
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties. |
 | 3 | 2026-10-15 | Joel | Ajout du lien vers le plan de déploiement PostgreSQL, Prefect et dbt. |
-| 4 | 2026-10-16 | Codex | Options CUDA expérimentales, transferts des résultats par lot et protocole de comparaison GPU. |
-| 5 | 2026-10-16 | Codex | Validation réelle CPU : sorties identiques avec options CUDA désactivées ou activées sur un extrait staging. |
+| 4 | 2026-10-16 | Codex | Reprise ciblée de la PR 27 : notebook consolidé, choix du périphérique, expansion des crops sans modification des surfaces et suppression optionnelle des chevauchements. |
+| 5 | 2026-10-16 | Codex | Validation CPU sur médias staging récupérés à nouveau : inférence par défaut et options, exports eval et notebook avec modèles réels. |
+| 6 | 2026-10-16 | Codex | Intégration PR 29 : options CUDA désactivées par défaut, prise en compte du périphérique explicite, validations CPU et protocole GPU restant. |

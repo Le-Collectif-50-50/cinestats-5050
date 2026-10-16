@@ -1,6 +1,6 @@
 {{
   config(
-    materialized = 'view',
+    materialized = 'table',
     tags = ['mubi']
   )
 }}
@@ -20,5 +20,5 @@ SELECT
     m.allocine_id
 FROM {{ ref('stg_mubi_film_awards') }} a
 LEFT JOIN {{ ref('int_id_matching') }} m
-    ON a.mubi_id = m.mubi_id
+    ON CAST(a.mubi_id AS TEXT) = m.mubi_id
 WHERE a.award IS NOT NULL

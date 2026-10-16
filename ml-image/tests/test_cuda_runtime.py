@@ -37,7 +37,16 @@ class CudaRuntimeTests(unittest.TestCase):
         with patch.object(torch.cuda, 'is_available', return_value=False), patch.object(cuda_runtime, 'inference_options') as options, patch.object(pipelines, 'predict_one_item', return_value=([], [])) as predict:
             self.assertEqual(pipelines.predict_with_cuda_options(args, 'value', mode='eval'), ([], []))
         options.assert_called_once_with(torch.device('cpu'), amp=True, profile_memory=True, clear_cache=True)
-        predict.assert_called_once_with('value', mode='eval')
+        predict.assert_called_once_with('value', mode='eval', device_arg='cpu')
+
+    def test_forced_cpu_on_cuda_host_avoids_cuda_context(self):
+        args = SimpleNamespace(device='cpu', cuda_amp=True, profile_memory=True, clear_cuda_cache=True)
+        with patch.object(torch, 'cuda') as cuda, patch.object(torch, 'autocast') as autocast, patch.object(pipelines, 'predict_one_item') as predict:
+            cuda.is_available.return_value = True
+            pipelines.predict_with_cuda_options(args, device_arg='cpu')
+            self.assertEqual(cuda.mock_calls, [])
+            autocast.assert_not_called()
+            predict.assert_called_once_with(device_arg='cpu')
 
     def test_embedding_fp32_output(self):
         model = object.__new__(faces_clustering.EmbeddingModel)

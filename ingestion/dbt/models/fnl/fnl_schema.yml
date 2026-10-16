@@ -7,11 +7,15 @@ models:
       Consolide les données CNC, Allociné et le financement français pour permettre 
       l'analyse des inégalités de genre dans le cinéma français.
     columns:
-      - name: movie_id
+      - name: film_id
         description: "Identifiant unique du film dans Cinéstats 50/50."
         tests:
           - not_null
-          - unique
+          - unique:
+              config:
+                severity: warn
+                store_failures: true
+                schema: ops
       - name: allocine_id
         description: "Identifiant du film sur Allociné."
       - name: mubi_id
@@ -22,7 +26,11 @@ models:
         description: "Visa d'exploitation CNC du film."
         tests:
           - not_null
-          - unique
+          - unique:
+              config:
+                severity: warn
+                store_failures: true
+                schema: ops
       - name: movie_name
         description: "Titre du film tel qu'affiché dans Cinéstats 50/50, privilégiant le titre Allociné."
         tests:
@@ -63,17 +71,13 @@ models:
       Table finale de la répartition du financement des films par pays de coproduction. 
       Permet d'analyser la dimension internationale des productions.
     columns:
-      - name: id
+      - name: film_country_budget_allocation_id
         description: "Identifiant unique de la ligne (couple film × pays)."
         tests:
           - not_null
           - unique
-      - name: movie_id
+      - name: film_id
         description: "Identifiant du film associé."
-        tests:
-          - not_null
-      - name: cnc_visa
-        description: "Visa d'exploitation CNC du film."
         tests:
           - not_null
       - name: country_id

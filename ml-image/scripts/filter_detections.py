@@ -135,6 +135,35 @@ def is_face_not_occluded(det: Dict, **kwargs) -> bool:
     return True
 
 
+def compute_iou(bbox1, bbox2):
+    """Intersection sur union de deux boîtes de coins."""
+    def area(box):
+        return max(0, box[2] - box[0]) * max(0, box[3] - box[1])
+    intersection = area([max(bbox1[0], bbox2[0]), max(bbox1[1], bbox2[1]),
+                         min(bbox1[2], bbox2[2]), min(bbox1[3], bbox2[3])])
+    union = area(bbox1) + area(bbox2) - intersection
+    return intersection / union if union > 0 else 0.0
+
+
+def remove_overlapping_faces_per_frame(detections, iou_threshold=0.5):
+    """Garder les grandes boîtes par image, sans changer l'ordre ni les IDs."""
+    if not 0 <= iou_threshold <= 1:
+        raise ValueError("iou_threshold doit être compris entre 0 et 1")
+    frames = {}
+    for index, det in enumerate(detections):
+        frames.setdefault(det["frame_id"], []).append(index)
+    kept = set()
+    for indices in frames.values():
+        ordered = sorted(indices, key=lambda i: compute_area(detections[i]["bbox"], 1), reverse=True)
+        selected = []
+        for index in ordered:
+            if all(compute_iou(detections[index]["bbox"], detections[i]["bbox"]) <= iou_threshold
+                   for i in selected):
+                selected.append(index)
+        kept.update(selected)
+    return [det for index, det in enumerate(detections) if index in kept]
+
+
 def filter_detections_poster(detections: list[dict], total_area: float, min_area: float, min_conf: float, mode: str='infer', results_path: str="") -> list[dict]: 
     # Filter detections for poster
     filters = [validates_confidence_filter]
@@ -156,7 +185,7 @@ def filter_detections_poster(detections: list[dict], total_area: float, min_area
     return filtered_detections
 
 
-def filter_detections_clustering(detections: list[dict], effective_area: float, min_area: float, max_area: float, min_conf: float, mode: str='infer', results_path: str="") -> list[dict]:
+def filter_detections_clustering(detections: list[dict], effective_area: float, min_area: float, max_area: float, min_conf: float, mode: str='infer', results_path: str="", remove_overlaps: bool=False, iou_threshold: float=0.5) -> list[dict]:
     # Filter detections
     filters = [validates_area_filter, validates_confidence_filter]
 
@@ -171,6 +200,11 @@ def filter_detections_clustering(detections: list[dict], effective_area: float, 
     detections = clustering_filters.apply(detections)
     filtered_detections = [d for d in detections if d["clustering_weight"] == len(filters)]
     not_kept_detections = [d for d in detections if d["clustering_weight"] != len(filters)]
+    if remove_overlaps:
+        filtered_detections = remove_overlapping_faces_per_frame(filtered_detections, iou_threshold)
+        kept_ids = {d["perso_id"] for d in filtered_detections}
+        not_kept_detections = [d for d in detections if d["perso_id"] not in kept_ids]
+
 
     if mode == "eval":
         evaluation_annotation.register_faces_intermediate_results(results_path, not_kept_detections)

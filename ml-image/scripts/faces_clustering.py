@@ -86,7 +86,7 @@ class FacesClusterer:
         '''
         labels = self.get_clustering_labels(faces_list)
 
-        for label, person in zip(labels, persons_list):
+        for label, person in zip(labels, persons_list, strict=False):
             if label not in self.persons:
                 self.persons[label] = [person]
             else:

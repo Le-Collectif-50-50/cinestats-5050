@@ -93,5 +93,13 @@ if __name__ == '__main__':
                         help="Journaliser mémoire CUDA et pics par film, dans infer et eval")
     parser.add_argument("--clear_cuda_cache", action=argparse.BooleanOptionalAction, default=False,
                         help="Libérer le cache CUDA inutilisé après chaque film")
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto",
+                        help="Périphérique pour infer et eval")
+    parser.add_argument("--bbox_expand_factor", type=float, default=0.0,
+                        help="Marge par côté du crop ; ne modifie pas les surfaces mesurées")
+    parser.add_argument("--remove_overlaps", action=argparse.BooleanOptionalAction, default=False,
+                        help="Supprimer les boîtes vidéo redondantes avant classification")
+    parser.add_argument("--iou_threshold", type=float, default=0.5,
+                        help="Seuil IoU de suppression, entre 0 et 1")
 
     main(parser)
