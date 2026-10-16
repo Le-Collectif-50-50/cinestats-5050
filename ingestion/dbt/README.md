@@ -4,7 +4,7 @@
 
 **Owner:** Data Team DataForGood
 
-**Dernière révision:** 2026-10-11
+**Dernière révision:** 2026-10-15
 
 **Status:** actif
 
@@ -16,6 +16,7 @@
 | 2 | 2026-10-06 | Joel Teixeira | Suppression des déclarations de modèles absents et alignement des modèles documentés sur le code actuel |
 | 3 | 2026-10-10 | Joel Teixeira | Ajout du runbook local macOS/WSL2 pour le debug et dbt Docs |
 | 4 | 2026-10-11 | Joel Teixeira | Normalisation des espaces dans les budgets CNC avant conversion numérique. Inclusion des modèles intermédiaires et finaux dans la phase 2, avec leurs dépendances amont. Alignement des clés des corrections, identifiants des sociétés et avertissements sur les correspondances externes absentes ou dupliquées. Historisation des résultats et détails dbt pour Metabase, quarantaine des crédits sans film et harmonisation des types dans les jointures Mubi |
+| 5 | 2026-10-15 | Data Team DataForGood | URL d’affiche nullable dans le staging Allociné ; prérequis de migration. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -26,6 +27,8 @@ Projet dbt Core exécuté depuis `prefect-worker`.
 3. Consolider les vues intermédiaires dans `intermediate`.
 4. Publier les tables finales dans `fnl` quand elles existent.
 5. Publier les vues opérationnelles dans `ops`.
+
+`stg_allocine_films.poster_url` expose l’URL distante nullable de l’affiche. Appliquer la [migration ingestion](../../infra/data/2026-10-15-allocine-poster-url.sql) avant de reconstruire ce modèle sur une base existante. Le [guide Allociné](../scraping/allocine/README.md#affiches--migration-et-reprise-explicite) décrit le backfill explicite et les droits requis. Aucun fichier image n’est stocké par dbt. Les projections aval restent inchangées.
 
 Le staging `stg_cnc_films` retire les espaces classiques, insécables (U+00A0) et fines insécables (U+202F) de `DEVIS`, puis remplace la virgule décimale par un point avant conversion numérique. La multiplication par un million pour les années d'agrément à partir de 2013 reste inchangée.
 
