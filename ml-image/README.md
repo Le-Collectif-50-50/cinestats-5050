@@ -104,6 +104,18 @@ ml-image/.venv/bin/python ml-image/smoke_test.py \
 
 Le test du 10 octobre 2026 a terminé avec trois lignes de personnages pour la vidéo et sept lignes de détections pour l’affiche, ainsi que les deux fichiers pickle attendus. Il valide l’exécution de bout en bout sur cet extrait uniquement ; les classifications et les correspondances de visages n’ont pas été évaluées.
 
+Le 16 octobre 2026, les médias ont été récupérés à nouveau depuis les URL du même film en base `preview`, dans une transaction `READ ONLY`. Les poids auxiliaires ResNet34 et FaceNet ont été téléchargés dans le cache local. La validation CPU de la reprise de PR 27 a produit :
+
+| Parcours | Résultat sur cet extrait |
+| --- | --- |
+| Inférence par défaut | 3 groupes vidéo, 7 détections affiche ; pickle et CSV présents |
+| `--device cpu --bbox_expand_factor 0.3 --remove_overlaps` | 2 groupes vidéo, 7 détections affiche ; pickle et CSV présents |
+| Mode `eval` avec ces options | 826 lignes intermédiaires vidéo, 7 lignes affiche ; aucun score final calculé |
+
+Le notebook consolidé a aussi été exécuté avec les modèles réels : toutes les cellules de code passent, sans annotations de référence. L’affichage Jupyter a été remplacé par des PNG pour cette exécution hors notebook ; le noyau Jupyter lui-même n’a pas été testé. L’extrait récupéré comporte 237 images à 24 FPS (9,875 s).
+
+La variation du nombre de groupes justifie de conserver ces options désactivées par défaut. Ce contrôle porte sur l’exécution et les fichiers produits, pas sur l’exactitude des prédictions. Les six tests de régression sans modèles passent également.
+
 Le fichier `trailer-short.mp4` est un extrait de dix secondes à partir de la trentième seconde. Ce fixture local n’est pas distribué avec le dépôt. Les identifiants des sorties du lanceur restent synthétiques.
 
 ## Entrée CSV de la pipeline
@@ -166,3 +178,4 @@ Le classifieur d’attributs CelebA et les optimisations/profilages CUDA de la P
 | 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties. |
 | 3 | 2026-10-15 | Joel | Ajout du lien vers le plan de déploiement PostgreSQL, Prefect et dbt. |
 | 4 | 2026-10-16 | Codex | Reprise ciblée de la PR 27 : notebook consolidé, choix du périphérique, expansion des crops sans modification des surfaces et suppression optionnelle des chevauchements. |
+| 5 | 2026-10-16 | Codex | Validation CPU sur médias staging récupérés à nouveau : inférence par défaut et options, exports eval et notebook avec modèles réels. |
