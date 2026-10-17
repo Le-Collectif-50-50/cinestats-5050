@@ -1,7 +1,7 @@
 # Pipeline ML image : architecture implémentée et limites
 
 **Owner:** Julien Commes
-**Dernière révision:** 2026-10-10
+**Dernière révision:** 2026-10-16
 **Status:** actif
 
 ## Périmètre et niveau de validation
@@ -22,7 +22,7 @@ Ce document décrit le code présent, y compris ses limitations. Pour installer 
 | Affiche annotée depuis la CLI | Désactivée dans l’appel de `predict_one_item` |
 | CUDA | Sélection automatique présente ; exécution non validée |
 | Apple MPS | Non implémenté |
-| Nettoyage/profilage explicite de mémoire CUDA | Non implémenté |
+| Nettoyage/profilage explicite de mémoire CUDA | Options par film ; validation matérielle restante |
 | Validation du schéma CSV et reprise fiable des erreurs | Non implémentées |
 
 Le 10 octobre 2026, le test CPU sur macOS ARM64 a produit deux pickle, trois lignes de personnages vidéo et sept lignes de détections affiche pour un extrait de dix secondes / 240 images de **Natacha, hôtesse de l’air**. Le test confirme le fonctionnement de ce parcours, pas la qualité des classifications, des regroupements ou des correspondances. L’échantillon et les poids sont locaux et non versionnés.
@@ -65,14 +65,14 @@ Depuis `ml-image/`, avec les dépendances et poids disponibles :
 
 `load_data_from_links()` réutilise les fichiers `{visa_number}.mp4` et `{visa_number}.jpg` déjà présents, sinon les télécharge. Il attend les deux médias ; l’affiche facultative décrite dans certains arguments n’est pas gérée par ce chargeur. Les téléchargements n’imposent ni délai maximal ni contrôle du statut HTTP.
 
-`predict_one_item()` choisit CUDA si `torch.cuda.is_available()`, sinon CPU. Il appelle successivement `infer_on_trailer()` puis `infer_on_poster()`. Le lanceur de test masque CUDA pour imposer le CPU. MediaPipe peut malgré cela nécessiter un contexte graphique macOS ; ce n’est pas une sélection MPS pour PyTorch.
+`predict_one_item()` utilise `resolve_device()` : `auto` choisit CUDA si disponible, sinon CPU ; `cpu` et `cuda` imposent le périphérique. Les deux modes valident les nouvelles options avant la boucle des films, notamment la disponibilité de CUDA explicite. Il appelle successivement `infer_on_trailer()` puis `infer_on_poster()`. Le lanceur de test masque CUDA pour imposer le CPU. MediaPipe peut malgré cela nécessiter un contexte graphique macOS ; ce n’est pas une sélection MPS pour PyTorch.
 
 ## Analyse de la bande-annonce
 
 1. **Lecture complète.** `frame_capture()` charge toutes les images BGR dans un tableau NumPy et lit les FPS OpenCV. Il n’y a ni sous-échantillonnage ni lecture progressive dans la pipeline.
 2. **Surface de référence.** `compute_params()` utilise `largeur × (largeur / 2.478)`. La fonction de détection des bandes noires existe, mais n’est pas appelée ici. Aucun rejet spatial des visages situés hors de cette surface théorique n’est effectué. La netteté globale est calculée sans ajustement actif des seuils.
-3. **Détection.** YOLO Face reçoit des images RGB redimensionnées à 640 × 640, par lots. Les boîtes sont remises à l’échelle d’origine. Le détecteur initialise aussi YOLO personne, même pour une demande de visages. Aucun agrandissement configurable des boîtes n’est implémenté.
-4. **Sélection initiale.** `filter_detections_clustering()` conserve les visages satisfaisant le filtre de surface relative et celui de confiance YOLO.
+3. **Détection.** YOLO Face reçoit des images RGB redimensionnées à 640 × 640, par lots. Les boîtes sont remises à l’échelle d’origine. Le détecteur initialise aussi YOLO personne, même pour une demande de visages. `bbox_expand_factor` agrandit uniquement le crop, borné à l’image ; `bbox` conserve les coordonnées détectées et `crop_bbox` les coordonnées du crop. Le défaut zéro conserve le cadrage initial.
+4. **Sélection initiale.** `filter_detections_clustering()` conserve les visages satisfaisant le filtre de surface relative et celui de confiance YOLO. Avec `remove_overlaps`, une suppression par IoU conserve les grandes boîtes de chaque image, dans l’ordre d’entrée. Elle utilise les boîtes originales, conserve les identifiants et intervient avant classification et embeddings. Les rejets sont enregistrés en mode `eval`.
 5. **Classification.** FairFace/ResNet34 produit des classes et probabilités. Une classe devient `unknown` sous son seuil propre. Les seuils sont des valeurs par défaut de `classify_faces()`, non des options CLI : genre ≈ 0,965932 ; âge ≈ 0,595667 ; ethnie ≈ 0,810392.
 6. **Pondération.** `filter_detections_classifications()` conserve les détections et leur attribue `classification_weight`, nombre de critères satisfaits parmi confiance, netteté et pose, donc de 0 à 3. Malgré le nom `min_conf_cla`, le critère de confiance lit `det['conf']` — la confiance YOLO — et non une probabilité FairFace. La pose utilise la coordonnée z du nez de MediaPipe ; ce n’est pas un z-score statistique. Le critère d’ouverture de bouche n’est pas actif.
 7. **Embeddings et groupes.** FaceNet/InceptionResnetV1, poids VGGFace2, encode les visages en 160 × 160. Chinese Whispers regroupe les vecteurs avec un seuil de 0,92 par défaut. Un groupe est conservé s’il représente au moins 3 % des détections regroupées. Ce minimum est défini dans la fonction, pas exposé dans la CLI.
@@ -130,7 +130,7 @@ Chaque groupe contient les clés suivantes, avec leur orthographe actuelle :
 
 ### Schéma pickle affiche
 
-Chaque détection conserve `bbox`, `conf`, `cropped_face` (tableau NumPy BGR), `frame_id`, `perso_id`, `movie_id` et `poster_weight`. Le rapprochement ajoute `gender`, `age`, `ethnicity`, `label` et `occupied_area`. Les boîtes sont des coordonnées de coins, pas `[x, y, largeur, hauteur]`.
+Chaque détection conserve `bbox`, `crop_bbox`, `conf`, `cropped_face` (tableau NumPy BGR), `frame_id`, `perso_id`, `movie_id` et `poster_weight`. Le rapprochement ajoute `gender`, `age`, `ethnicity`, `label` et `occupied_area`. Les boîtes sont des coordonnées de coins, pas `[x, y, largeur, hauteur]`.
 
 ### Schémas CSV
 
@@ -166,7 +166,17 @@ L’appel final au calcul des scores est commenté. Les helpers d’annotation n
 | `--source_image`, `--min_sharpness`, `--max_z`, `--min_mouth_opening` | Déclarés dans la CLI, non utilisés par le gestionnaire |
 | `--min_mouth_opening_cla` | Transmis mais aucun filtre actif ne l’utilise |
 
-Il n’y a pas d’option CLI `--device` ni `--bbox_expand_factor`.
+Les options `--device` (`auto`, `cpu`, `cuda`), `--bbox_expand_factor` (défaut 0), `--remove_overlaps` (désactivé) et `--iou_threshold` (défaut 0,5) sont raccordées dans les modes `infer` et `eval`. L’expansion s’applique aux crops vidéo et affiche ; la suppression de chevauchements concerne uniquement la sélection vidéo initiale. Aucun filtre supplémentaire après embeddings ne modifie leur alignement avec les identifiants.
+
+Le notebook `ml-image/notebooks/explore_pipeline_clustering.ipynb` expose ces étapes pour inspection. Sa comparaison facultative d’annotations mesure la similarité des distributions de temps, pas l’exactitude des classifications. Le classifieur d’attributs reste différé ; les options CUDA sont décrites ci-dessous.
+
+### Options CUDA
+
+`predict_with_cuda_options()` enveloppe chaque prédiction des modes `infer` et `eval`. Le périphérique résolu depuis `device_arg` est transmis au contexte et à la prédiction. Le contexte `cuda_runtime.inference_options()` restaure l’option AMP dans un bloc `finally`, y compris en cas d’échec. Les options `--cuda_amp`, `--profile_memory` et `--clear_cuda_cache` sont désactivées par défaut et sans effet sur CPU.
+
+Sur CUDA, les DataLoader utilisent `pin_memory` et les transferts non bloquants. YOLO renvoie les résultats de chaque lot sur CPU ; FairFace y calcule ses probabilités en FP32 et FaceNet y stocke ses embeddings en FP32. Avec AMP, les passages de modèles s’exécutent sous autocast FP16. Cette conversion finale ne garantit pas des prédictions identiques au FP32.
+
+Le profilage synchronise CUDA, remet à zéro les pics avant le film et journalise les valeurs allouées/réservées et leurs pics à la sortie. Le nettoyage optionnel libère seulement le cache inutilisé. Aucun réglage global de l’allocateur n’est forcé. Les tests couvrent les contrats CPU et des appels CUDA simulés ; le test CUDA matériel est conditionnel. Le [README ML](../../ml-image/README.md#options-cuda-expérimentales) donne le protocole de comparaison restant.
 
 ## Fiabilité et travail restant
 
@@ -174,7 +184,7 @@ Les points suivants sont des limites du code, pas des fonctionnalités disponibl
 
 - Les vidéos vides, FPS nuls ou listes de détections vides ne sont pas traités systématiquement. Des accès `[0]` figurent même dans des chaînes de logs de niveau debug.
 - Les exceptions par film sont journalisées puis ignorées. Le message « All films … analyzed » peut donc apparaître malgré des films en échec. Il n’existe pas de bilan fiable des réussites et échecs ; le lanceur de test contrôle les fichiers produits.
-- Les images, détections et embeddings restent en mémoire. Les lots limitent certains calculs, mais pas le chargement initial. Aucun profilage GPU, `empty_cache()` ou nettoyage explicite par film n’est implémenté.
+- Les images, détections et embeddings restent en mémoire. Les lots limitent certains calculs, mais pas le chargement initial. Le profilage et le nettoyage optionnels opèrent par film ; ils ne libèrent pas les tenseurs encore référencés ni la RAM des images.
 - Les modèles sont recréés lors des appels de traitement ; leur réutilisation entre films n’est pas organisée.
 - Docker utilise les dépendances historiques, une installation CUDA 11.8 et le téléchargement des poids à la construction. Son `ENTRYPOINT` est commenté. Il n’a pas été validé par le test CPU local.
 - La validation qualitative nécessite des annotations de référence, des mesures d’erreur et une revue des conversions de couleurs, des seuils, des votes et des correspondances.
@@ -185,3 +195,5 @@ Les points suivants sont des limites du code, pas des fonctionnalités disponibl
 | --- | --- | --- | --- |
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2 | 2026-10-10 | Joel Teixeira | Audit du code récupéré et du test CPU ; description en français des entrées, calculs, sorties, paramètres actifs et fonctionnalités incomplètes. |
+| 3 | 2026-10-16 | Codex | Options d’exploration issues de la PR 27 : périphérique, crops séparés des boîtes de mesure, suppression vidéo optionnelle et notebook consolidé. |
+| 4 | 2026-10-16 | Codex | Intégration des options CUDA et du choix explicite de périphérique, validation CPU et limites matérielles. |

@@ -19,9 +19,11 @@ models:
       +materialized: view
       +schema: staging
     intermediate:
+      +tags: [phase2]
       +materialized: view
       +schema: intermediate
     fnl:
+      +tags: [phase2]
       +materialized: table
       +schema: fnl
     ops:
@@ -29,3 +31,6 @@ models:
       +schema: ops
       +grants:
         select: [metabase_ops_user]
+
+on-run-end:
+  - "{{ persist_dbt_results(results) }}"

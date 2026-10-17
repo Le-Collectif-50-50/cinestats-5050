@@ -4,16 +4,17 @@
 
 **Owner:** Joel Teixeira
 
-**Last reviewed:** 2026-10-10
+**Dernière révision:** 2026-10-11
 
-**Status:** active
+**Status:** actif
 
 ## Historique du document
 
-| #   | Date       | Author         | Observations                                                          |
+| #   | Date       | Auteur         | Observations                                                          |
 | --- | ---------- | -------------- | --------------------------------------------------------------------- |
 | 1   | 2026-05-22 | Joel Teixeira | Guide dev pour lancer `dbt test` hors container                      |
 | 2   | 2026-10-10 | Joel Teixeira | Renommage, ajout de macOS et de dbt Docs, alignement des versions sur le worker Prefect |
+| 3 | 2026-10-11 | Joel Teixeira | Alignement de la sélection de finalisation sur les couches intermédiaires et finales |
 
 ## Objectif
 
@@ -63,7 +64,7 @@ Pour lancer les tests sur les relations déjà présentes en base :
 python -m dotenv -f ../.env run -- dbt test --profile ric --project-dir . --profiles-dir profiles
 ```
 
-Cette commande ne construit pas les modèles manquants. Pour limiter les tests à une phase, ajouter `--select tag:phase1` ou `--select tag:phase2`. Ces sélections ne couvrent pas tous les modèles intermédiaires et finaux ; voir le [README dbt](README.md).
+Cette commande ne construit pas les modèles manquants. Pour limiter les tests à une phase, ajouter `--select tag:phase1` ou `--select +tag:phase2`. La phase 2 inclut tous les modèles intermédiaires et finaux, ainsi que leurs dépendances amont. Pour construire les relations manquantes puis les tester, utiliser `dbt build --select +tag:phase2` avec les mêmes options de profil et de répertoires ; voir le [README dbt](README.md).
 
 Pour obtenir les détails d'un échec :
 

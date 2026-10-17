@@ -145,13 +145,20 @@ unioned AS (
 SELECT
     matching.film_id,
     unioned.type,
-    MD5(CAST(unioned.full_name AS TEXT))::UUID AS credit_holder_id,
+    -- Conserver les identifiants existants des personnes.
+    -- Les sociétés utilisent leur raison sociale et un espace de noms dédié.
+    CASE
+        WHEN unioned.type = 'Company' THEN
+            MD5('company:' || NULLIF(TRIM(unioned.legal_name), ''))::UUID
+        ELSE MD5(NULLIF(unioned.full_name, ''))::UUID
+    END AS credit_holder_id,
     unioned.full_name,
     unioned.first_name,
     unioned.last_name,
     unioned.legal_name,
     MD5(CAST(unioned.role AS TEXT))::UUID AS role_id,
-    unioned.role
+    unioned.role,
+    unioned.allocine_id
 FROM unioned
 LEFT JOIN {{ ref('stg_id_matching') }} AS matching
     ON unioned.allocine_id = matching.allocine_id

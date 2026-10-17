@@ -1,5 +1,5 @@
 {{
-  config(materialized = 'view')
+  config(materialized = 'table')
 }}
 
 SELECT
@@ -16,6 +16,7 @@ SELECT
     search_url AS search_url,
     source_url AS source_url,
     allocine_url AS allocine_url,
+    poster_url AS poster_url,
     trailer_url AS trailer_url,
     ARRAY(
         SELECT jsonb_array_elements_text("genres")

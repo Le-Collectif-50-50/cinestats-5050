@@ -88,12 +88,26 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description="Allocine Airbyte custom source")
     parser.add_argument(
-        "command", choices=["spec", "check", "discover", "read", "sync"]
+        "command", choices=["spec", "check", "discover", "read", "sync", "backfill-posters"]
     )
     parser.add_argument("--config", dest="config_path")
     parser.add_argument("--catalog", dest="catalog_path")
     parser.add_argument("--state", dest="state_path")
+    parser.add_argument("--dry-run", action="store_true", help="Backfill : sélection seule")
+    parser.add_argument("--limit", type=int, help="Backfill : nombre maximum de films")
+    parser.add_argument(
+        "--source-id",
+        action="append",
+        dest="source_ids",
+        help="Backfill : source_record_id exact ; option répétable",
+    )
     args = parser.parse_args()
+    if args.command != "backfill-posters" and (
+        args.dry_run or args.limit is not None or args.source_ids
+    ):
+        parser.error("--dry-run, --limit et --source-id sont réservés à backfill-posters")
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit doit être positif")
 
     source = AllocineAirbyteSource()
 
@@ -102,6 +116,15 @@ def main() -> int:
         return 0
 
     config = _load_json(args.config_path) or {}
+
+    if args.command == "backfill-posters":
+        from ingestion.scraping.allocine.poster_backfill import backfill_posters
+
+        results = backfill_posters(
+            config, dry_run=args.dry_run, limit=args.limit, source_ids=args.source_ids
+        )
+        _emit({"dry_run": args.dry_run, "films": results})
+        return 1 if any(row.get("status") == "error" for row in results) else 0
 
     if args.command == "check":
         ok, message = source.check(config)

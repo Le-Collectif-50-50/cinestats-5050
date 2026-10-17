@@ -1,7 +1,7 @@
 # Tester la pipeline image en local
 
 **Owner:** Julien Commes
-**Dernière révision:** 2026-10-10
+**Dernière révision:** 2026-10-17
 **Status:** actif
 
 ## Périmètre
@@ -10,13 +10,15 @@ Le module analyse les visages des bandes-annonces, regroupe les détections par 
 
 L’inférence vidéo/affiche et les exports fonctionnent sur un extrait CPU de test. L’évaluation intégrée reste inachevée ; l’exactitude des prédictions n’a pas été mesurée. La [description d’architecture](../docs/architecture/ml-image-architecture-description-pipeline-phase-1.md) détaille le code implémenté, les schémas de sortie et les limites vérifiées.
 
-La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU. Le lanceur de test impose le CPU. Apple MPS, le profilage GPU et le nettoyage explicite du cache CUDA ne sont pas implémentés. Le module produit des fichiers locaux ; il ne les insère pas en base.
+La pipeline standard choisit automatiquement CUDA si disponible, sinon CPU ; `--device cpu` ou `--device cuda` impose le périphérique dans les modes `infer` et `eval`. Une demande CUDA indisponible échoue avant traitement. Le lanceur de test impose le CPU. Apple MPS n’est pas implémenté. Précision mixte, profilage et nettoyage du cache CUDA sont optionnels ; leur exécution matérielle reste à valider. Le module produit des fichiers locaux ; il ne les insère pas en base.
 
 Pour préparer la mesure de qualité et les prochaines intégrations, voir le [cadrage du jeu d’évaluation](../docs/specifications/ml-image-evaluation-validation.md).
 
 L’outil autonome [annotation-poster](annotation-poster/README.md) permet de rechercher une affiche par identifiant Allociné, de corriger les préannotations et d’exporter une référence validée. Son lancement Docker est indépendant du site Cinestats ; la recherche en base reste optionnelle.
 
 ## Repères dans le module
+
+Le [plan de déploiement PostgreSQL, Prefect et dbt](../docs/specifications/ml-image-plan-deploiement-prefect-dbt.md) décrit la cible de production à implémenter, avec une exécution Docker CPU ou CUDA et des entrées/sorties en base.
 
 | Fichier | Rôle |
 | --- | --- |
@@ -58,7 +60,7 @@ export YOLO_CONFIG_DIR="$PWD/tmp/ultralytics"
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Le test d’export utilise des prédictions synthétiques. Il vérifie les chemins natifs et les valeurs CSV. Il n’exécute aucun modèle et n’écrit pas en base.
+Les tests utilisent des prédictions synthétiques et des modèles simulés. Ils vérifient les exports, les crops bornés, les surfaces et identifiants conservés, la suppression optionnelle des chevauchements et la transmission des options dans les deux modes. Ils n’exécutent aucun modèle et n’écrivent pas en base.
 
 ## Télécharger les poids
 
@@ -106,6 +108,18 @@ ml-image/.venv/bin/python ml-image/smoke_test.py \
 
 Le test du 10 octobre 2026 a terminé avec trois lignes de personnages pour la vidéo et sept lignes de détections pour l’affiche, ainsi que les deux fichiers pickle attendus. Il valide l’exécution de bout en bout sur cet extrait uniquement ; les classifications et les correspondances de visages n’ont pas été évaluées.
 
+Le 16 octobre 2026, les médias ont été récupérés à nouveau depuis les URL du même film en base `preview`, dans une transaction `READ ONLY`. Les poids auxiliaires ResNet34 et FaceNet ont été téléchargés dans le cache local. La validation CPU de la reprise de PR 27 a produit :
+
+| Parcours | Résultat sur cet extrait |
+| --- | --- |
+| Inférence par défaut | 3 groupes vidéo, 7 détections affiche ; pickle et CSV présents |
+| `--device cpu --bbox_expand_factor 0.3 --remove_overlaps` | 2 groupes vidéo, 7 détections affiche ; pickle et CSV présents |
+| Mode `eval` avec ces options | 826 lignes intermédiaires vidéo, 7 lignes affiche ; aucun score final calculé |
+
+Le notebook consolidé a aussi été exécuté avec les modèles réels : toutes les cellules de code passent, sans annotations de référence. Une nouvelle exécution dans le noyau Jupyter `ric-ml-cpu` a validé les six cellules de code et produit six graphiques intégrés, sans erreur. Les annotations facultatives n’ont pas été testées. L’extrait récupéré comporte 237 images à 24 FPS (9,875 s).
+
+La variation du nombre de groupes justifie de conserver ces options désactivées par défaut. Ce contrôle porte sur l’exécution et les fichiers produits, pas sur l’exactitude des prédictions. Les six tests de régression sans modèles passent également.
+
 Le fichier `trailer-short.mp4` est un extrait de dix secondes à partir de la trentième seconde. Ce fixture local n’est pas distribué avec le dépôt. Les identifiants des sorties du lanceur restent synthétiques.
 
 ## Entrée CSV de la pipeline
@@ -126,6 +140,76 @@ La borne `istop` est exclue. Le schéma CSV n’est pas validé avant traitement
 
 Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires racines. `PREDICTIONS_FOLDER`, `DOWNLOADED_MEDIA_FOLDER`, `FINAL_PREDICTIONS_FOLDER`, `INTERMEDIATE_FOLDER` et `VISUALS_FOLDER` choisissent leurs sous-répertoires. Le lanceur les isole automatiquement. Exception : les fonctions de visualisation écrivent encore dans `example/`, sans utiliser `VISUALS_FOLDER`. La branche affiche force les visualisations à `False`.
 
+## Exploration des détections et des groupes
+
+Le [notebook d’exploration](notebooks/explore_pipeline_clustering.ipynb) consolide les deux notebooks historiques de la PR 27. Il utilise les signatures actuelles, des chemins absolus et un répertoire de résultats distinct par exécution. Configurer une vidéo locale courte et sélectionner le noyau **RIC ML (Python 3.11 CPU)**. Le `.venv` à la racine du dépôt est distinct ; ne pas le confondre avec `ml-image/.venv`. Aucun CSV historique privé n’est nécessaire. Les sorties ne sont pas préexécutées.
+
+Installer et enregistrer le noyau depuis la racine, après `bash ml-image/install/setup_local.sh` :
+
+```bash
+uv pip install --python ml-image/.venv/bin/python ipykernel
+ml-image/.venv/bin/python -m ipykernel install --user --name ric-ml-cpu --display-name "RIC ML (Python 3.11 CPU)"
+```
+
+Sélectionner ce noyau dans Jupyter/VS Code, redémarrer puis tout exécuter. Dans VS Code, il est aussi possible de sélectionner directement `ml-image/.venv/bin/python`. La première cellule affiche le Python actif et signale les dépendances manquantes avant les imports ML. `No module named 'cv2'` indique qu’OpenCV manque dans le noyau actif ; préparer l’environnement ML puis sélectionner son noyau.
+
+
+Il permet d’inspecter les images, les crops, les filtres, les classifications, les membres des groupes et leur temps de présence. Un CSV facultatif d’annotations (`gender,age,ethnicity,time_on_screen`) compare les distributions de temps sur le même extrait. Leur similarité n’est pas une mesure d’exactitude individuelle.
+
+Options disponibles dans les modes `infer` et `eval` :
+
+| Option | Défaut | Effet |
+| --- | --- | --- |
+| `--device` | `auto` | `auto`, `cpu` ou `cuda` ; CUDA explicite indisponible provoque une erreur |
+| `--bbox_expand_factor` | `0.0` | Marge par côté du crop, positive ou nulle ; `0.3` ajoute 30 % de largeur/hauteur sur chaque côté avant bornage |
+| `--remove_overlaps` | désactivé | Supprime les boîtes vidéo redondantes d’une même image avant classification et embeddings |
+| `--iou_threshold` | `0.5` | Supprime une boîte si son IoU avec une boîte conservée dépasse ce seuil, compris entre 0 et 1 |
+
+L’expansion s’applique aux crops vidéo et affiche. `bbox` reste la boîte détectée, utilisée pour les surfaces, les filtres et les annotations ; `crop_bbox` décrit le crop borné à l’image. L’expansion peut modifier les classifications, embeddings et critères de qualité : elle n’est pas validée comme amélioration.
+
+La suppression conserve les grandes boîtes et préserve l’ordre d’entrée et les identifiants. Elle n’est appliquée qu’une fois, avant la production des embeddings vidéo, pour conserver leur correspondance avec les détections. Elle peut supprimer des visages distincts proches et reste donc désactivée par défaut. Les détections supprimées sont enregistrées parmi les rejets du mode `eval`.
+
+Le classifieur d’attributs CelebA reste différé : poids et ordre des labels restent à valider. Les options CUDA sont décrites ci-dessous. Les correctifs actuels de téléchargement et d’export sont conservés.
+
+## Options CUDA expérimentales
+
+Les options CUDA respectent `--device` dans les modes `infer` et `eval`, y compris CPU imposé sur une machine équipée de CUDA. Les options suivantes sont désactivées par défaut et transmises dans les modes `infer` et `eval` :
+
+| Option | Effet sur CUDA |
+| --- | --- |
+| `--cuda_amp` | Autocast FP16 pour YOLO, FairFace et FaceNet ; les probabilités FairFace et les embeddings exportés sont convertis en FP32 |
+| `--profile_memory` | Synchronisation et remise à zéro des pics avant chaque film ; journalisation de la mémoire allouée/réservée et de leurs pics à la sortie, y compris après exception |
+| `--clear_cuda_cache` | Libération du cache inutilisé à la sortie du traitement d’un film, y compris après exception |
+
+Sur CPU, ces options n’appellent ni autocast ni API de mémoire CUDA. Les DataLoader utilisent la mémoire épinglée et les transferts non bloquants uniquement pour un périphérique CUDA. Les résultats YOLO sont transférés sur CPU après chaque lot au lieu de rester tous sur GPU. Les images vidéo restent entièrement chargées en RAM.
+
+`empty_cache()` ne libère pas les tenseurs encore référencés et n’évite pas un dépassement de mémoire pendant un film. Le nettoyage et les synchronisations peuvent ralentir le traitement. Aucune configuration globale de l’allocateur n’est imposée.
+
+Depuis `ml-image/`, sur une machine CUDA équipée des dépendances et poids :
+
+```bash
+TEMP_FOLDER=tmp/cuda-fp32 OUTPUTS_FOLDER=outputs/cuda-fp32 \
+  .venv/bin/python main.py --source /chemin/films.csv --istop 1 --profile_memory
+TEMP_FOLDER=tmp/cuda-amp OUTPUTS_FOLDER=outputs/cuda-amp \
+  .venv/bin/python main.py --source /chemin/films.csv --istop 1 --profile_memory --cuda_amp
+```
+
+Vérifier que CUDA est disponible avant ces comparaisons. Utiliser les mêmes médias, versions, poids, taille de lot et seuils. Comparer durée, pics mémoire, nombre de détections, classifications, probabilités, embeddings et groupes. La conversion finale en FP32 ne restaure pas la précision perdue pendant AMP : les seuils et regroupements peuvent changer. Tester séparément `--clear_cuda_cache` sur plusieurs films et sur un échec.
+
+Validation locale : tests CPU et CUDA simulé, exports synthétiques, aide CLI et inférence réelle sur CPU. Le test matériel CUDA de `tests/test_cuda_runtime.py` est ignoré sans GPU. Aucun gain de performance ni équivalence qualitative sur les modèles réels n’est établi.
+
+### Validation CPU du 16 octobre 2026
+
+Sur macOS ARM64, PyTorch 2.2.2 sans CUDA, l’extrait staging récupéré à nouveau de **Natacha, hôtesse de l’air** contient 237 images à 24 FPS. L’inférence utilise les modèles réels et des lots de quatre images.
+
+- Le parcours par défaut produit 3 groupes vidéo et 7 détections affiche.
+- Avec `--cuda_amp --profile_memory --clear_cuda_cache`, les mêmes sorties sont produites. Les lignes CSV vidéo et affiche sont exactement identiques après tri, ainsi qu’à la référence CPU de PR 27 sans expansion ni suppression de chevauchements.
+- Le mode `eval`, avec les trois options activées, produit 826 lignes intermédiaires vidéo et 7 lignes affiche ; les scores finaux restent hors périmètre.
+- Après intégration de `main`, treize tests de régression passent ; le test matériel CUDA est ignoré faute de GPU.
+- Une nouvelle inférence avec `--device cpu --cuda_amp --profile_memory --clear_cuda_cache --bbox_expand_factor 0.3 --remove_overlaps` produit 2 groupes vidéo et 7 détections affiche, comme la validation PR 27 avec ces options de crops.
+
+Ces contrôles valident le fonctionnement CPU et l’absence d’effet des options CUDA sur cet échantillon. Ils ne mesurent ni la qualité des classifications, ni les performances, ni le fonctionnement matériel CUDA. Les logs, médias et sorties sont conservés localement dans les répertoires de test ignorés par Git.
+
 ## Limites et dépannage
 
 - MediaPipe 0.10.21 contient une bibliothèque universelle ARM64/x86_64, mais ses métadonnées de wheel annoncent x86_64. `uv pip check` et `pip check` signalent donc la plateforme ; le traitement natif d’une image a été vérifié sur ce Mac ARM64.
@@ -145,3 +229,6 @@ Les variables `TEMP_FOLDER` et `OUTPUTS_FOLDER` choisissent les répertoires rac
 | --- | --- | --- | --- |
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2 | 2026-10-10 | Joel Teixeira | Reprise du travail sur le module. Intégration de la branche de pipeline ML et de la mise à jour urllib3 ; autres changements de dépendances non intégrés. Profil CPU isolé, test d’export et procédure de test sur un film local ; clarification des limites de la pipeline récupérée ; exécution complète validée sur un extrait staging après ajout local du poids FairFace ; audit documentaire des paramètres, limites et sorties ; lien vers le cadrage du jeu d’évaluation. |
+| 3 | 2026-10-15 | Joel Teixeira| Ajout du lien vers le plan de déploiement PostgreSQL, Prefect et dbt. |
+| 4 | 2026-10-16 | Joel Teixeira | Reprise ciblée de la PR 27 : notebook consolidé, choix du périphérique, expansion des crops sans modification des surfaces et suppression optionnelle des chevauchements. Validation CPU sur médias staging récupérés à nouveau : inférence par défaut et options, exports eval et notebook avec modèles réels. Intégration PR 29 : options CUDA désactivées par défaut, prise en compte du périphérique explicite, validations CPU et protocole GPU restant. Installation du noyau Jupyter dédié et diagnostic du mauvais environnement Python dans le notebook. |
+| 5 | 2026-10-17 | Joel Teixeira | Réconciliation des consignes CUDA et exploration avec les liens vers le jeu d’évaluation et l’outil autonome d’annotation des affiches. |

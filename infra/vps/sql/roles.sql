@@ -30,7 +30,7 @@ ALTER ROLE app_ro SET idle_in_transaction_session_timeout = '60s';
 ALTER ROLE app_ro CONNECTION LIMIT 20;
 
 -- ===== Stack data (branche analytics : Airbyte, dbt, scrapers, Prefect, Metabase) =====
-GRANT CONNECT ON DATABASE :"db_name" TO airbyte_user, dbt_user, prefect_user, metabase_user, metabase_ops_user;
+GRANT CONNECT ON DATABASE :"db_name" TO airbyte_user, dbt_user, scraper_user, prefect_user, metabase_user, metabase_ops_user;
 
 -- Airbyte lance « CREATE SCHEMA IF NOT EXISTS » à chaque synchro, ce qui exige
 -- CREATE sur la base même quand le schéma existe (vérifié sur Postgres 16).
@@ -51,12 +51,24 @@ ALTER SCHEMA fnl OWNER TO dbt_user;
 REVOKE ALL ON SCHEMA ops FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA ops FROM PUBLIC;
 
--- dbt (et les scrapers, qui se connectent aussi en dbt_user) : écrit dans raw et ops,
+-- dbt : écrit dans raw et ops,
 -- lit ce qu'Airbyte charge dans raw.
 GRANT USAGE, CREATE ON SCHEMA raw TO dbt_user;
 GRANT USAGE, CREATE ON SCHEMA ops TO dbt_user;
 GRANT SELECT ON ALL TABLES IN SCHEMA raw TO dbt_user;
 ALTER DEFAULT PRIVILEGES FOR ROLE airbyte_user IN SCHEMA raw GRANT SELECT ON TABLES TO dbt_user;
+
+-- Scrapers : lecture de l'entrée id_matching, création de leurs sorties dans raw.
+-- Le GRANT courant ne survit pas à DROP/CREATE : le défaut s'applique à toutes
+-- les futures tables de raw créées par airbyte_user, sans droit d'écriture.
+GRANT USAGE, CREATE ON SCHEMA raw TO scraper_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE airbyte_user IN SCHEMA raw GRANT SELECT ON TABLES TO scraper_user;
+SELECT to_regclass('raw.id_matching') IS NOT NULL AS has_id_matching_table \gset
+\if :has_id_matching_table
+  GRANT SELECT ON TABLE raw.id_matching TO scraper_user;
+\else
+  \echo 'raw.id_matching absente : SELECT sera accordé à sa création par airbyte_user.'
+\endif
 
 -- metabase_user : lecture seule de la couche finale.
 GRANT USAGE ON SCHEMA fnl TO metabase_user;

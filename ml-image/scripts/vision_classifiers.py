@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+
+from . import cuda_runtime
 from torch.utils.data import DataLoader
 from torchvision import transforms, models
 
@@ -58,15 +60,18 @@ class VisionClassifier:
 
         transformed_faces = ImageDataset(faces, inference_transform)
         dataloader = DataLoader(
-            transformed_faces, batch_size=batch_size, shuffle=False, num_workers=0)
+            transformed_faces, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=cuda_runtime.is_cuda(self.device))
 
         ages, genders, ethnicities = [], [], []
         age_confidences, gender_confidences, ethnicity_confidences = [], [], []
         with torch.no_grad():
             for batch in dataloader:
-                batch = batch.to(self.device)
-                outputs = self.model_fair_7(batch)
-                outputs_cpu = outputs.detach().cpu()
+                batch = batch.to(self.device, non_blocking=cuda_runtime.is_cuda(self.device))
+                with cuda_runtime.autocast_context(self.device):
+                    outputs = self.model_fair_7(batch)
+                # Probabilités calculées en FP32, même après inférence AMP.
+                outputs_cpu = outputs.detach().float().cpu()
+                del batch, outputs
 
                 age_outputs = outputs_cpu[:, 9:18]
                 gender_outputs = outputs_cpu[:, 7:9]
