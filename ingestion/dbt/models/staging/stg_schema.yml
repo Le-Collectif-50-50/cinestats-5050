@@ -22,14 +22,14 @@ models:
         description: "Budget estimé du film, normalisé et exprimé en euros."
       - name: director
         description: "Liste des réalisateurs du film."
-      - name: filmography_rank
-        description: "Rang du film dans la filmographie des réalisateurs lorsqu’il y en a plusieurs."
+      - name: director_rank
+        description: "Rangs des réalisateurs dans leur filmographie, conservés en texte et séparés par '/'."
       - name: producer
         description: "Liste des producteurs du film."
       - name: paid_broadcaster
-        description: "Diffuseurs payants associés au film."
+        description: "Chaîne des diffuseurs payants associés au film, stockée en texte."
       - name: free_broadcaster
-        description: "Diffuseurs gratuits associés au film."
+        description: "Chaîne des diffuseurs gratuits associés au film, stockée en texte."
       - name: country_budget_allocation
         description: "Répartition du budget du film par pays contributeur."
       - name: has_eof

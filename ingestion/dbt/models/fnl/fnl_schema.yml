@@ -48,7 +48,7 @@ models:
       - name: genre_category
         description: "Genre cinématographique du film."
       - name: broadcasters
-        description: "Diffuseurs TV associés au film (chaînes payantes et gratuites)."
+        description: "Chaîne texte des diffuseurs TV associés au film, séparés par une virgule."
       - name: is_french_financed
         description: "Vrai si la France finance au moins 50% du budget du film."
       - name: has_parity_bonus
@@ -62,7 +62,7 @@ models:
       - name: has_regional_funding
         description: "Vrai si le film a reçu une aide financière d'une collectivité régionale."
       - name: filmography_rank
-        description: "Position du film dans la carrière du ou des réalisateur(s), indicateur d'expérience pertinent pour l'analyse des inégalités d'accès à la réalisation."
+        description: "Chaîne texte des rangs catégorisés des réalisateurs dans leur filmographie."
       - name: has_asr
         description: "Vrai si le film bénéficie de l'aide sélective à la réalisation (ASR) du CNC."
 

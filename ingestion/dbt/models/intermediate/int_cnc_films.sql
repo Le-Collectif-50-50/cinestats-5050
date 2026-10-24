@@ -14,7 +14,7 @@ SELECT
         ELSE NULL
     END AS budget_category,
     films.director,
-    ARRAY(
+    ARRAY_TO_STRING(ARRAY(
         SELECT
             CASE
                 WHEN str_filmography_rank = '1' THEN '1er film'
@@ -22,21 +22,20 @@ SELECT
                 WHEN str_filmography_rank IN ('3', '4') THEN '3e film ou plus'
                 ELSE NULL
             END
-        FROM UNNEST(films.director_rank) AS str_filmography_rank
-    ) AS filmography_rank,
+        FROM UNNEST(STRING_TO_ARRAY(films.director_rank, '/')) AS str_filmography_rank
+    ), ', ') AS filmography_rank,
     films.producer,
-    ARRAY(
+    ARRAY_TO_STRING(ARRAY(
         SELECT
             CASE str_broadcaster
                 WHEN 'France5' THEN 'FranceTV'
                 ELSE str_broadcaster
             END
-        FROM UNNEST(
-            COALESCE(films.paid_broadcaster, ARRAY[]::TEXT[]) ||
-            COALESCE(films.free_broadcaster, ARRAY[]::TEXT[])
-        ) AS str_broadcaster
-        WHERE str_broadcaster != 'FranceÔ'
-    ) AS broadcasters,
+        FROM UNNEST(ARRAY[films.paid_broadcaster, films.free_broadcaster]) AS str_broadcaster
+        WHERE str_broadcaster IS NOT NULL
+            AND str_broadcaster != ''
+            AND str_broadcaster != 'FranceÔ'
+    ), ', ') AS broadcasters,
     films.country_funder,
     films.has_eof,
     films.has_parity_bonus,
