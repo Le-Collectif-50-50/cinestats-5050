@@ -115,7 +115,7 @@ with_country_id AS (
         base.country_name,
         base.budget_allocation
     FROM base
-    LEFT JOIN {{ ref('stg_id_matching') }} AS matching
+    INNER JOIN {{ ref('stg_id_matching') }} AS matching
         ON base.cnc_visa = matching.cnc_visa
 )
 SELECT
@@ -126,4 +126,3 @@ SELECT
     country_name,
     budget_allocation
 FROM with_country_id
-WHERE MD5(CAST(CONCAT(film_id, '-', country_id) AS TEXT))::UUID IS NOT NULL
