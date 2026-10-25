@@ -22,8 +22,8 @@ SELECT
                 WHEN str_filmography_rank IN ('3', '4') THEN '3e film ou plus'
                 ELSE NULL
             END
-        FROM UNNEST(STRING_TO_ARRAY(films.director_rank, '/')) AS str_filmography_rank
-    ), ', ') AS filmography_rank,
+        FROM UNNEST(films.director_rank) AS str_filmography_rank
+    )[1] AS filmography_rank, -- dois repasser dessus pour avoir le rang de TOUS les réal' d'un film
     films.producer,
     ARRAY_TO_STRING(ARRAY(
         SELECT
