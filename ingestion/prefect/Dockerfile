@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y cron \
     && pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir \
         "prefect==${PREFECT_VERSION}" \
+        "fastapi==0.139.0" \
         "dbt-core==1.11.7" \
         "dbt-postgres==1.10.0" \
         "sqlalchemy>=2.0,<2.1" \
