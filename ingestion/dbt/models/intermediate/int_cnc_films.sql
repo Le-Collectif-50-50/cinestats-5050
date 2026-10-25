@@ -14,7 +14,7 @@ SELECT
         ELSE NULL
     END AS budget_category,
     films.director,
-    ARRAY(
+    (ARRAY(
         SELECT
             CASE
                 WHEN str_filmography_rank = '1' THEN '1er film'
@@ -25,7 +25,7 @@ SELECT
         FROM UNNEST(STRING_TO_ARRAY(films.director_rank, '/'))
             WITH ORDINALITY AS ranks(str_filmography_rank, position)
         ORDER BY position
-    )[1] AS filmography_rank, -- TODO : revoir pour récupérer le rang de tous les réalisateurs
+    ))[1] AS filmography_rank, -- TODO : revoir pour récupérer le rang de tous les réalisateurs
     films.producer,
     ARRAY_TO_STRING(ARRAY(
         SELECT
