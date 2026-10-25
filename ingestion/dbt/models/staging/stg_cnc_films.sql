@@ -27,10 +27,10 @@ SELECT
     END AS budget,
     -- ARRAYS
     STRING_TO_ARRAY(REPLACE("REALISATEUR", ' ', ''), ' / ') AS director,
-    STRING_TO_ARRAY(REPLACE("RANG", ' ', ''), ' / ') AS director_rank,
+    CAST(REPLACE("RANG", ' ', '') AS TEXT) AS director_rank,
     STRING_TO_ARRAY(REPLACE("PRODUCTEURS", ' ', ''), ' / ') AS producer,
-    STRING_TO_ARRAY(REPLACE("PAYANT", ' ', ''), ' ') AS paid_broadcaster,
-    STRING_TO_ARRAY(REPLACE("CLAIR", ' ', ''), ' ') AS free_broadcaster,
+    CAST(REPLACE("PAYANT", ' ', '') AS TEXT) AS paid_broadcaster,
+    CAST(REPLACE("CLAIR", ' ', '') AS TEXT) AS free_broadcaster,
     ARRAY(
         SELECT JSONB_BUILD_OBJECT(
             'country', INITCAP(UNACCENT(TRIM(REGEXP_REPLACE(elem, '[^a-zA-ZÀ-ÿ ]', '', 'g')))),

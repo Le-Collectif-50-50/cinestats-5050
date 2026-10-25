@@ -126,4 +126,4 @@ SELECT
     country_name,
     budget_allocation
 FROM with_country_id
-WHERE MD5(CAST(CONCAT(film_id, '-', country_id) AS TEXT))::UUID IS NULL
+WHERE MD5(CAST(CONCAT(film_id, '-', country_id) AS TEXT))::UUID IS NOT NULL

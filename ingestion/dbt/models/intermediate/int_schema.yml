@@ -19,11 +19,11 @@ models:
       - name: director
         description: "Liste des réalisateurs du film."
       - name: filmography_rank
-        description: "Rang du film dans la filmographie de chaque réalisateur, catégorisé en '1er film', '2e film', ou '3e film ou plus'."
+        description: "Chaîne texte des rangs catégorisés ('1er film', '2e film', ou '3e film ou plus'), séparés par une virgule."
       - name: producer
         description: "Liste des producteurs du film."
       - name: broadcasters
-        description: "Liste unifiée des diffuseurs (payants et gratuits), avec normalisation des noms (France5 → FranceTV, suppression de FranceÔ)."
+        description: "Chaîne texte des diffuseurs payants et gratuits, séparés par une virgule, avec normalisation des noms (France5 → FranceTV, suppression de FranceÔ)."
       - name: has_eof
         description: "Indique si le film bénéficie du dispositif EOF."
       - name: has_parity_bonus
