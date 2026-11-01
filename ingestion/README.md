@@ -20,6 +20,7 @@
 | 6   | 2026-10-09 | Joel Teixeira | Autorisation TLS du compte scraper_user depuis le VPS data dans pg_hba.conf et son générateur |
 | 7 | 2026-10-11 | Joel Teixeira | Lecture de raw.id_matching restaurable et privilèges SELECT par défaut pour les futures tables créées par airbyte_user dans raw. Activation Airbyte par défaut pour les runs manuels, le CLI et le poller ; noms de connexions partagés via environnement et désactivation explicite. Finalisation dbt étendue aux modèles intermédiaires et finaux et à leurs dépendances |
 | 8 | 2026-10-15 | Data Team DataForGood | URL des affiches Allociné : migration, backfill explicite et staging dbt. |
+| 9 | 2026-10-31 | Nicolas Revel | Lien vers la spécification brouillon d'ingestion sur la preview avant la production. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -355,6 +356,7 @@ Artefacts associés:
 1. [README dbt](dbt/README.md): modèles préparés, tags d'exécution et sources brutes consommées par le projet dbt.
 1. [Runbook infra](../docs/runbooks/ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md): installation et exploitation locale Airbyte/dbt/PostgreSQL.
 1. [Specification Airbyte/dbt](../docs/specifications/ingestion-specification-airbyte-dbt-mises-a-jour-donnees.md): contrats cible et critères d'acceptation.
+1. [Specification preview avant production](../docs/specifications/ingestion-specification-preview-avant-production.md) (brouillon): lancer l'ingestion sur la base preview et vérifier dans l'app avant la production.
 1. [Architecture ingestion](../docs/architecture/ingestion-architecture-airbyte-dbt-prefect-scraping.md): cible de référence, état actuel relatif et roadmap de convergence.
 
 ## Referenced by
