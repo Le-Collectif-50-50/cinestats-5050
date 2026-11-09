@@ -1,7 +1,7 @@
 # Déploiement
 
 **Resonsable** Data Team DataForGood
-**Dernière révision:** 2026-10-09
+**Dernière révision:** 2026-11-09
 **Status:** active
 
 ## Historique du document
@@ -9,6 +9,7 @@
 | # | Date | Auteur | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-10-09 | Joel Teixeira | Ajout du parcours de validation en preview et clarification des branches sources de promotion. |
+| 2 | 2026-11-09 | Nicolas Revel | Limitation de débit nginx par IP cliente sur l'API et les pages. |
 
 ## Stratégie de branches
 
@@ -80,6 +81,7 @@ Si le serveur est réinstallé, sa clé change : le déploiement échoue tant qu
 - TLS : **DNS-01 via l'API OVH**, comme en preview (`certbot/dns-ovh`, `certbot/entrypoint-dns.sh`). Le certificat initial est émis **automatiquement** au premier déploiement, rien à faire à la main sur le serveur. Il couvre `DOMAIN`, `API_DOMAIN` et les noms de `CERT_EXTRA_DOMAINS` (les alias `www.`), puis `certbot renew` tourne toutes les 12 h. nginx ne démarre qu'une fois le certificat présent (`certbot` est `healthy`) : comptez environ 2 minutes au tout premier déploiement. Le port 80 ne sert plus qu'à rediriger vers HTTPS.
   - `CERT_EXTRA_DOMAINS` n'est lue qu'à l'émission. Pour changer la liste plus tard, supprimer `certbot/conf/live/cinestats5050.fr`, `archive/cinestats5050.fr` et `renewal/cinestats5050.fr.conf` sur le serveur, puis redéployer.
   - Il faut que les enregistrements DNS soient chez OVH (même compte que le token) : DNS-01 n'a pas besoin que le domaine pointe déjà vers le serveur.
+- **Limitation de débit** (`nginx/prod.conf`, même réglage dans `preview.conf`) : par IP cliente, 10 requêtes/s sur l'API (marge de 30) et 20 requêtes/s sur les pages (marge de 60, pour absorber le préchargement des liens par Next.js). Au-delà, nginx répond `429` et le note dans son journal (`limiting requests`). Les fichiers statiques (`.js`, `.css`, images) ne sont pas limités. Les adresses privées (passerelle Docker, par exemple un client IPv6 relayé par `docker-proxy`) ne sont pas limitées, pour ne pas mettre tous ces clients dans un même compteur. Pour ajuster : `rate` dans `limit_req_zone`, `burst` dans `limit_req`.
 - Le backend se connecte avec le rôle **`app_ro`, en lecture seule** (l'API n'a que des routes GET) : `DATABASE_URL=postgresql+psycopg://app_ro:***@10.50.0.1:5432/cinestats-5050-db?sslmode=require`.
 - Aucune migration Alembic automatique : à jouer à la main depuis le VPS `app` avec le rôle **`app_migrator`**, seul à pouvoir modifier le schéma. Son mot de passe vient du gestionnaire de mots de passe et n'est jamais stocké sur le serveur :
 
