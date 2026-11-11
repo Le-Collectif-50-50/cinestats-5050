@@ -22,7 +22,7 @@ agg_genre AS (
             WHEN LOWER(genre) IN ('comédie', 'comédie dramatique', 'comédie musicale', 'famille', 'musical', 'romance') THEN 'Comédie/Comédie dramatique'
             WHEN LOWER(genre) = 'documentaire' THEN 'Documentaire'
             WHEN LOWER(genre) IN ('drame', 'opéra') THEN 'Drame'
-            WHEN LOWER(genre) IN ('épouvante-horreur', 'expérimental', 'fantastique', 'science fiction') THEN 'Fantastique'
+            WHEN LOWER(genre) IN ('épouvante-horreur', 'expérimental', 'fantastique', 'science fiction') THEN 'Fantastique/Horreur/SF'
         END AS genre_name
     FROM base
 )
