@@ -4,7 +4,7 @@
 
 **Owner:** Data Team DataForGood
 
-**Dernière révision:** 2026-10-15
+**Dernière révision:** 2026-11-11
 
 **Status:** actif
 
@@ -17,6 +17,7 @@
 | 3 | 2026-10-10 | Joel Teixeira | Ajout du runbook local macOS/WSL2 pour le debug et dbt Docs |
 | 4 | 2026-10-11 | Joel Teixeira | Normalisation des espaces dans les budgets CNC avant conversion numérique. Inclusion des modèles intermédiaires et finaux dans la phase 2, avec leurs dépendances amont. Alignement des clés des corrections, identifiants des sociétés et avertissements sur les correspondances externes absentes ou dupliquées. Historisation des résultats et détails dbt pour Metabase, quarantaine des crédits sans film et harmonisation des types dans les jointures Mubi |
 | 5 | 2026-10-15 | Data Team DataForGood | URL d’affiche nullable dans le staging Allociné ; prérequis de migration. |
+| 6 | 2026-11-11 | Data Team DataForGood | Couverture des 29 genres observés : corrections orthographiques, classement du Péplum et catégories explicites Divers, Erotique et Évènement Sportif. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -74,6 +75,10 @@ Pour vérifier le périmètre sans écrire en base, remplacer `dbt build` par `d
 5. `ops.v_allocine_pipeline_status`: vue dashboard Metabase pour le suivi Allociné.
 
 Les modèles intermédiaires CNC et Allociné actuels ne sélectionnent pas automatiquement la dernière version par visa ou par enregistrement source. Les anciennes déclarations YAML de déduplication, dont les fichiers SQL sont absents, ne constituent pas des tests actifs. Leur suppression ne supprime aucune relation PostgreSQL existante.
+
+## Classification des genres
+
+Le `CASE` de `int_film_genres` classe `Judiciaire` dans `Aventure/Policier/Thriller` et accepte `Epouvante-horreur` avec ou sans accent initial pour `Fantastique/Horreur/SF`. `Péplum` rejoint `Biopic/Guerre/Histoire`. `Divers`, `Erotique` et `Évènement Sportif` conservent chacun une catégorie explicite. Ce mapping couvre les 29 genres distincts observés dans `staging.stg_allocine_films` le 11 novembre 2026. Les nouveaux genres sans correspondance restent nuls et font échouer les tests de présence des tables finales : ajouter leur classement explicitement, sans catégorie de repli « Autre ».
 
 ## Qualité des identifiants
 

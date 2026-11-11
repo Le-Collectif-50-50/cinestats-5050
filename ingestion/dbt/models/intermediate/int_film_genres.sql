@@ -17,12 +17,15 @@ agg_genre AS (
         allocine_id,
         CASE
             WHEN LOWER(genre) = 'animation' THEN 'Animation'
-            WHEN LOWER(genre) IN ('action', 'arts martiaux', 'aventure', 'espionnage', 'judificaire', 'policier', 'thriller', 'western') THEN 'Aventure/Policier/Thriller'
-            WHEN LOWER(genre) IN ('biopic', 'guerre', 'historique') THEN 'Biopic/Guerre/Histoire'
+            WHEN LOWER(genre) IN ('action', 'arts martiaux', 'aventure', 'espionnage', 'judiciaire', 'policier', 'thriller', 'western') THEN 'Aventure/Policier/Thriller'
+            WHEN LOWER(genre) IN ('biopic', 'guerre', 'historique', 'péplum') THEN 'Biopic/Guerre/Histoire'
             WHEN LOWER(genre) IN ('comédie', 'comédie dramatique', 'comédie musicale', 'famille', 'musical', 'romance') THEN 'Comédie/Comédie dramatique'
             WHEN LOWER(genre) = 'documentaire' THEN 'Documentaire'
             WHEN LOWER(genre) IN ('drame', 'opéra') THEN 'Drame'
-            WHEN LOWER(genre) IN ('épouvante-horreur', 'expérimental', 'fantastique', 'science fiction') THEN 'Fantastique/Horreur/SF'
+            WHEN LOWER(genre) IN ('epouvante-horreur', 'épouvante-horreur', 'expérimental', 'fantastique', 'science fiction') THEN 'Fantastique/Horreur/SF'
+            WHEN LOWER(genre) = 'divers' THEN 'Divers'
+            WHEN LOWER(genre) = 'erotique' THEN 'Erotique'
+            WHEN LOWER(genre) = 'évènement sportif' THEN 'Évènement Sportif'
         END AS genre_name
     FROM base
 )
