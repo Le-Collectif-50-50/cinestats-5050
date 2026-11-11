@@ -3,9 +3,10 @@
 }}
 
 SELECT
-    TRIM("ID")::UUID AS film_country_budget_allocation_id,
-    CAST("COUNTRY_ID" AS TEXT)::UUID AS country_id,
+    TRIM("FILM_COUNTRY_BUDGET_ALLOCATION_ID")::UUID AS film_country_budget_allocation_id,
     CAST("FILM_ID" AS TEXT)::UUID AS film_id,
+    CAST("COUNTRY_ID" AS TEXT)::UUID AS country_id,
+    CAST("COUNTRY_NAME" AS TEXT)::TEXT AS country_name,
     CAST("BUDGET_ALLOCATION" AS INTEGER) AS budget_allocation,
     -- METADATA
     TO_DATE("UPDATED_DATE", 'DD/MM/YYYY') AS updated_date,
@@ -17,4 +18,4 @@ SELECT
 FROM {{ source('raw', 'film_country_budget_allocation') }}
 WHERE "UPDATED_BY" IS NOT NULL
     AND "UPDATED_DATE" IS NOT NULL
-    AND TRIM("ID") <> '9999999999999-9999999999999'
+    AND "UPDATED_BY" <> 'Hugo Laurens'

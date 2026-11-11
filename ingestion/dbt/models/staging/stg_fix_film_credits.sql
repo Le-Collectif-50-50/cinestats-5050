@@ -3,7 +3,6 @@
 }}
 
 SELECT
-    CAST("ID" AS TEXT)::UUID AS film_credit_id,
     CAST("FILM_ID" AS TEXT)::UUID AS film_id,
     CAST("ROLE_ID" AS TEXT)::UUID AS role_id,
     CAST("CREDIT_HOLDER_ID" AS TEXT)::UUID AS credit_holder_id,
@@ -17,4 +16,4 @@ SELECT
 FROM {{ source('raw', 'film_credits') }}
 WHERE "UPDATED_BY" IS NOT NULL
     AND "UPDATED_DATE" IS NOT NULL
-    AND CAST("ID" AS BIGINT) <> 9999999999999
+    AND "UPDATED_BY" <> 'Hugo Laurens'

@@ -3,8 +3,8 @@
 }}
 
 SELECT
-    CAST("ID" AS TEXT)::UUID AS id,
-    TRIM("NAME") AS name,
+    CAST("GENRE_ID" AS TEXT)::UUID AS id,
+    TRIM("GENRE_NAME") AS name,
     -- METADATA
     TO_DATE("UPDATED_DATE", 'DD/MM/YYYY') AS updated_date,
     TRIM("UPDATED_BY") AS updated_by,

@@ -3,11 +3,10 @@
 }}
 
 SELECT
-    CAST("ID" AS TEXT)::UUID AS id,
-    TRIM("NAME") AS name,
+    CAST("ROLE_ID" AS TEXT)::UUID AS id,
+    TRIM("ROLE_NAME") AS name,
+    TRIM("ROLE_INCLUSIVE_NAME") AS inclusive_name,
     CAST("IS_KEY_ROLE" AS BOOLEAN) AS is_key_role,
-    TRIM("ALLOCINE_NAME") AS allocine_name,
-    TRIM("INCLUSIVE_NAME") AS inclusive_name,
     -- METADATA
     TO_DATE("UPDATED_DATE", 'DD/MM/YYYY') AS updated_date,
     TRIM("UPDATED_BY") AS updated_by,
@@ -18,4 +17,4 @@ SELECT
 FROM {{ source('raw', 'roles') }}
 WHERE "UPDATED_BY" IS NOT NULL
     AND "UPDATED_DATE" IS NOT NULL
-    AND "ID" <> '9999999999999'
+    AND "UPDATED_BY" <> 'Hugo Laurens'
