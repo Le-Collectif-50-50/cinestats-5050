@@ -1,6 +1,6 @@
 # Révéler les Inégalités dans le Cinéma (RIC)
 
-**Resonsable** Data Team DataForGood
+**Resonsable** Nicolas Revel (front/back/devops), Joel Teixeira (data)
 **Dernière révision:** 2026-10-10
 **Status:** active
 

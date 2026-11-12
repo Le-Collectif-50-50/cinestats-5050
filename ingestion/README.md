@@ -19,7 +19,7 @@
 | 5   | 2026-10-06 | Joel Teixeira | Séparation du compte Postgres des scrapers et paramétrage SSL commun. Alignement des noms de modèles dbt et clarification du périmètre des phases après suppression des déclarations obsolètes. Correction de l'appel à la phase dbt 2 : le flow principal contrôle son activation avant d'appeler le helper sans argument. Activation de la phase dbt 2 par défaut pour les runs manuels, le CLI et le poller Metabase, avec désactivation explicite possible |
 | 6   | 2026-10-09 | Joel Teixeira | Autorisation TLS du compte scraper_user depuis le VPS data dans pg_hba.conf et son générateur |
 | 7 | 2026-10-11 | Joel Teixeira | Lecture de raw.id_matching restaurable et privilèges SELECT par défaut pour les futures tables créées par airbyte_user dans raw. Activation Airbyte par défaut pour les runs manuels, le CLI et le poller ; noms de connexions partagés via environnement et désactivation explicite. Finalisation dbt étendue aux modèles intermédiaires et finaux et à leurs dépendances |
-| 8 | 2026-10-15 | Data Team DataForGood | URL des affiches Allociné : migration, backfill explicite et staging dbt. |
+| 8 | 2026-10-15 | Joel Teixeira | URL des affiches Allociné : migration, backfill explicite et staging dbt. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
