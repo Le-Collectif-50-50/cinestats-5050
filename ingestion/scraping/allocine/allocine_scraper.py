@@ -40,16 +40,8 @@ class AllocineScraper:
         "credit_name": "a.item.link",
     }
 
-    def extract_searched_first_film(self, html: str) -> list[dict]:
-        """
-        Extracts a list of films from the search results HTML page.
-
-        Args:
-            html (str): Raw HTML content of the search results page.
-
-        Returns:
-            list[dict]: A list of dictionaries with allocine film title, id, and link.
-        """
+    def extract_searched_films(self, html: str) -> list[dict]:
+        """Return distinct film candidates in search-result order."""
         soup = BeautifulSoup(html, "html.parser")
         film_elements = soup.select(self.SEARCH_SELECTORS["films"])
         films = []
@@ -68,6 +60,11 @@ class AllocineScraper:
                     'link': link
                 })
 
+        return list({film['id']: film for film in films}.values())
+
+    def extract_searched_first_film(self, html: str) -> dict | None:
+        """Compatibility helper; ingestion validates multiple candidates instead."""
+        films = self.extract_searched_films(html)
         return films[0] if films else None
 
     def extract_film_details(self, html: str):
@@ -116,7 +113,33 @@ class AllocineScraper:
         else:
             duration = None
 
+        directors = []
+        for script in soup.select('script[type="application/ld+json"]'):
+            try:
+                data = json.loads(script.get_text())
+            except (ValueError, TypeError):
+                continue
+            nodes = data if isinstance(data, list) else [data]
+            for node in nodes:
+                if isinstance(node, dict) and "@graph" in node:
+                    nodes = nodes + node["@graph"]
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                types = node.get("@type", [])
+                if types != "Movie" and not (isinstance(types, list) and "Movie" in types):
+                    continue
+                people = node.get("director", [])
+                people = people if isinstance(people, list) else [people]
+                directors = [person["name"] for person in people
+                             if isinstance(person, dict) and isinstance(person.get("name"), str)]
+                if directors:
+                    break
+            if directors:
+                break
+
         film_details = {
+            "directors": directors,
             "allocine_visa_number": allocine_visa_div.find('span', class_='that').text.strip() if allocine_visa_div else None,
             "poster_url": (poster_url.get("src") or None) if poster_url else None,
             "release_date": release_date.get_text(strip=True) if release_date else None,

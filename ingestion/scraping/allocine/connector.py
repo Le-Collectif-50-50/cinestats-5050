@@ -7,6 +7,7 @@ import random
 import re
 import time
 import uuid
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
@@ -27,6 +28,7 @@ DEFAULT_OUTPUT_SCHEMA = "raw"
 DEFAULT_OUTPUT_TABLE = STREAM_NAME
 DEFAULT_COMPLETED_STATUSES = ["success", "not_found", "visa_mismatch"]
 DEFAULT_RECORD_TIMEOUT_SECONDS = 180.0
+MAX_SEARCH_CANDIDATES = 5
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -396,6 +398,40 @@ def _normalize_record_id(source_row: dict[str, Any]) -> str | None:
     return None
 
 
+def _director_names(value: Any) -> set[tuple[str, ...]]:
+    """Compare full names, ignoring accents, punctuation and token order."""
+    values = value if isinstance(value, list) else [value]
+    names = set()
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        for person in re.split(r"\s*(?:;|/|&|\bet\b)\s*", item, flags=re.I):
+            normalized = unicodedata.normalize("NFKD", person.casefold())
+            normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+            tokens = tuple(sorted(re.findall(r"[^\W\d_]+", normalized)))
+            if len(tokens) < 2:
+                return set()
+            names.add(tokens)
+    return names
+
+
+def _identity_status(source_visa, candidate_visa, source_directors, candidate_directors):
+    expected = _normalize_visa_for_compare(source_visa)
+    found = _normalize_visa_for_compare(candidate_visa)
+    if expected and found:
+        if expected == found:
+            return "success", None
+        return "visa_mismatch", f"Allocine visa {found} differs from source visa {expected}."
+    expected_names = _director_names(source_directors)
+    found_names = _director_names(candidate_directors)
+    if expected_names and expected_names == found_names:
+        return "success", None
+    return "needs_review", (
+        f"Director verification failed or unavailable: CNC={source_directors!r}; "
+        f"Allocine={candidate_directors!r}; no matching visa."
+    )
+
+
 def _normalize_visa_for_compare(value: Any) -> str | None:
     if value in (None, ""):
         return None
@@ -476,7 +512,7 @@ class AllocineAirbyteSource:
         scraper, browser_factory = self._load_scraping_dependencies()
         run_id = str(uuid.uuid4())
         total_rows = len(source_rows)
-        summary_statuses = ["success", "not_found", "blocked", "error", "visa_mismatch"]
+        summary_statuses = ["success", "not_found", "blocked", "error", "visa_mismatch", "needs_review"]
         status_counts = {status: 0 for status in summary_statuses}
 
         print(f"Allocine scraping started: {total_rows} pending rows to process.")
@@ -583,6 +619,9 @@ class AllocineAirbyteSource:
                 print(
                     f"[session {session_index}] Record {index + 1}/{len(chunk)} started: {label!r}"
                 )
+                timeout_seconds = config.record_timeout_seconds
+                if not _normalize_int(source_row.get("allocine_id")):
+                    timeout_seconds *= MAX_SEARCH_CANDIDATES + 1
                 attempt = 1
                 max_attempts = 2
                 while True:
@@ -598,7 +637,7 @@ class AllocineAirbyteSource:
                         if config.record_timeout_seconds > 0:
                             record = await asyncio.wait_for(
                                 scrape_task,
-                                timeout=config.record_timeout_seconds,
+                                timeout=timeout_seconds,
                             )
                         else:
                             record = await scrape_task
@@ -606,7 +645,7 @@ class AllocineAirbyteSource:
                         record = self._build_timeout_error_record(
                             run_id=run_id,
                             source_row=source_row,
-                            timeout_seconds=config.record_timeout_seconds,
+                            timeout_seconds=timeout_seconds,
                         )
 
                     status = record.get("scrape_status", "?")
@@ -845,6 +884,19 @@ class AllocineAirbyteSource:
                 self._ensure_output_table_exists(connection, config)
                 rows = [dict(row._mapping) for row in connection.execute(query)]
                 processed_ids = self._fetch_processed_ids(connection, config)
+                # CNC reference supplies the director absent from id_matching.
+                directors = {}
+                if self._table_exists(connection, config.input_schema, "films"):
+                    reference_rows = connection.execute(text(
+                        f'SELECT "VISA"::text, "REALISATEUR" FROM '
+                        f'{_relation(config.input_schema, "films")}'
+                    ))
+                    for visa, director in reference_rows:
+                        directors.setdefault(str(visa), set()).add(director)
+                for row in rows:
+                    names = directors.get(str(row.get("visa_number")), set())
+                    row["cnc_director"] = next(iter(names)) if len(names) == 1 else None
+
         finally:
             engine.dispose()
 
@@ -1046,10 +1098,10 @@ class AllocineAirbyteSource:
                 if verbose:
                     print(f"  [search] {search_term!r} -> {search_url}")
                 search_html = await session.fetch_html(search_url)
-                search_result = scraper.extract_searched_first_film(search_html)
+                candidates = scraper.extract_searched_films(search_html)
                 base_record["search_url"] = search_url
 
-                if not search_result:
+                if not candidates:
                     if verbose:
                         print(f"  [search] No result found for {search_term!r}")
                     base_record["scrape_status"] = "not_found"
@@ -1057,14 +1109,33 @@ class AllocineAirbyteSource:
                     base_record["record_hash"] = _hash_record(base_record)
                     return base_record
 
-                allocine_id = search_result["id"]
-                allocine_url = f"{scraper.BASE_URL}{search_result['link']}"
-                if verbose:
-                    print(f"  [search] Found: allocine_id={allocine_id}, title={search_result['title']!r}")
-                base_record["allocine_id"] = allocine_id
-                base_record["allocine_title"] = search_result["title"]
-                base_record["allocine_url"] = allocine_url
-                base_record["source_url"] = allocine_url
+                matches = []
+                diagnostics = []
+                incomplete = len(candidates) > MAX_SEARCH_CANDIDATES
+                for candidate in candidates[:MAX_SEARCH_CANDIDATES]:
+                    candidate_row = dict(source_row, allocine_id=candidate["id"], allocine_url=None)
+                    result = await self._scrape_one_record(
+                        run_id, session, scraper, candidate_row, verbose=verbose
+                    )
+                    result.update(match_strategy="search", search_url=search_url,
+                                  allocine_title=candidate["title"])
+                    diagnostics.append(f"{candidate['id']}: {result['scrape_status']} ({result['error_message']})")
+                    if verbose:
+                        print(f"  [candidate] {diagnostics[-1]}")
+                    if result["scrape_status"] in {"error", "blocked"}:
+                        incomplete = True
+                    if result["scrape_status"] == "success":
+                        matches.append(result)
+                if len(matches) == 1 and not incomplete:
+                    result = matches[0]
+                    result["record_hash"] = _hash_record(result)
+                    return result
+                base_record.update(
+                    scrape_status="needs_review", source_url=search_url,
+                    error_message="No unique verified candidate. " + "; ".join(diagnostics),
+                )
+                base_record["record_hash"] = _hash_record(base_record)
+                return base_record
 
             details_url = scraper.FILM_URL.format(allocine_film_id=allocine_id)
             casting_url = scraper.FILM_CASTING_URL.format(allocine_film_id=allocine_id)
@@ -1076,6 +1147,8 @@ class AllocineAirbyteSource:
             casting_html = await session.fetch_html(casting_url)
             details = scraper.extract_film_details(details_html)
             casting = scraper.extract_film_casting(casting_html)
+            if not casting.get("Direction"):
+                casting["Direction"] = details.get("directors", [])
 
             allocine_visa_number = details.get("allocine_visa_number")
             release_date_raw = details.get("release_date")
@@ -1106,15 +1179,12 @@ class AllocineAirbyteSource:
                 }
             )
 
-            row_visa = _normalize_visa_for_compare(visa_number)
-            allocine_visa = _normalize_visa_for_compare(allocine_visa_number)
-            if row_visa and allocine_visa and row_visa != allocine_visa:
-                base_record["scrape_status"] = "visa_mismatch"
-                base_record["error_message"] = (
-                    f"Allocine visa {allocine_visa_number} differs from source visa {visa_number}."
-                )
-            else:
-                base_record["scrape_status"] = "success"
+            status, reason = _identity_status(
+                visa_number, allocine_visa_number,
+                source_row.get("cnc_director"), casting.get("Direction"),
+            )
+            base_record["scrape_status"] = status
+            base_record["error_message"] = reason
 
         except WebsiteBlockedError as exc:
             base_record["scrape_status"] = "blocked"

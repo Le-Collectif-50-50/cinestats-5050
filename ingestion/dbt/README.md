@@ -16,8 +16,9 @@
 | 2 | 2026-10-06 | Joel Teixeira | Suppression des déclarations de modèles absents et alignement des modèles documentés sur le code actuel |
 | 3 | 2026-10-10 | Joel Teixeira | Ajout du runbook local macOS/WSL2 pour le debug et dbt Docs |
 | 4 | 2026-10-11 | Joel Teixeira | Normalisation des espaces dans les budgets CNC avant conversion numérique. Inclusion des modèles intermédiaires et finaux dans la phase 2, avec leurs dépendances amont. Alignement des clés des corrections, identifiants des sociétés et avertissements sur les correspondances externes absentes ou dupliquées. Historisation des résultats et détails dbt pour Metabase, quarantaine des crédits sans film et harmonisation des types dans les jointures Mubi |
-| 5 | 2026-10-15 | Data Team DataForGood | URL d’affiche nullable dans le staging Allociné ; prérequis de migration. |
-| 6 | 2026-11-11 | Data Team DataForGood | Couverture des 29 genres observés : corrections orthographiques, classement du Péplum et catégories explicites Divers, Erotique et Évènement Sportif. |
+| 5 | 2026-10-15 | Joel Teixeira | URL d’affiche nullable dans le staging Allociné ; prérequis de migration. |
+| 6 | 2026-11-11 | Joel Teixeira | Couverture des 29 genres observés : corrections orthographiques, classement du Péplum et catégories explicites Divers, Erotique et Évènement Sportif. |
+| 7 | 2026-11-12 | Joel Teixeira | Alignement des corrections sur le schéma Airbyte : clés composées des crédits et genres, retrait du champ Allociné des rôles et filtre GENRE_ID. Dashboard Metabase de revue du scraping Allociné, des écarts de visa et des recherches sans résultat (`not_found`). |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -125,6 +126,62 @@ python3 infra/data/metabase-dbt-quality.py \
 La clé reste hors Git et hors ligne de commande. Le fichier d'état conserve les identifiants du dashboard et des questions pour les actualisations ; le réutiliser évite les créations multiples. Le script conserve les cartes ajoutées manuellement. Aucune publication publique ni modification des permissions Metabase n'est effectuée. L'accès API doit être fourni séparément ; la connexion SSH au serveur ne remplace pas une authentification Metabase.
 
 Après déploiement, relancer `dbt build --select +tag:phase2` avec les options de profil ci-dessus. Cela reconstruit les finales et la quarantaine, teste les données puis alimente le suivi. `dbt parse` vérifie la configuration mais ni les données ni l'exécution SQL.
+
+## Examiner les correspondances du scraping dans Metabase
+
+Le dashboard [Scraping Allociné — À examiner](https://metabase.cinestats5050.fr/dashboard/7) lit directement `raw.allocine_data`
+sur la connexion `cinestats-ops-db`. Il comporte quatre compteurs (total, `needs_review`,
+`visa_mismatch`, `not_found`) et trois tables détaillées, avec filtres **Visa CNC** (égalité exacte)
+et **Titre contient** (recherche sans distinction de casse, CNC ou Allociné).
+Les tables affichent les titres, visas attendu et trouvé, réalisateur Allociné,
+motif, liens de vérification et dernière tentative en heure de Paris, par ancienneté.
+
+La [requête commune](analyses/metabase/scraping_review_queue.sql) classe **tous**
+les statuts avant de sélectionner les anomalies. Une seule tentative est retenue
+par `source_record_id`, avec repli sur le visa puis l'empreinte pour les lignes sans
+identifiant. Les dates nulles passent après les dates connues ; les égalités sont
+départagées par run et empreinte. Sans séquence d'insertion, deux tentatives au même
+instant ne permettent pas de prouver leur ordre chronologique.
+Une réussite plus récente retire donc le film de cette file ; un ancien écart ne
+reste pas affiché après résolution. Le compteur mesure les identifiants source,
+pas les tentatives. Aucun historique de validation humaine n'est créé.
+
+`needs_review` signifie une correspondance non confirmée ; `visa_mismatch` indique
+un visa Allociné différent du visa source. Le diagnostic peut détailler plusieurs
+candidats, sans candidat retenu ni visa Allociné unique. Les anciens résultats ne
+sont pas requalifiés automatiquement. `not_found` signale une recherche sans résultat :
+vérifier manuellement le titre et l'identifiant Allociné. Ce statut est considéré
+comme terminé par le scraper et ne déclenche pas de reprise automatique.
+Les erreurs techniques (`error`, `blocked`) restent hors périmètre.
+La vue `ops.v_allocine_pipeline_status`, issue du staging filtré
+sur `success`, ne peut pas alimenter cette file. Aucun run dbt n'est nécessaire.
+
+Depuis la racine, vérifier puis créer ou actualiser le dashboard :
+
+```bash
+python3 infra/data/metabase-scraping-review.py --preview
+python3 infra/data/metabase-scraping-review.py \
+  --url https://metabase.cinestats5050.fr \
+  --env-file ingestion/.env --collection-id 7 --check
+python3 infra/data/metabase-scraping-review.py \
+  --url https://metabase.cinestats5050.fr \
+  --env-file ingestion/.env --collection-id 7
+```
+
+`METABASE_API_KEY` peut venir de l'environnement, du fichier `.env` explicite
+(`python-dotenv` requis), ou de `--api-key-file`. La clé n'est jamais imprimée.
+`--check` exécute les sept requêtes sans créer de question ni dashboard.
+Le compte Metabase doit pouvoir lire `raw.allocine_data` et écrire dans la
+collection Operations (ID 7 sur cette instance). Aucun droit ni accès public
+n'est modifié ; les permissions existantes de la collection s'appliquent.
+
+Conserver le fichier d'état local ignoré par Git
+`ingestion/scraping/allocine/local-runs/metabase-review-state.json` : il contient
+uniquement l'URL, les identifiants Metabase et la collection. Le réutiliser permet
+les mises à jour sans doublons ; `--state-file` permet un autre emplacement.
+Les cartes et filtres ajoutés manuellement sont conservés. Actualiser le dashboard
+dans Metabase pour relire les résultats ; aucune relance de scraper ni correction
+source n'est déclenchée par sa consultation.
 
 ## Permissions
 

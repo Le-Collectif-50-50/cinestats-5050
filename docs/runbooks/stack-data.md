@@ -2,7 +2,7 @@
 
 **Owner:** Nicolas Revel
 
-**Dernière révision:** 2026-10-11
+**Dernière révision:** 2026-11-13
 
 **Status:** active
 
@@ -13,6 +13,7 @@
 | 1 | 2026-10-06 | Nicolas Revel | Première version du runbook | 
 | 2 | 2026-10-09 | Joel Teixeira | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
 | 3 | 2026-10-11 | Joel Teixeira | Restauration de SELECT pour scraper_user et persistance de la lecture après recréation des tables Airbyte. Configuration requise pour Airbyte activé par défaut et migration du fichier .env existant. |
+| 4 | 2026-11-13 | Joel Teixeira | Dépendance libatomic1 persistante dans l'image Prefect et contrôle du démarrage du pilote Playwright au build. |
 
 Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 
@@ -94,6 +95,24 @@ sudo docker compose up -d prefect-server         # serveur seul, aucun flux plan
 - `traiter-les-demandes-ingestion` : toutes les 5 minutes, interroge `ops.ingestion_run_requests`.
 
 Le premier est un scraping d'un site tiers, planifié sans pause : à valider avant le premier démarrage du worker.
+
+### Dépannage du pilote Playwright
+
+L'erreur `libatomic.so.1: cannot open shared object file` interrompt le scraping
+avant tout accès au site. Le Dockerfile Prefect installe `libatomic1` et vérifie
+le démarrage du pilote Playwright pendant le build. Une installation manuelle
+dans un conteneur disparaît à sa recréation.
+
+Après copie du Dockerfile corrigé, reconstruire l'image avec
+`sudo docker compose build prefect-worker`, puis attendre la fin des runs actifs
+avant `sudo docker compose up -d --no-deps --force-recreate prefect-worker`.
+Vérifier le pilote dans le nouveau worker :
+
+```bash
+sudo docker compose exec -T prefect-worker python -c 'from playwright.sync_api import sync_playwright; p = sync_playwright().start(); p.stop(); print("Playwright OK")'
+```
+
+Ce contrôle ne scrape aucun film et ne valide pas une ingestion complète.
 
 ## 5. Accéder à l'interface
 

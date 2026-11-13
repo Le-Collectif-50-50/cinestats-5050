@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-10-15
+**Dernière révision:** 2026-11-12
 
 **Status:** actif
 
@@ -19,6 +19,8 @@
 | 5   | 2026-10-09 | Joel Teixeira | Copie des helpers de date et durée dans ingestion pour démarrer sans package backend |
 | 6 | 2026-10-11 | Joel Teixeira | Sélection dbt post-scraping incluant les modèles intermédiaires et finaux et leurs dépendances |
 | 7 | 2026-10-15 | Data Team DataForGood | Persistance des URL d’affiche, migration additive, backfill local journalisé, export/import SQL ciblé et tests PostgreSQL isolés. |
+
+| 8 | 2026-11-12 | Joel Teixeira | Vérification du réalisateur CNC et examen de plusieurs candidats ; statut needs_review pour les correspondances non confirmées. |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -383,3 +385,15 @@ récupération staging. L'import échoue atomiquement si une écriture est impos
 Il cible toujours `raw.allocine_data`, même si l'export utilise une autre source.
 Les identifiants sans correspondance en production ne modifient aucune ligne.
 Rafraîchir ensuite `stg_allocine_films` avec le profil dbt production approprié.
+
+## Vérification des correspondances
+
+Le connecteur lit `REALISATEUR` dans la table `films` du schéma source, par `VISA`, pour compléter les lignes de `id_matching`. Le compte scraper doit pouvoir lire cette table. Une référence absente ou plusieurs valeurs distinctes pour un visa empêchent la confirmation par réalisateur.
+
+Un visa identique confirme le candidat ; un visa différent le rejette, même si le réalisateur correspond. Le réalisateur est lu dans le casting, avec repli sur les données structurées `Movie.director` de la fiche principale. Sans visa comparable, les ensembles de noms complets des réalisateurs doivent correspondre exactement après normalisation de la casse, des accents, de la ponctuation et de l’ordre des mots. Les coréalisations séparées par `/`, `;`, `&` ou `et` sont comparées séparément. Les initiales, alias, noms partiels et variantes ambiguës ne sont pas rapprochés automatiquement.
+
+Sans ID Allociné fourni, le scraper examine au maximum cinq candidats distincts. Il ne retient une correspondance que si un seul candidat est confirmé et si tous les candidats ont pu être examinés. Plus de cinq résultats, plusieurs correspondances, une erreur de lecture ou aucune correspondance confirmée produisent `needs_review`. Une recherche sans résultat reste `not_found`. Le budget de temps d’une recherche est six fois `record_timeout_seconds` pour couvrir la recherche et les cinq candidats ; celui d’un ID fourni reste inchangé.
+
+Les lignes `needs_review` ne sont pas considérées comme terminées et pourront être retentées. Le staging dbt existant ne consomme que `success`, donc elles ne sont pas publiées comme enrichissements. Les anciens résultats déjà enregistrés ne sont pas requalifiés automatiquement.
+
+Vérifications locales sans réseau : `python -m pytest tests/ingestion/test_allocine_identity.py`. Le flag CLI `--dry-run` reste réservé au backfill des affiches ; un test de recherche sans écriture doit utiliser des entrées en mémoire et ne pas appeler `sync_to_postgres`.

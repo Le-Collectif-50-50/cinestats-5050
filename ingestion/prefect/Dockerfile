@@ -20,6 +20,11 @@ RUN apt-get update && apt-get install -y cron \
         "playwright>=1.51" \
     && rm -rf /var/lib/apt/lists/*
 
+# Le pilote Node de Playwright nécessite libatomic, même avec Browserless distant.
+RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); p.stop()"
+
 COPY . /app
 COPY ingestion/prefect/cleanup_crontab /etc/cron.d/cleanup_crontab
 RUN chmod 0644 /etc/cron.d/cleanup_crontab && crontab /etc/cron.d/cleanup_crontab
