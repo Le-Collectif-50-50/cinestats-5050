@@ -8,6 +8,23 @@ from pathlib import Path
 import pytest
 
 from ingestion.scraping.date_utils import parse_duration, parse_release_date
+from ingestion.scraping.allocine.allocine_scraper import AllocineScraper
+
+
+@pytest.mark.parametrize("tag", ["a", "span"])
+def test_release_date_from_link_or_span(tag):
+    html = (
+        f'<div class="meta-body-info"><{tag} class="date blue-link">'
+        f'27 avril 2022</{tag}> | 0h 26min</div>'
+        '<div class="other"><a class="date blue-link">1 janvier 2024</a></div>'
+    )
+    value = AllocineScraper().extract_film_details(html)["release_date"]
+    assert parse_release_date(value) == date(2022, 4, 27)
+
+
+def test_missing_release_date_does_not_use_another_section():
+    html = '<div class="meta-body-info">0h 26min</div><span class="date blue-link">1 janvier 2024</span>'
+    assert AllocineScraper().extract_film_details(html)["release_date"] is None
 
 
 @pytest.mark.parametrize(

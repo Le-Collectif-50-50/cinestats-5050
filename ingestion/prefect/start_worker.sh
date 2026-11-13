@@ -61,7 +61,7 @@ prefect --no-prompt deploy "${FLOWS_FILE}:run_mubi_cnc_scraping" \
 
 prefect --no-prompt deploy "${FLOWS_FILE}:dispatch_ingestion_requests" \
 	--name "traiter-les-demandes-ingestion" \
-	--description "Poll les demandes Metabase dans ops.ingestion_run_requests, claim une ligne et declenche le deployment principal." \
+	--description "Poll les demandes Metabase dans ops.ingestion_run_requests, claim une ligne et declenche ingestion ou Allocine selon request_type." \
 	--concurrency-limit 1 \
 	--interval "${INGESTION_REQUEST_POLL_INTERVAL_SECONDS:-300}" \
 	--pool "${POOL_NAME}" >/tmp/prefect-deploy-dispatch.log 2>&1 || {

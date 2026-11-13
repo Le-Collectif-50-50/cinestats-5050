@@ -23,6 +23,7 @@
 | 9 | 2026-11-13 | Joel Teixeira | Déploiement manuel, navigation DOMContentLoaded, délais configurables et reprise bornée des timeouts. |
 | 10 | 2026-11-13 | Joel Teixeira | Limite max_films dans le déploiement manuel séparé et override CLI --limit pour sync/read. |
 | 11 | 2026-11-13 | Joel Teixeira | Reprise automatique des ID Allociné corrigés et sélection ciblée --source-id pour sync/read. |
+| 12 | 2026-11-13 | Joel Teixeira | Extraction de la date sur les balises a et span de la fiche Allociné. |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -43,6 +44,11 @@ Objectif: remplacer le handoff CSV historique dans `database/data/allocine/` par
 Le connecteur utilise `ingestion/scraping/date_utils.py` pour convertir les dates françaises et les durées. Ce module contient une copie de `parse_release_date` et `parse_duration` du backend, avec le même comportement. Les fonctions originales restent dans le backend pour ses consommateurs.
 
 Le démarrage du scraper ne nécessite pas le package `backend`. La dépendance `dateparser` est déjà déclarée dans `requirements.txt` et installée dans l'image Prefect. Toute évolution de ces conversions doit tenir compte des deux copies.
+
+La date est extraite de `.date.blue-link` dans `div.meta-body-info`, que le site
+utilise un lien `a` ou une balise `span`. Les dates présentes dans d'autres
+sections ne servent pas de repli. Les tests couvrent ces deux formes et l'absence
+de date dans `tests/ingestion/test_allocine_date_utils.py`.
 
 Pour vérifier les conversions et le démarrage CLI avec une copie isolée du package ingestion, après installation des dépendances du scraper et de `pytest`, depuis la racine du dépôt :
 

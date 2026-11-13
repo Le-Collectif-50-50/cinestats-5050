@@ -20,7 +20,7 @@
 | 6 | 2026-11-11 | Joel Teixeira | Couverture des 29 genres observés : corrections orthographiques, classement du Péplum et catégories explicites Divers, Erotique et Évènement Sportif. |
 | 7 | 2026-11-12 | Joel Teixeira | Alignement des corrections sur le schéma Airbyte : clés composées des crédits et genres, retrait du champ Allociné des rôles et filtre GENRE_ID. Dashboard Metabase de revue du scraping Allociné, des écarts de visa et des recherches sans résultat (`not_found`). |
 | 8 | 2026-11-13 | Joel Teixeira | Intégration des ajouts manuels de personnes et crédits, dernier succès Allociné par visa, contrôles de références et conversion du crédit d’impôt. |
-| 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. |
+| 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. Bouton Allociné dans Metabase, suivi des demandes et statuts par heure avec filtre de plage de dates. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -134,9 +134,14 @@ Après déploiement, relancer `dbt build --select +tag:phase2` avec les options 
 ## Examiner les correspondances du scraping dans Metabase
 
 Le dashboard [Scraping Allociné — À examiner](https://metabase.cinestats5050.fr/dashboard/7) lit directement `raw.allocine_data`
-sur la connexion `cinestats-ops-db`. Il comporte quatre compteurs (total, `needs_review`,
-`visa_mismatch`, `not_found`) et trois tables détaillées, avec filtres **Visa CNC** (égalité exacte)
-et **Titre contient** (recherche sans distinction de casse, CNC ou Allociné).
+sur la connexion `cinestats-ops-db`. Il comporte un bouton **Lancer le scraping Allociné**,
+quatre compteurs (total, `needs_review`, `visa_mismatch`, `not_found`), trois tables de revue,
+un graphique empilé des statuts par heure et une table des 50 dernières demandes.
+Les filtres **Visa CNC** (égalité exacte) et **Titre contient** (recherche sans distinction
+de casse, CNC ou Allociné) portent sur les compteurs, les tables de revue et le graphique.
+Ils ne modifient ni le formulaire de lancement ni la table des demandes.
+Le filtre **Période du scraping** est une plage de dates reliée uniquement au graphique,
+sur le champ `raw.allocine_data.extracted_at`. Sans sélection, tout l’historique est affiché.
 Les tables affichent les titres, visas attendu et trouvé, réalisateur Allociné,
 motif, liens de vérification et dernière tentative en heure de Paris, par ancienneté.
 
@@ -156,9 +161,64 @@ candidats, sans candidat retenu ni visa Allociné unique. Les anciens résultats
 sont pas requalifiés automatiquement. `not_found` signale une recherche sans résultat :
 vérifier manuellement le titre et l'identifiant Allociné. Ce statut est considéré
 comme terminé par le scraper et ne déclenche pas de reprise automatique.
-Les erreurs techniques (`error`, `blocked`) restent hors périmètre.
+Les erreurs techniques (`error`, `blocked`) restent hors des compteurs et tables de revue ;
+elles figurent dans le graphique horaire.
 La vue `ops.v_allocine_pipeline_status`, issue du staging filtré
 sur `success`, ne peut pas alimenter cette file. Aucun run dbt n'est nécessaire.
+
+### Déclencher et suivre un scraping
+
+Le formulaire demande une identité déclarative, un motif et un **nombre maximum de films**,
+entier strictement positif (10 par défaut). La demande passe par la même file PostgreSQL
+et le même poller que Pipeline Overview, avec `request_type=allocine`. Elle déclenche
+uniquement le scraper Allociné. Le nombre réellement traité peut être inférieur si
+moins de films sont éligibles. Les règles de sélection et de reprise du scraper restent applicables.
+
+Une seule demande Metabase Allociné peut rester active : un second envoi est refusé
+par la contrainte unique tant que la première est `pending` ou `processing`.
+Le poller passe toutes les 300 secondes par défaut et traite une demande par passage :
+un backlog ou un worker indisponible peut allonger ce délai.
+La concurrence Prefect du scraper reste limitée à 1, y compris pour les runs manuels.
+
+La table des demandes distingue **En attente**, **Transmise / en cours**, **Terminée** et **Échec**.
+« Terminée » signifie une fin technique normale, pas que tous les films ont réussi ;
+un lot vide peut aussi terminer normalement. Le poller réconcilie les états terminaux
+Prefect, y compris les annulations et crashes, au passage suivant. Les identifiants Prefect
+permettent de retrouver les logs. Les runs lancés directement dans Prefect ne sont pas
+inscrits dans cette file Metabase.
+
+Le [graphique](analyses/metabase/scraping_execution_status.sql) compte les tentatives
+stockées par heure de Paris et `scrape_status`, toutes exécutions confondues,
+sur toute la période sélectionnée, sans limite de nombre de tranches horaires.
+Les heures sans tentative et les dates nulles sont exclues.
+Il inclut `success`, `not_found`, `needs_review`, `visa_mismatch`, `error`, `blocked` et
+les statuts inconnus. La plage de dates filtre les tentatives avant agrégation ; les filtres visa et titre
+s’appliquent également au graphique.
+L'heure est tronquée au début de la tranche : 14:37 est compté dans 14:00.
+Les tentatives de plusieurs runs dans la même heure sont additionnées. Un run qui
+chevauche deux heures contribue aux deux tranches selon `extracted_at`. Au passage
+à l’heure d’hiver, les deux occurrences de la même heure locale sont regroupées.
+Le scraper écrit le lot à la fin : ce graphique ne mesure donc pas une progression en direct.
+Un run sans ligne écrite n'y figure pas ; consulter la table des demandes et Prefect.
+Le `run_id` métier du scraper est distinct de l'identifiant du flow Prefect.
+
+### Publier le formulaire et les cartes
+
+Ordre requis :
+
+1. Sur la base projet vérifiée, appliquer `infra/data/ops-ingestion-table.sql` en propriétaire
+   ou administrateur. La migration ajoute `request_type` (défaut `ingestion`), `max_films`
+   et les contraintes Allociné, sans supprimer l'historique. Les droits existants suffisent.
+2. Publier `ingestion/prefect/flows.py` sur le worker puis actualiser le déploiement
+   `Recuperer les donnees Allocine/lancer-scrapping-allocine` pour exposer `request_id`.
+   Garder la concurrence à 1 et l'absence de calendrier. Le poller lit le nouveau code
+   à son prochain run ; ne pas lancer de scraping pour valider la configuration.
+3. Exécuter les commandes ci-dessous. Une synchronisation du schéma `cinestats-ops-db`
+   par un administrateur est facultative pour ces requêtes SQL natives ; elle rend les
+   nouvelles colonnes visibles dans l’explorateur de données.
+   Le modèle de la file utilisé par Pipeline Overview est le modèle 38 sur Cinestats.
+   `--action-model-id` crée ou actualise l'action SQL et son bouton ; son ID est conservé
+   dans le fichier d'état. Aux passages suivants, le script le réutilise automatiquement.
 
 Depuis la racine, vérifier puis créer ou actualiser le dashboard :
 
@@ -169,13 +229,15 @@ python3 infra/data/metabase-scraping-review.py \
   --env-file ingestion/.env --collection-id 7 --check
 python3 infra/data/metabase-scraping-review.py \
   --url https://metabase.cinestats5050.fr \
-  --env-file ingestion/.env --collection-id 7
+  --env-file ingestion/.env --collection-id 7 --action-model-id 38
 ```
 
 `METABASE_API_KEY` peut venir de l'environnement, du fichier `.env` explicite
 (`python-dotenv` requis), ou de `--api-key-file`. La clé n'est jamais imprimée.
-`--check` exécute les sept requêtes sans créer de question ni dashboard.
-Le compte Metabase doit pouvoir lire `raw.allocine_data` et écrire dans la
+`--check` exécute les neuf requêtes de lecture sans créer de question ni dashboard.
+Il ne soumet jamais une demande de scraping.
+Le compte Metabase doit pouvoir lire `raw.allocine_data` et `ops.ingestion_run_requests`,
+créer une action sur le modèle des demandes et écrire dans la
 collection Operations (ID 7 sur cette instance). Aucun droit ni accès public
 n'est modifié ; les permissions existantes de la collection s'appliquent.
 

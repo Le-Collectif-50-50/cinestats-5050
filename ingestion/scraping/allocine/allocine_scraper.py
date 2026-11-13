@@ -20,7 +20,7 @@ class AllocineScraper:
 
     FILM_SELECTORS = {
         "poster_url": "div.entity-card img.thumbnail-img",
-        "release_date": "div.meta-body-info a.date.blue-link",
+        "release_date": "div.meta-body-info .date.blue-link",
         "duration": "div.meta-body-item.meta-body-info",
         "genres": "div.meta-body-info a.dark-grey-link"
     }

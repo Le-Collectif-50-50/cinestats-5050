@@ -22,7 +22,7 @@
 | 8 | 2026-10-15 | Joel Teixeira | URL des affiches Allociné : migration, backfill explicite et staging dbt. |
 | 9 | 2026-11-13 | Joel Teixeira | Dernier succès Allociné par visa et intégration des personnes et crédits manuels dans les modèles finaux. Déploiement Allociné manuel réactivé et délais de navigation documentés. |
 | 10 | 2026-11-13 | Joel Teixeira | Quatre déploiements Prefect : ingestion sans scraping, scrapers Allociné et Mubi CNC manuels avec max_films=10, migration du nom ciblé par le poller. |
-| 11 | 2026-11-13 | Joel Teixeira | Reprise Allociné lorsque l'ID cible change dans id_matching ; sélection ciblée par visa dans le CLI. |
+| 11 | 2026-11-13 | Joel Teixeira | Reprise Allociné lorsque l'ID cible change dans id_matching ; sélection ciblée par visa dans le CLI. Déclenchement Allociné depuis Metabase avec limite de films et suivi des demandes. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -37,7 +37,7 @@ Strategie retenue:
 3. `dbt` transforme les tables brutes et les sorties de scraping, puis publie les tables finales prévues par `schema1`.
 4. `scraping/allocine/` exécute le scraping Allociné et écrit les données enrichies dans `raw.allocine_data`.
 5. `Prefect` orchestre les syncs Airbyte via API puis les deux phases `dbt`. Les scrapers sont des déploiements manuels séparés.
-6. `Prefect` poll aussi la file `ops.ingestion_run_requests` dans la base projet, claim une requête à la fois et déclenche le deployment Prefect principal.
+6. `Prefect` poll aussi la file `ops.ingestion_run_requests` dans la base projet, claim une requête à la fois et déclenche le deployment ingestion ou Allociné selon `request_type`.
 
 Pour les configs locales de debug, le CLI de scraping charge automatiquement `ingestion/.env` avant de résoudre les placeholders JSON de type `${...}`.
 
@@ -275,7 +275,7 @@ Au démarrage, `start_worker.sh` publie exactement quatre déploiements gérés 
 | Déploiement | Étapes | Déclenchement | Paramètre de volume |
 | --- | --- | --- | --- |
 | `lancer-ingestion-complete` | Airbyte → dbt phase 1 → dbt phase 2 | Manuel ou demande Metabase | Aucun scraping |
-| `lancer-scrapping-allocine` | Scraping Allociné seul | Manuel, aucun calendrier | `max_films=10` |
+| `lancer-scrapping-allocine` | Scraping Allociné seul | Manuel ou demande Metabase, aucun calendrier | `max_films=10` |
 | `lancer-scrapping-mubi` | Scraping Mubi piloté CNC | Manuel, aucun calendrier | `max_films=10` |
 | `traiter-les-demandes-ingestion` | Poll de `ops.ingestion_run_requests` | Toutes les 300 secondes par défaut | `max_requests_per_run=1` |
 
@@ -331,6 +331,12 @@ docker compose exec -T prefect-worker prefect deployment run \
 Le paramètre `config_path` reste disponible uniquement sur les scrapers. Les
 délais Allociné sont décrits dans le [guide Allociné](scraping/allocine/README.md#délais-et-timeouts).
 
+Le bouton **Lancer le scraping Allociné** du dashboard **Scraping Allociné — À examiner**
+ouvre un formulaire identité, motif et nombre maximum de films (10 par défaut).
+Il traite les films éligibles selon la configuration du scraper ; les filtres du
+dashboard ne ciblent pas ce lancement. Voir le [guide Metabase](dbt/README.md#examiner-les-correspondances-du-scraping-dans-metabase)
+pour les graphiques et la procédure de publication.
+
 ## Usage Poller
 
 Le polling Metabase est maintenant porté directement par des flows Prefect:
@@ -338,8 +344,8 @@ Le polling Metabase est maintenant porté directement par des flows Prefect:
 1. `Traiter les demandes d'ingestion` lit la file `ops.ingestion_run_requests` déjà initialisée;
 2. `request_id` est maintenant généré automatiquement par PostgreSQL via `gen_random_uuid()`;
 3. il claim au plus une ligne `pending` par run via `FOR UPDATE SKIP LOCKED` et la passe en `processing`;
-4. il déclenche ensuite uniquement le deployment Prefect `lancer-ingestion-complete`;
-5. le flow d'ingestion écrit ensuite l'état terminal `success` ou `failed` dans la même table;
+4. il route `request_type=ingestion` (valeur par défaut, historique conservé) vers `lancer-ingestion-complete`, et `request_type=allocine` vers `lancer-scrapping-allocine` avec `max_films` et `request_id`;
+5. le flow concerné écrit l'état terminal `success` ou `failed` dans la même table ; le poller réconcilie aussi les annulations/crashes Prefect des demandes Allociné au passage suivant;
 6. `Requeue les demandes d'ingestion stale` reste disponible en CLI/code comme maintenance explicite pour les lignes `processing` trop anciennes sans flow run associé; il n'est pas publié automatiquement comme deployment schedulé.
 
 Important:

@@ -53,6 +53,7 @@ DEFAULT_AIRBYTE_SYNC_POLL_SECONDS = int(
 )
 REQUEST_TABLE_NAME = "ops.ingestion_run_requests"
 DEFAULT_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-complete"
+ALLOCINE_DEPLOYMENT_NAME = "Recuperer les donnees Allocine/lancer-scrapping-allocine"
 LEGACY_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-donnees"
 FilmLimit = Annotated[int, Field(gt=0, strict=True)]
 DEFAULT_REQUEST_FLOW_RUN_NAME_PREFIX = "metabase-ingestion"
@@ -90,6 +91,23 @@ ALTER TABLE ops.ingestion_run_requests
 
 ALTER TABLE ops.ingestion_run_requests
   ADD COLUMN IF NOT EXISTS request_reason TEXT;
+
+ALTER TABLE ops.ingestion_run_requests
+  ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'ingestion'
+    CHECK (request_type IN ('ingestion', 'allocine')),
+  ADD COLUMN IF NOT EXISTS max_films INTEGER;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'ops.ingestion_run_requests'::regclass
+                   AND conname = 'allocine_request_parameters') THEN
+    ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT allocine_request_parameters
+      CHECK (request_type <> 'allocine' OR (
+        max_films IS NOT NULL AND max_films > 0
+        AND length(btrim(requested_by_metabase_user)) > 0
+        AND request_reason IS NOT NULL AND length(btrim(request_reason)) > 0));
+  END IF;
+END $$;
 
 ALTER TABLE ops.ingestion_run_requests
   DROP COLUMN IF EXISTS requested_extraction_date;
@@ -256,10 +274,11 @@ def _mark_request_processing(
     sql = f"""
     UPDATE {REQUEST_TABLE_NAME}
     SET
-        request_status = 'processing',
+        request_status = CASE WHEN request_status IN ('success', 'failed')
+                              THEN request_status ELSE 'processing' END,
         claimed_at = COALESCE(claimed_at, now()),
         triggered_flow_run_id = COALESCE(%(flow_run_id)s, triggered_flow_run_id),
-        trigger_error = NULL
+        trigger_error = CASE WHEN request_status = 'failed' THEN trigger_error ELSE NULL END
     WHERE request_id = %(request_id)s;
     """
 
@@ -375,27 +394,62 @@ async def _trigger_ingestion_request_run(
     request_row: dict[str, Any],
 ) -> str:
     request_id = request_row["request_id"]
+    request_type = request_row.get("request_type", "ingestion")
+    if request_type == "allocine":
+        max_films = request_row.get("max_films")
+        _validate_film_limit(max_films)
+        deployment_name = ALLOCINE_DEPLOYMENT_NAME
+        parameters = {"request_id": str(request_id), "max_films": max_films}
+    elif request_type == "ingestion":
+        deployment_name = settings.main_deployment_name
+        parameters = _build_request_parameters(settings, request_id=request_id)
+    else:
+        raise ValueError(f"Type de demande inconnu : {request_type}")
     labels = {
         "request_id": str(request_id),
         "request_source": str(request_row["request_source"]),
         "requested_by": str(request_row["requested_by_metabase_user"]),
+        "request_type": request_type,
     }
 
     async with get_client() as client:
         deployment = await client.read_deployment_by_name(
-            settings.main_deployment_name
+            deployment_name
         )
         flow_run = await client.create_flow_run_from_deployment(
             deployment.id,
-            parameters=_build_request_parameters(
-                settings,
-                request_id=request_id,
-            ),
-            name=f"{settings.flow_run_name_prefix}-{request_id}",
+            parameters=parameters,
+            name=f"metabase-allocine-{request_id}" if request_type == "allocine"
+                 else f"{settings.flow_run_name_prefix}-{request_id}",
             idempotency_key=str(request_id),
             labels=labels,
         )
     return str(flow_run.id)
+
+
+async def _reconcile_allocine_requests(settings: IngestionRequestSettings) -> None:
+    """Récupérer aussi les annulations/crashes survenus hors du corps du flow."""
+    with _connect_request_db(settings) as connection:
+        rows = connection.execute(f"""
+            SELECT request_id, triggered_flow_run_id FROM {REQUEST_TABLE_NAME}
+            WHERE request_type = 'allocine' AND request_status = 'processing'
+              AND triggered_flow_run_id IS NOT NULL
+        """).fetchall()
+    if not rows:
+        return
+    async with get_client() as client:
+        for row in rows:
+            try:
+                run = await client.read_flow_run(UUID(row["triggered_flow_run_id"]))
+            except Exception:
+                get_run_logger().exception("État Prefect inaccessible pour %s", row["request_id"])
+                continue
+            if run.state and run.state.is_final():
+                if run.state.is_completed():
+                    _mark_request_success(settings, request_id=row["request_id"])
+                else:
+                    _mark_request_failed(settings, request_id=row["request_id"],
+                                         error_message=f"Prefect {run.state.name}: {run.state.message or ''}")
 
 
 def _run(command: list[str], step_name: str, cwd: Path | None = None) -> None:
@@ -611,8 +665,22 @@ def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH), ma
     name="Recuperer les donnees Allocine",
     description="Lance le scraping Allocine avec la configuration fournie.",
 )
-def run_allocine_scraping(config_path: str = str(ALLOCINE_CONFIG_PATH), max_films: FilmLimit = 10) -> None:
-    _run_allocine_scraping_step(config_path=config_path, max_films=max_films)
+def run_allocine_scraping(
+    config_path: str = str(ALLOCINE_CONFIG_PATH), max_films: FilmLimit = 10,
+    request_id: str | None = None,
+) -> None:
+    request_uuid = UUID(request_id) if request_id is not None else None
+    settings = IngestionRequestSettings.from_env() if request_uuid is not None else None
+    if settings is not None:
+        _mark_request_processing(settings, request_id=request_uuid)
+    try:
+        _run_allocine_scraping_step(config_path=config_path, max_films=max_films)
+    except Exception as exc:
+        if settings is not None:
+            _mark_request_failed(settings, request_id=request_uuid, error_message=str(exc))
+        raise
+    if settings is not None:
+        _mark_request_success(settings, request_id=request_uuid)
 
 
 def _run_mubi_scraping_step(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
@@ -746,12 +814,14 @@ def main_ingestion_flow(
 
 @flow(
     name="Traiter les demandes d'ingestion",
-    description="Claim une requete Metabase, declenche le deployment d'ingestion principal, puis persiste l'etat terminal dans ops.ingestion_run_requests.",
+    description="Claim une requete Metabase et declenche l'ingestion ou le scraping Allocine selon request_type.",
 )
 def dispatch_ingestion_requests(max_requests_per_run: int = 1) -> int:
     logger = get_run_logger()
     settings = IngestionRequestSettings.from_env()
     _ensure_request_queue(settings)
+
+    asyncio.run(_reconcile_allocine_requests(settings))
 
     processed_count = 0
     for _ in range(max_requests_per_run):
