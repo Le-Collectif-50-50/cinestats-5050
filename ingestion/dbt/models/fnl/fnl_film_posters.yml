@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: fnl_film_posters
+    description: >
+      Affiches disponibles pour les films du catalogue final, issues du dernier
+      succès Allociné correspondant au mapping courant. Une absence de ligne
+      signifie qu'aucune affiche n'est disponible pour cette correspondance.
+      Seules les URL sont stockées ; aucun fichier image n'est téléchargé.
+    columns:
+      - name: film_id
+        description: Identifiant du film dans le catalogue final.
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('fnl_films')
+                field: film_id
+      - name: cnc_visa
+        description: Visa CNC du film.
+        tests:
+          - not_null
+      - name: poster_url
+        description: URL de l'affiche collectée sur Allociné.
+        tests:
+          - not_null

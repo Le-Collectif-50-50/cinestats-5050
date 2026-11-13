@@ -20,7 +20,7 @@
 | 6 | 2026-11-11 | Joel Teixeira | Couverture des 29 genres observés : corrections orthographiques, classement du Péplum et catégories explicites Divers, Erotique et Évènement Sportif. |
 | 7 | 2026-11-12 | Joel Teixeira | Alignement des corrections sur le schéma Airbyte : clés composées des crédits et genres, retrait du champ Allociné des rôles et filtre GENRE_ID. Dashboard Metabase de revue du scraping Allociné, des écarts de visa et des recherches sans résultat (`not_found`). |
 | 8 | 2026-11-13 | Joel Teixeira | Intégration des ajouts manuels de personnes et crédits, dernier succès Allociné par visa, contrôles de références et conversion du crédit d’impôt. |
-| 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. Bouton Allociné dans Metabase, suivi des demandes et statuts par heure avec filtre de plage de dates. Documentation de la reprise des correspondances validées dans id_matching. |
+| 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. Bouton Allociné dans Metabase, suivi des demandes et statuts par heure avec filtre de plage de dates. Documentation de la reprise des correspondances validées dans id_matching. Fiches métier Film et Credit Holder dans Metabase, recherche, navigation croisée et vue finale des affiches. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -258,6 +258,71 @@ les mises à jour sans doublons ; `--state-file` permet un autre emplacement.
 Les cartes et filtres ajoutés manuellement sont conservés. Actualiser le dashboard
 dans Metabase pour relire les résultats ; aucune relance de scraper ni correction
 source n'est déclenchée par sa consultation.
+
+## Consulter les fiches Film et Credit Holder dans Metabase
+
+Les dashboards [Fiche Film](https://metabase.cinestats5050.fr/dashboard/9) et
+[Fiche Credit Holder](https://metabase.cinestats5050.fr/dashboard/10) sont rangés
+à la racine dans **Cinestats 50/50 - Fiches**, hors de la collection Operations.
+Ils utilisent la connexion métier **cinestats-5050-db** et uniquement les huit
+relations `fnl`, avec les droits Metabase existants. Aucune publication publique
+ni modification des permissions n'est effectuée.
+
+- **Film** : chercher par visa CNC exact ou fragment du titre final. La fiche
+  affiche poster disponible, identité, genres, crédits et métiers, représentation par genre,
+  budget, diffuseurs, financement par pays et dispositifs de soutien.
+- **Credit Holder** : chercher par UUID exact ou fragment du prénom, nom ou
+  de la raison sociale. La fiche affiche identité, filmographie, métiers,
+  films par année d'agrément et personnes créditées sur les mêmes films.
+- Une recherche est nécessaire : sans filtre, les listes restent vides et les
+  compteurs à zéro. Les recherches textuelles ignorent la casse, mais pas les
+  accents. Deux filtres remplis se cumulent avec `AND`.
+- Plusieurs résultats peuvent correspondre au nom. Affiner avec le visa ou
+  l'UUID, ou utiliser **Ouvrir la fiche**. Les liens dans les crédits et dans la
+  filmographie permettent de naviguer entre les deux dashboards.
+
+Les compteurs dédupliquent les entités, films et rôles par identifiant ;
+les tableaux de métiers regroupent les libellés inclusifs.
+La représentation par genre concerne uniquement les personnes physiques,
+avec une catégorie explicite pour les genres non renseignés ou autres.
+Une personne peut exercer plusieurs métiers : les lignes ne sont pas additives.
+La filmographie est limitée au catalogue Cinestats, et une présence dans les
+mêmes crédits ne prouve pas une collaboration directe. Les identifiants dérivés
+du nom en amont ne résolvent pas les homonymes. Les valeurs vides ne signifient
+pas « non » ou zéro. Le synopsis et les identifiants externes ne figurent pas dans ces fiches.
+
+La vue `fnl.fnl_film_posters` publie l'URL d'affiche issue du dernier succès
+Allociné, uniquement lorsqu'il correspond au mapping courant (visa et ID Allociné).
+Elle conserve le lien avec `fnl_films` sans ouvrir les schémas `raw` ou `staging`
+à la connexion métier. Le dashboard affiche une miniature et un lien vers l'affiche complète, ou
+« Affiche non disponible ». La taille de l'aperçu est limitée par le rendu natif
+de Metabase. Aucun scraping ni téléchargement d'image n'est déclenché.
+Avant la première publication sur une autre instance, déployer les fichiers
+`models/fnl/fnl_film_posters.*` et exécuter sur la cible dbt vérifiée :
+
+```bash
+dbt build --profile ric --project-dir /app/ingestion/dbt --select fnl_film_posters
+```
+
+Les [sélections SQL](analyses/metabase) et le
+[script de publication](../../infra/data/metabase-entity-profiles.py) sont versionnés.
+Depuis la racine :
+
+```bash
+python3 infra/data/metabase-entity-profiles.py --preview
+python3 infra/data/metabase-entity-profiles.py --env-file ingestion/.env --check
+python3 infra/data/metabase-entity-profiles.py --env-file ingestion/.env
+```
+
+`--check` exécute les 19 requêtes sans filtre puis avec une sélection, ainsi que
+six contrôles de recherche (nom, absence de résultat et cumul des filtres).
+Les exemples de validation utilisent le visa `113336` et l'UUID
+`f4bab825-8ea1-65ea-9688-d6d089bfb09a` ; ils doivent exister sur l'instance cible.
+Aucun résultat métier n'est sauvegardé. `METABASE_API_KEY` reste hors Git.
+Sans `--check`, le script retrouve collection, dashboards et questions par
+leur nom exact ; une ambiguïté arrête la publication. Réutiliser les noms permet
+une mise à jour sans duplication. Les cartes ajoutées manuellement restent
+présentes. Les données métier ne sont jamais modifiées.
 
 ## Permissions
 
