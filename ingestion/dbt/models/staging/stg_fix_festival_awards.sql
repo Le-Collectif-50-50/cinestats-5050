@@ -9,7 +9,7 @@ SELECT
     TRIM("ENGLISH_LABEL") AS english_label,
     TRIM("FRENCH_LABEL") AS french_label,
     -- METADATA
-    TO_DATE("UPDATED_DATE", 'DD/MM/YYYY') AS updated_date,
+    {{ gsheet_updated_timestamp('"UPDATED_DATE"') }} AS updated_date,
     TRIM("UPDATED_BY") AS updated_by,
     TRIM(_airbyte_raw_id) AS airbyte_raw_id,
     CAST(_airbyte_generation_id AS INTEGER) AS airbyte_generation_id,

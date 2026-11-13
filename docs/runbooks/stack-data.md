@@ -14,6 +14,7 @@
 | 2 | 2026-10-09 | Joel Teixeira | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
 | 3 | 2026-10-11 | Joel Teixeira | Restauration de SELECT pour scraper_user et persistance de la lecture après recréation des tables Airbyte. Configuration requise pour Airbyte activé par défaut et migration du fichier .env existant. |
 | 4 | 2026-11-13 | Joel Teixeira | Dépendance libatomic1 persistante dans l'image Prefect et contrôle du démarrage du pilote Playwright au build. Déploiement Allociné manuel et retrait des indications de scraping Mubi planifié. |
+| 5 | 2026-11-13 | Joel Teixeira | Quatre déploiements au démarrage, ingestion sans scraping et limites manuelles des scrapers. |
 
 Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 
@@ -91,8 +92,9 @@ sudo docker compose up -d prefect-server         # serveur seul, aucun flux plan
 
 Au démarrage, `ingestion/prefect/start_worker.sh` publie :
 
-- `lancer-ingestion-donnees` : ingestion complète, déclenchement manuel ;
-- `lancer-scraping-allocine` : scraping Allociné seul, déclenchement manuel, concurrence limitée à 1 et aucun calendrier automatique ;
+- `lancer-ingestion-complete` : Airbyte puis les deux phases dbt, sans scraping ;
+- `lancer-scrapping-allocine` : manuel, aucun calendrier, `max_films=10`, concurrence 1 ;
+- `lancer-scrapping-mubi` : Mubi CNC manuel, aucun calendrier, `max_films=10` films source et leurs éditions associées, concurrence 1 ;
 - `traiter-les-demandes-ingestion` : poller toutes les 5 minutes par défaut, qui peut déclencher l’ingestion complète selon les demandes en base.
 
 Aucun scraping Mubi n’est planifié par ce script. Pour publier les changements, attendre la fin des runs actifs, puis recréer le worker. Le [guide ingestion](../../ingestion/README.md#publier-et-lancer-le-scraping-seul) donne les commandes de contrôle et de lancement Allociné. Utiliser `sudo docker` sur le VPS.
@@ -161,6 +163,17 @@ Avant de lancer une ingestion complète sur le VPS :
 3. Renseigner `INGESTION_REQUEST_AIRBYTE_CONNECTION_NAMES` avec les noms exacts des connexions, séparés par des virgules. Exemple pour une connexion créée par le bootstrap : `src_gsheet_films -> dst_pg_raw`. Les runs manuels et le CLI réutilisent cette liste lorsqu’aucun nom n’est fourni explicitement.
 4. Passer `INGESTION_REQUEST_RUN_AIRBYTE_SYNC_STEP=true` pour les demandes Metabase. Cette variable contrôle le poller ; le paramètre `run_airbyte_sync_step` contrôle les runs manuels.
 5. Après livraison du code, recréer le worker pour charger le `.env` et republier les paramètres du deployment, en attendant la fin des runs en cours : `sudo docker compose up -d --force-recreate prefect-worker`.
-6. Vérifier dans Prefect que `lancer-ingestion-donnees` utilise `run_airbyte_sync_step=true`. Retirer toute ancienne surcharge `false` avant de lancer le run.
+6. Vérifier dans Prefect que `lancer-ingestion-complete` utilise `run_airbyte_sync_step=true`. Retirer toute ancienne surcharge `false` avant de lancer le run.
 
 Sans noms de connexions ou credentials valides, la phase Airbyte échoue avant dbt. Pour exécuter temporairement sans sync, utiliser `run_airbyte_sync_step=false` dans Prefect ou `--no-run-airbyte-sync` en CLI ; pour le poller, utiliser `INGESTION_REQUEST_RUN_AIRBYTE_SYNC_STEP=false`.
+
+### Migration des déploiements ingestion et scraping
+
+Le worker recrée ses quatre déploiements gérés à chaque démarrage et supprime les
+anciens noms. Attendre la fin des runs avant sa recréation. Seul le poller garde
+un calendrier ; les deux scrapers restent manuels et acceptent `max_films`, entier
+strictement positif (10 par défaut). Le poller traduit automatiquement l’ancienne
+valeur `Lancer l'ingestion complete/lancer-ingestion-donnees` du `.env` vers
+`Lancer l'ingestion complete/lancer-ingestion-complete`. Les configs Allociné ne
+sont plus transmises au flow d’ingestion. Le serveur Prefect et Browserless n’ont
+pas besoin d’être recréés pour ce changement de code.

@@ -74,7 +74,7 @@ SELECT
         ELSE FALSE
     END AS has_regional_funding,
     -- METADATA
-    TO_DATE("UPDATED_DATE", 'DD/MM/YYYY') AS updated_date,
+    {{ gsheet_updated_timestamp('"UPDATED_DATE"') }} AS updated_date,
     "UPDATED_BY" AS updated_by,
     _airbyte_raw_id AS airbyte_raw_id,
     CAST(_airbyte_generation_id AS INTEGER) AS airbyte_generation_id,

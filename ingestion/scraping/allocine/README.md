@@ -21,6 +21,7 @@
 | 7 | 2026-10-15 | Joel Teixeira | Persistance des URL d’affiche, migration additive, backfill local journalisé, export/import SQL ciblé et tests PostgreSQL isolés. |
 | 8 | 2026-11-12 | Joel Teixeira | Vérification du réalisateur CNC et examen de plusieurs candidats ; statut needs_review pour les correspondances non confirmées. |
 | 9 | 2026-11-13 | Joel Teixeira | Déploiement manuel, navigation DOMContentLoaded, délais configurables et reprise bornée des timeouts. |
+| 10 | 2026-11-13 | Joel Teixeira | Limite max_films dans le déploiement manuel séparé et override CLI --limit pour sync/read. |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -100,7 +101,7 @@ La configuration applique actuellement `scrape_limit: 10`, ce qui borne les runs
 
 ### Délais et timeouts
 
-Le déploiement `Recuperer les donnees Allocine/lancer-scraping-allocine` lance uniquement ce scraper. Publication et déclenchement : [guide Prefect](../../README.md#publier-et-lancer-le-scraping-seul).
+Le déploiement `Recuperer les donnees Allocine/lancer-scrapping-allocine` lance uniquement ce scraper. Publication et déclenchement : [guide Prefect](../../README.md#publier-et-lancer-le-scraping-seul).
 
 | Réglage | Valeur runtime | Périmètre |
 | --- | --- | --- |
@@ -198,13 +199,13 @@ Dans la stratégie retenue:
 
 1. Airbyte ne pilote pas ce job;
 2. Airbyte reste réservé aux Google Sheets source vers `raw`;
-3. Prefect orchestre `dbt phase 1` puis ce job de scraping depuis `prefect-worker`;
+3. Prefect lance ce job dans un déploiement manuel séparé, sans Airbyte ni dbt;
 4. `read` et `catalog.template.json` sont conservés surtout pour compatibilité technique et tests locaux.
 
 Séparation assumée:
 
-1. la phase `dbt` avant scraping est finalisée côté Prefect;
-2. la phase `dbt` après scraping exécute `dbt build --select +tag:phase2` quand elle est activée;
+1. le flow d’ingestion exécute Airbyte puis les deux phases dbt;
+2. sa phase finale exécute `dbt build --select +tag:phase2` sur les données déjà collectées;
 3. le flow Prefect peut aussi déclencher les syncs Airbyte par noms de connexions explicites;
 4. ce job couvre uniquement la partie scraping Allocine.
 
@@ -431,3 +432,11 @@ Sans ID Allociné fourni, le scraper examine au maximum cinq candidats distincts
 Les lignes `needs_review` ne sont pas considérées comme terminées et pourront être retentées. Le staging dbt existant ne consomme que `success`, donc elles ne sont pas publiées comme enrichissements. Les anciens résultats déjà enregistrés ne sont pas requalifiés automatiquement.
 
 Vérifications locales sans réseau : `python -m pytest tests/ingestion/test_allocine_identity.py`. Le flag CLI `--dry-run` reste réservé au backfill des affiches ; un test de recherche sans écriture doit utiliser des entrées en mémoire et ne pas appeler `sync_to_postgres`.
+
+### Limite par run Prefect
+
+Le déploiement `lancer-scrapping-allocine` expose `max_films=10`, entier strictement
+positif. Il n’a aucun calendrier automatique. Le flow transmet `--limit` au CLI
+`sync`, qui remplace `scrape_limit` en mémoire pour ce run uniquement. `read`
+accepte aussi `--limit`. Après scraping, relancer l’ingestion Airbyte/dbt pour
+actualiser les modèles finaux.

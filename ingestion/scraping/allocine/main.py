@@ -94,7 +94,7 @@ def main() -> int:
     parser.add_argument("--catalog", dest="catalog_path")
     parser.add_argument("--state", dest="state_path")
     parser.add_argument("--dry-run", action="store_true", help="Backfill : sélection seule")
-    parser.add_argument("--limit", type=int, help="Backfill : nombre maximum de films")
+    parser.add_argument("--limit", type=int, help="Nombre maximum de films (sync, read ou backfill-posters)")
     parser.add_argument(
         "--source-id",
         action="append",
@@ -103,9 +103,11 @@ def main() -> int:
     )
     args = parser.parse_args()
     if args.command != "backfill-posters" and (
-        args.dry_run or args.limit is not None or args.source_ids
+        args.dry_run or args.source_ids
     ):
-        parser.error("--dry-run, --limit et --source-id sont réservés à backfill-posters")
+        parser.error("--dry-run et --source-id sont réservés à backfill-posters")
+    if args.limit is not None and args.command not in {"sync", "read", "backfill-posters"}:
+        parser.error("--limit est réservé à sync, read et backfill-posters")
     if args.limit is not None and args.limit < 1:
         parser.error("--limit doit être positif")
 
@@ -116,6 +118,8 @@ def main() -> int:
         return 0
 
     config = _load_json(args.config_path) or {}
+    if args.limit is not None and args.command in {"sync", "read"}:
+        config["scrape_limit"] = args.limit
 
     if args.command == "backfill-posters":
         from ingestion.scraping.allocine.poster_backfill import backfill_posters

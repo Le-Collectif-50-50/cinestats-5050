@@ -26,9 +26,13 @@ def fixture(columns, rows):
 
 @unittest.skipUnless(os.getenv("DBT_TEST_SSH"), "DBT_TEST_SSH non configuré")
 class ManualRecoverySQLTests(unittest.TestCase):
-    def run_model(self, path, inputs):
+    def run_model(self, path, inputs, sql_template=None):
         env = Environment()
-        rendered = env.from_string((MODELS / path).read_text()).render(
+        module = env.from_string(
+            (MODELS.parent / "macros/gsheet_updated_timestamp.sql").read_text()
+        ).module
+        env.globals["gsheet_updated_timestamp"] = module.gsheet_updated_timestamp
+        rendered = env.from_string(sql_template or (MODELS / path).read_text()).render(
             ref=lambda name: name,
             source=lambda schema, name: f"source_{name}",
             config=lambda **kwargs: "",
@@ -46,6 +50,47 @@ class ManualRecoverySQLTests(unittest.TestCase):
             input=sql, text=True, capture_output=True, check=True,
         )
         return json.loads(proc.stdout)
+
+    def test_updated_timestamp_formats_and_type(self):
+        dates = ["13/11/2026", "13/11/2026 15:42", "13/11/2026 15:42:08",
+                 " 1/2/2026 09:05:02 ", "2026-11-13 15:42:08", "", None]
+        result = self.run_model(None, {
+            "dates": fixture(dict(id="integer", value="text"),
+                             [dict(id=i, value=v) for i, v in enumerate(dates)])
+        }, sql_template="""
+            SELECT id, {{ gsheet_updated_timestamp('value') }} AS parsed,
+                   pg_typeof({{ gsheet_updated_timestamp('value') }})::text AS kind
+            FROM dates ORDER BY id
+        """)
+        self.assertEqual([r["parsed"] for r in result], [
+            "2026-11-13T00:00:00", "2026-11-13T15:42:00", "2026-11-13T15:42:08",
+            "2026-02-01T09:05:02", "2026-11-13T15:42:08", None, None,
+        ])
+        self.assertTrue(all(r["kind"] == "timestamp without time zone" for r in result))
+
+    def test_updated_timestamp_rejects_invalid_values(self):
+        for value in ["31/02/2026 12:00:00", "13/11/2026 25:01:00", "13/11/2026 ignored"]:
+            with self.subTest(value=value), self.assertRaises(subprocess.CalledProcessError):
+                self.run_model(None, {"dates": fixture(dict(value="text"), [dict(value=value)])},
+                               sql_template="SELECT {{ gsheet_updated_timestamp('value') }} FROM dates")
+
+    def test_latest_correction_uses_time_then_airbyte_metadata(self):
+        columns = dict(id="uuid", type="text", first_name="text", last_name="text",
+                       legal_name="text", gender="text", birthdate="date", updated_date="timestamp",
+                       airbyte_extraction_date="timestamp", airbyte_raw_id="text")
+        base = dict(id=PERSON, type="Individual", first_name="Maxence", last_name="Voiseux")
+        rows = [dict(base, gender="old", updated_date="2026-11-13 15:42:07"),
+                dict(base, gender="male", updated_date="2026-11-13 15:42:08",
+                     airbyte_extraction_date="2026-11-13 16:00:00", airbyte_raw_id="b"),
+                dict(base, gender="old_tie", updated_date="2026-11-13 15:42:08",
+                     airbyte_extraction_date="2026-11-13 15:59:00", airbyte_raw_id="z"),
+                dict(base, gender="null_date", updated_date=None)]
+        for ordered in (rows, list(reversed(rows))):
+            result = self.run_model("intermediate/int_fix_credit_holders.sql", {
+                "stg_fix_credit_holders": fixture(columns, ordered),
+            })
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["gender"], "male")
 
     def test_manual_credit_added_and_duplicate_removed(self):
         cols = dict(film_id="uuid", role_id="uuid", credit_holder_id="uuid")

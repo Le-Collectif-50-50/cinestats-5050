@@ -7,13 +7,14 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 import psycopg
 from prefect import flow, get_run_logger
 from prefect.client.orchestration import get_client
 from psycopg.rows import dict_row
+from pydantic import Field
 
 from ingestion.airbyte.client import ensure_workspace_id
 from ingestion.airbyte.client import extract_job_id
@@ -51,7 +52,9 @@ DEFAULT_AIRBYTE_SYNC_POLL_SECONDS = int(
     os.getenv("AIRBYTE_SYNC_POLL_SECONDS", "10")
 )
 REQUEST_TABLE_NAME = "ops.ingestion_run_requests"
-DEFAULT_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-donnees"
+DEFAULT_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-complete"
+LEGACY_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-donnees"
+FilmLimit = Annotated[int, Field(gt=0, strict=True)]
 DEFAULT_REQUEST_FLOW_RUN_NAME_PREFIX = "metabase-ingestion"
 CREATE_QUEUE_SQL = """
 CREATE SCHEMA IF NOT EXISTS ops;
@@ -105,6 +108,17 @@ def _parse_csv(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _main_deployment_name() -> str:
+    configured = os.getenv("INGESTION_REQUEST_MAIN_DEPLOYMENT_NAME", DEFAULT_MAIN_DEPLOYMENT_NAME)
+    # Les .env existants sont conservés au déploiement : migrer l'ancien nom connu.
+    return DEFAULT_MAIN_DEPLOYMENT_NAME if configured == LEGACY_MAIN_DEPLOYMENT_NAME else configured
+
+
+def _validate_film_limit(max_films: int) -> None:
+    if isinstance(max_films, bool) or not isinstance(max_films, int) or max_films < 1:
+        raise ValueError("max_films doit être un entier strictement positif")
+
+
 @dataclass(frozen=True)
 class IngestionRequestSettings:
     database_host: str
@@ -115,7 +129,6 @@ class IngestionRequestSettings:
     claim_timeout_seconds: int
     claimed_by: str
     main_deployment_name: str
-    config_path: str
     flow_run_name_prefix: str
     auto_init_queue_schema: bool
     run_airbyte_sync_step: bool
@@ -140,14 +153,7 @@ class IngestionRequestSettings:
                 "INGESTION_REQUEST_CLAIMED_BY",
                 socket.gethostname() or "prefect-worker",
             ),
-            main_deployment_name=os.getenv(
-                "INGESTION_REQUEST_MAIN_DEPLOYMENT_NAME",
-                DEFAULT_MAIN_DEPLOYMENT_NAME,
-            ),
-            config_path=os.getenv(
-                "INGESTION_REQUEST_ALLOCINE_CONFIG_PATH",
-                str(ALLOCINE_CONFIG_PATH),
-            ),
+            main_deployment_name=_main_deployment_name(),
             flow_run_name_prefix=os.getenv(
                 "INGESTION_REQUEST_FLOW_RUN_NAME_PREFIX",
                 DEFAULT_REQUEST_FLOW_RUN_NAME_PREFIX,
@@ -353,7 +359,6 @@ def _build_request_parameters(
 ) -> dict[str, object]:
     return {
         "request_id": str(request_id),
-        "config_path": settings.config_path,
         "run_airbyte_sync_step": settings.run_airbyte_sync_step,
         "run_dbt_phase_2_step": settings.run_dbt_phase_2_step,
         "airbyte_connection_names": (
@@ -576,15 +581,16 @@ def _run_dbt_phase_1_step() -> None:
 
 @flow(
     name="Preparer les donnees",
-    description="Execute la preparation dbt avant le scraping Allocine.",
+    description="Execute la preparation dbt des donnees CNC.",
 )
 def run_dbt_phase_1() -> None:
     _run_dbt_phase_1_step()
 
 
-def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH)) -> None:
+def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH), max_films: int = 10) -> None:
+    _validate_film_limit(max_films)
     logger = get_run_logger()
-    logger.info("Task parameters: config_path=%s", config_path)
+    logger.info("Task parameters: config_path=%s, max_films=%s", config_path, max_films)
     _run(
         [
             "python3",
@@ -593,6 +599,8 @@ def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH)) ->
             "sync",
             "--config",
             config_path,
+            "--limit",
+            str(max_films),
         ],
         step_name="Recuperer les donnees Allocine",
         cwd=REPO_ROOT,
@@ -603,8 +611,8 @@ def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH)) ->
     name="Recuperer les donnees Allocine",
     description="Lance le scraping Allocine avec la configuration fournie.",
 )
-def run_allocine_scraping(config_path: str = str(ALLOCINE_CONFIG_PATH)) -> None:
-    _run_allocine_scraping_step(config_path=config_path)
+def run_allocine_scraping(config_path: str = str(ALLOCINE_CONFIG_PATH), max_films: FilmLimit = 10) -> None:
+    _run_allocine_scraping_step(config_path=config_path, max_films=max_films)
 
 
 def _run_mubi_scraping_step(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
@@ -632,9 +640,10 @@ def run_mubi_scraping(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
     _run_mubi_scraping_step(config_path=config_path)
 
 
-def _run_mubi_cnc_scraping_step(config_path: str = str(MUBI_CNC_CONFIG_PATH)) -> None:
+def _run_mubi_cnc_scraping_step(config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: int = 10) -> None:
+    _validate_film_limit(max_films)
     logger = get_run_logger()
-    logger.info("Task parameters: config_path=%s", config_path)
+    logger.info("Task parameters: config_path=%s, max_films=%s", config_path, max_films)
     _run(
         [
             "python3",
@@ -643,6 +652,8 @@ def _run_mubi_cnc_scraping_step(config_path: str = str(MUBI_CNC_CONFIG_PATH)) ->
             "sync",
             "--config",
             config_path,
+            "--limit",
+            str(max_films),
         ],
         step_name="Recuperer les donnees Mubi (CNC)",
         cwd=REPO_ROOT,
@@ -653,8 +664,8 @@ def _run_mubi_cnc_scraping_step(config_path: str = str(MUBI_CNC_CONFIG_PATH)) ->
     name="Recuperer les donnees Mubi (CNC)",
     description="Lance le scraping Mubi restreint aux films du referentiel CNC (palmares puis editions de festivals concernees).",
 )
-def run_mubi_cnc_scraping(config_path: str = str(MUBI_CNC_CONFIG_PATH)) -> None:
-    _run_mubi_cnc_scraping_step(config_path=config_path)
+def run_mubi_cnc_scraping(config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: FilmLimit = 10) -> None:
+    _run_mubi_cnc_scraping_step(config_path=config_path, max_films=max_films)
 
 
 def _run_dbt_phase_2_step() -> None:
@@ -684,19 +695,17 @@ def run_dbt_phase_2() -> None:
 
 @flow(
     name="Lancer l'ingestion complete",
-    description="Orchestre la preparation des donnees, le scraping Allocine et les etapes optionnelles de synchronisation et de finalisation.",
+    description="Orchestre Airbyte puis les deux phases dbt, sans aucun scraping.",
 )
 def main_ingestion_flow(
     request_id: str | None = None,
-    config_path: str = str(ALLOCINE_CONFIG_PATH),
     run_airbyte_sync_step: bool = True,
     run_dbt_phase_2_step: bool = True,
     airbyte_connection_names: list[str] | None = None,
 ) -> None:
     logger = get_run_logger()
     logger.info(
-        "Flow parameters: config_path=%s, run_airbyte_sync_step=%s, run_dbt_phase_2_step=%s, airbyte_connection_names=%s",
-        config_path,
+        "Flow parameters: run_airbyte_sync_step=%s, run_dbt_phase_2_step=%s, airbyte_connection_names=%s",
         run_airbyte_sync_step,
         run_dbt_phase_2_step,
         airbyte_connection_names or [],
@@ -717,7 +726,6 @@ def main_ingestion_flow(
             connection_names=airbyte_connection_names,
         )
         _run_dbt_phase_1_step()
-        _run_allocine_scraping_step(config_path=config_path)
         if run_dbt_phase_2_step:
             _run_dbt_phase_2_step()
     except Exception as exc:
@@ -822,11 +830,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ],
     )
     parser.add_argument(
-        "--config-path",
-        default=str(ALLOCINE_CONFIG_PATH),
-        help="Chemin du fichier de configuration du scraping Allocine.",
-    )
-    parser.add_argument(
         "--request-id",
         default=None,
         help="Identifiant ops.ingestion_run_requests a mettre a jour pendant l'execution.",
@@ -874,7 +877,6 @@ def main() -> None:
 
     main_ingestion_flow(
         request_id=args.request_id,
-        config_path=args.config_path,
         run_airbyte_sync_step=args.run_airbyte_sync,
         run_dbt_phase_2_step=args.run_dbt_phase_2,
         airbyte_connection_names=args.airbyte_connection_names,

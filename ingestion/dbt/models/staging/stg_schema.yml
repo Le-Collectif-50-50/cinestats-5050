@@ -45,7 +45,7 @@ models:
       - name: has_regional_funding
         description: "Indique si le film bénéficie d’aides régionales."
       - name: updated_date
-        description: "Date de dernière mise à jour des données du film."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant effectué la correction via le gsheet Cinéstats 50/50."
       - name: airbyte_raw_id
@@ -78,7 +78,7 @@ models:
       - name: tmdb_id
         description: "Identifiant du film sur TMDB."
       - name: updated_date
-        description: "Date de dernière mise à jour du mapping."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant effectué la correction via le gsheet Cinéstats 50/50."
       - name: airbyte_raw_id
@@ -100,7 +100,7 @@ models:
       - name: credit_holder_id
         description: "Identifiant de la personne ou entité créditée dans le film."
       - name: updated_date
-        description: "Date de dernière mise à jour du crédit."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant effectué la correction via le gsheet Cinéstats 50/50."
       - name: airbyte_raw_id
@@ -128,7 +128,7 @@ models:
       - name: budget_allocation
         description: "Pourcentage ou montant du budget attribué à ce pays pour le film."
       - name: updated_date
-        description: "Date de dernière mise à jour de la donnée."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant effectué la dernière modification manuelle."
       - name: airbyte_raw_id
@@ -148,7 +148,7 @@ models:
       - name: genre_id
         description: "Identifiant du genre cinématographique."
       - name: updated_date
-        description: "Date de dernière mise à jour."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant modifié la donnée."
       - name: airbyte_raw_id
@@ -178,7 +178,7 @@ models:
       - name: is_winner
         description: "Indique si la nomination a été remportée (true/false)."
       - name: updated_date
-        description: "Date de mise à jour de la donnée."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant modifié la donnée."
       - name: airbyte_raw_id
@@ -210,7 +210,7 @@ models:
       - name: birthdate
         description: "Date de naissance."
       - name: updated_date
-        description: "Date de mise à jour."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant effectué la modification."
       - name: airbyte_raw_id
@@ -236,7 +236,7 @@ models:
       - name: inclusive_name
         description: "Nom inclusif du rôle pour harmonisation des données."
       - name: updated_date
-        description: "Date de mise à jour."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant effectué la modification."
       - name: airbyte_raw_id
@@ -258,7 +258,7 @@ models:
       - name: name
         description: "Nom du genre cinématographique."
       - name: updated_date
-        description: "Date de mise à jour."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant modifié la donnée."
       - name: airbyte_raw_id
@@ -280,7 +280,7 @@ models:
       - name: name
         description: "Nom du pays."
       - name: updated_date
-        description: "Date de mise à jour."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant modifié la donnée."
       - name: airbyte_raw_id
@@ -308,7 +308,7 @@ models:
       - name: country_id
         description: "Pays d’organisation du festival."
       - name: updated_date
-        description: "Date de mise à jour."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant modifié la donnée."
       - name: airbyte_raw_id
@@ -360,7 +360,7 @@ models:
       - name: french_label
         description: "Libellé de la récompense en français."
       - name: updated_date
-        description: "Date de mise à jour."
+        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant modifié la donnée."
       - name: airbyte_raw_id

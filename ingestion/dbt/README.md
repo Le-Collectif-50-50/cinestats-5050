@@ -20,6 +20,7 @@
 | 6 | 2026-11-11 | Joel Teixeira | Couverture des 29 genres observés : corrections orthographiques, classement du Péplum et catégories explicites Divers, Erotique et Évènement Sportif. |
 | 7 | 2026-11-12 | Joel Teixeira | Alignement des corrections sur le schéma Airbyte : clés composées des crédits et genres, retrait du champ Allociné des rôles et filtre GENRE_ID. Dashboard Metabase de revue du scraping Allociné, des écarts de visa et des recherches sans résultat (`not_found`). |
 | 8 | 2026-11-13 | Joel Teixeira | Intégration des ajouts manuels de personnes et crédits, dernier succès Allociné par visa, contrôles de références et conversion du crédit d’impôt. |
+| 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -57,14 +58,14 @@ docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt build --p
 
 ## Tags
 
-1. `phase1`: `stg_cnc_films`, exécuté avant scraping Allociné.
-2. `phase2`: `stg_allocine_films`, `v_allocine_pipeline_status` et tous les modèles des dossiers `intermediate/` et `fnl/`, exécutés après scraping Allociné. Les deux dossiers héritent du tag dans `dbt_project.yml`.
+1. `phase1`: `stg_cnc_films`, préparation CNC après Airbyte.
+2. `phase2`: `stg_allocine_films`, `v_allocine_pipeline_status` et tous les modèles des dossiers `intermediate/` et `fnl/`, exécutés après la phase 1 avec les résultats de scraping déjà disponibles. Les deux dossiers héritent du tag dans `dbt_project.yml`.
 
 Le flow Prefect principal exécute toujours `tag:phase1`. Il exécute `+tag:phase2` seulement quand le paramètre `run_dbt_phase_2_step` est activé.
 
 Le préfixe `+` inclut les dépendances amont, notamment les modèles de staging non taggés. La finalisation construit ainsi les modèles `intermediate` et `fnl` et exécute les tests associés. La phase 1 reste limitée à `stg_cnc_films`.
 
-Toutes les sources brutes référencées doivent exister et être lisibles par `dbt_user`, y compris les tables de corrections et les sorties Mubi. Le flow principal ne lance que le scraping Allociné ; les sources Mubi doivent être alimentées séparément. Un échec de construction ou de test fait échouer la finalisation.
+Toutes les sources brutes référencées doivent exister et être lisibles par `dbt_user`, y compris les tables de corrections et les sorties Mubi. Le flow principal ne lance aucun scraper ; les sources Allociné et Mubi sont alimentées par leurs déploiements manuels séparés. Un échec de construction ou de test fait échouer la finalisation.
 
 Pour vérifier le périmètre sans écrire en base, remplacer `dbt build` par `dbt ls --resource-type model` dans la commande de phase 2. Après déploiement du worker mis à jour, cette commande de build permet aussi de reconstruire les couches manquantes sans relancer Airbyte ni le scraping.
 
@@ -251,3 +252,37 @@ l’extension `unaccent`, utilisée par le modèle CNC. Sans `DBT_TEST_SSH`, ces
 sont ignorés explicitement. Ils couvrent les ajouts, les overrides, les doublons,
 les lignes exemples, les corrections de Hugo, les reprises après erreur et les
 codes de crédit d’impôt. Ils ne remplacent pas un `dbt build` complet avant livraison.
+
+## Date et heure des mises à jour GSheet
+
+Les 12 stagings qui lisent `UPDATED_DATE` utilisent la macro commune
+`gsheet_updated_timestamp`. Le nom de colonne dbt `updated_date` reste inchangé,
+mais son type devient `timestamp without time zone` au lieu de `date`.
+Cela couvre `films`, `id_matching` et les dix sources de corrections.
+Aucune colonne `TIME` supplémentaire n’est nécessaire.
+
+Format recommandé dans la cellule : **`13/11/2026 15:42:08`**, soit
+`DD/MM/YYYY HH:MM:SS` avec une heure sur 24 heures. Les valeurs avec heures et
+minutes seules sont acceptées. Les anciennes dates seules restent valides et
+valent minuit. Les dates ISO `YYYY-MM-DD`, avec la même heure facultative, sont
+également acceptées. Les espaces extérieurs sont supprimés ; une cellule vide
+est convertie en NULL. Une date impossible ou un format non pris en charge fait
+échouer la conversion, sans ignorer silencieusement l’heure.
+
+Conserver le même fuseau de référence, Europe/Paris, dans tous les GSheets :
+la valeur est une heure locale, sans conversion de fuseau dans dbt. Airbyte doit
+continuer à transmettre une chaîne, pas un numéro de série de date Google Sheets.
+Les dates de naissance et de nomination restent des dates, sans heure.
+
+Les dix modèles `int_fix_*` classent les corrections par date et heure
+complètes, puis par date d’extraction Airbyte et identifiant de ligne Airbyte
+pour départager les égalités. Les valeurs NULL sont classées en dernier.
+L’ordre physique des lignes n’est pas utilisé. Deux corrections contradictoires
+avec le même horodatage restent à éviter : les métadonnées techniques ne
+traduisent pas l’intention métier et peuvent changer après une nouvelle sync.
+Les modèles de films et de matching ne gagnent pas de déduplication supplémentaire.
+
+Déployer le code avant de modifier le format des GSheets, puis reconstruire les
+stagings et leurs dépendances via le pipeline complet. Le parsing dbt et les
+tests SQL vérifient les anciennes dates, les heures/minutes/secondes, les dates
+invalides et la priorité des corrections indépendamment de leur ordre d’entrée.

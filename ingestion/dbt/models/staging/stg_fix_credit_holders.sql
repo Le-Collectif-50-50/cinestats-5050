@@ -11,7 +11,7 @@ SELECT
     NULLIF(TRIM("GENDER"), '') AS gender,
     TO_DATE(NULLIF(TRIM("BIRTHDATE"), ''), 'DD/MM/YYYY') AS birthdate,
     -- METADATA
-    TO_DATE("UPDATED_DATE", 'DD/MM/YYYY') AS updated_date,
+    {{ gsheet_updated_timestamp('"UPDATED_DATE"') }} AS updated_date,
     TRIM("UPDATED_BY") AS updated_by,
     TRIM(_airbyte_raw_id) AS airbyte_raw_id,
     CAST(_airbyte_generation_id AS INTEGER) AS airbyte_generation_id,

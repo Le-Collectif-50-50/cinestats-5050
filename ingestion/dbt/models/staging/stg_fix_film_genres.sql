@@ -6,7 +6,7 @@ SELECT
     CAST("FILM_ID" AS TEXT)::UUID AS film_id,
     CAST("GENRE_ID" AS TEXT)::UUID AS genre_id,
     -- METADATA
-    TO_DATE("UPDATED_DATE", 'DD/MM/YYYY') AS updated_date,
+    {{ gsheet_updated_timestamp('"UPDATED_DATE"') }} AS updated_date,
     TRIM("UPDATED_BY") AS updated_by,
     _airbyte_raw_id AS airbyte_raw_id,
     CAST(_airbyte_generation_id AS INTEGER) AS airbyte_generation_id,
