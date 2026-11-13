@@ -22,6 +22,7 @@
 | 8 | 2026-10-15 | Joel Teixeira | URL des affiches Allociné : migration, backfill explicite et staging dbt. |
 | 9 | 2026-11-13 | Joel Teixeira | Dernier succès Allociné par visa et intégration des personnes et crédits manuels dans les modèles finaux. Déploiement Allociné manuel réactivé et délais de navigation documentés. |
 | 10 | 2026-11-13 | Joel Teixeira | Quatre déploiements Prefect : ingestion sans scraping, scrapers Allociné et Mubi CNC manuels avec max_films=10, migration du nom ciblé par le poller. |
+| 11 | 2026-11-13 | Joel Teixeira | Reprise Allociné lorsque l'ID cible change dans id_matching ; sélection ciblée par visa dans le CLI. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
