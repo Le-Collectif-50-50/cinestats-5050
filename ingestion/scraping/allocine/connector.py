@@ -2,6 +2,7 @@ import asyncio
 import builtins
 import hashlib
 import json
+import math
 import os
 import random
 import re
@@ -27,7 +28,8 @@ DEFAULT_INPUT_TABLE = "id_matching"
 DEFAULT_OUTPUT_SCHEMA = "raw"
 DEFAULT_OUTPUT_TABLE = STREAM_NAME
 DEFAULT_COMPLETED_STATUSES = ["success", "not_found", "visa_mismatch"]
-DEFAULT_RECORD_TIMEOUT_SECONDS = 180.0
+DEFAULT_RECORD_TIMEOUT_SECONDS = 240.0
+DEFAULT_NAVIGATION_TIMEOUT_SECONDS = 60.0
 MAX_SEARCH_CANDIDATES = 5
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -135,6 +137,13 @@ CONNECTION_SPECIFICATION = {
             "minimum": 0,
             "description": "Timeout in seconds for scraping one record. Set to 0 to disable the timeout.",
         },
+        "navigation_timeout_seconds": {
+            "type": "number",
+            "title": "Délai maximal de navigation par page",
+            "default": DEFAULT_NAVIGATION_TIMEOUT_SECONDS,
+            "exclusiveMinimum": 0,
+            "description": "Délai en secondes pour atteindre DOMContentLoaded, par page.",
+        },
         "playwright_ws_endpoint": {
             "type": "string",
             "title": "Playwright websocket endpoint",
@@ -240,6 +249,7 @@ class ConnectorConfig:
     completed_statuses: list[str]
     scrape_limit: int | None
     record_timeout_seconds: float
+    navigation_timeout_seconds: float
     playwright_ws_endpoint: str | None
     headless: bool
     debug_pause_between_actions: bool
@@ -281,6 +291,10 @@ class ConnectorConfig:
                 raw_config.get("record_timeout_seconds", DEFAULT_RECORD_TIMEOUT_SECONDS),
                 field_name="record_timeout_seconds",
             ),
+            "navigation_timeout_seconds": _normalize_non_negative_float(
+                raw_config.get("navigation_timeout_seconds", DEFAULT_NAVIGATION_TIMEOUT_SECONDS),
+                field_name="navigation_timeout_seconds",
+            ),
             "playwright_ws_endpoint": raw_config.get("playwright_ws_endpoint")
             or os.getenv("PLAYWRIGHT_WS_ENDPOINT"),
             "headless": bool(raw_config.get("headless", True)),
@@ -298,6 +312,9 @@ class ConnectorConfig:
             ),
             "verbose": bool(raw_config.get("verbose", False)),
         }
+
+        if not math.isfinite(values["navigation_timeout_seconds"]) or values["navigation_timeout_seconds"] <= 0:
+            raise ValueError("navigation_timeout_seconds must be finite and greater than 0")
 
         if (
             values["inter_film_delay_max_seconds"]
@@ -578,6 +595,8 @@ class AllocineAirbyteSource:
                 headless=config.headless,
                 debug_pause_between_actions=config.debug_pause_between_actions,
                 verbose=config.verbose,
+                navigation_timeout_seconds=config.navigation_timeout_seconds,
+                navigation_wait_until="domcontentloaded",
             )
             session = await session_cm.__aenter__()
             if config.verbose:

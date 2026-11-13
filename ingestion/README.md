@@ -20,7 +20,7 @@
 | 6   | 2026-10-09 | Joel Teixeira | Autorisation TLS du compte scraper_user depuis le VPS data dans pg_hba.conf et son générateur |
 | 7 | 2026-10-11 | Joel Teixeira | Lecture de raw.id_matching restaurable et privilèges SELECT par défaut pour les futures tables créées par airbyte_user dans raw. Activation Airbyte par défaut pour les runs manuels, le CLI et le poller ; noms de connexions partagés via environnement et désactivation explicite. Finalisation dbt étendue aux modèles intermédiaires et finaux et à leurs dépendances |
 | 8 | 2026-10-15 | Joel Teixeira | URL des affiches Allociné : migration, backfill explicite et staging dbt. |
-| 9 | 2026-11-13 | Joel Teixeira | Dernier succès Allociné par visa et intégration des personnes et crédits manuels dans les modèles finaux. |
+| 9 | 2026-11-13 | Joel Teixeira | Dernier succès Allociné par visa et intégration des personnes et crédits manuels dans les modèles finaux. Déploiement Allociné manuel réactivé et délais de navigation documentés. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -273,7 +273,7 @@ Mode opératoire recommandé:
 1. démarrer la stack avec `docker compose up -d`;
 2. ouvrir l'UI Prefect;
 3. attendre la publication automatique des deployments par `prefect-worker`;
-4. déclencher manuellement `lancer-ingestion-donnees` selon besoin; `lancer-scraping-allocine` s'exécute automatiquement toutes les 10 minutes.
+4. déclencher manuellement `lancer-ingestion-donnees` selon besoin; `lancer-scraping-allocine` se déclenche manuellement, sans calendrier automatique.
 
 Le point d'entrée versionné est [flows.py](/root/explore/13_reveler_inegalites_cinema/ingestion/prefect/flows.py:1). Il expose maintenant plusieurs flows utilisables directement depuis l'UI Prefect:
 
@@ -300,7 +300,7 @@ Deployments publiés automatiquement:
 1. `lancer-ingestion-donnees`
    Description: point d'entrée manuel recommandé pour les utilisateurs de l'UI Prefect.
 2. `lancer-scraping-allocine`
-   Description: exécute uniquement le flow de scraping Allociné, sans déclencher Airbyte ni dbt, avec un schedule automatique toutes les 10 minutes et une limite de concurrence à 1.
+   Description: exécute uniquement le flow de scraping Allociné, sans déclencher Airbyte ni dbt, sur déclenchement manuel, sans calendrier automatique, avec une limite de concurrence à 1 pour ce deployment. Le lot par défaut contient au maximum 10 films ; les tables brutes source doivent déjà être alimentées. Cette limite ne sérialise pas le flow d’ingestion complète : éviter leur exécution simultanée.
 3. `traiter-les-demandes-ingestion`
    Description: poller schedulé qui lit `ops.ingestion_run_requests`, claim une ligne `pending`, lance `lancer-ingestion-donnees`, puis laisse le flow principal écrire l'état terminal.
 
@@ -314,6 +314,25 @@ Important:
 6. pour désactiver Airbyte, utiliser `run_airbyte_sync_step=false` dans Prefect, `--no-run-airbyte-sync` en CLI, ou `INGESTION_REQUEST_RUN_AIRBYTE_SYNC_STEP=false` pour le poller. Sans noms de connexions ou credentials valides, la phase échoue avant dbt ;
 7. l'étape Airbyte attend la fin de chaque job avant de passer à `dbt phase 1`;
 8. le flow principal exécute la séquence et saute les étapes explicitement désactivées.
+
+### Publier et lancer le scraping seul
+
+Après livraison du code, attendre la fin des runs actifs puis recréer le worker depuis `ingestion/` :
+
+```bash
+docker compose up -d --no-deps --force-recreate prefect-worker
+docker compose exec -T prefect-worker prefect deployment inspect \
+  "Recuperer les donnees Allocine/lancer-scraping-allocine"
+```
+
+Vérifier l’absence de calendrier dans le deployment. Le sélectionner dans l’UI Prefect, puis choisir **Run**. Équivalent CLI :
+
+```bash
+docker compose exec -T prefect-worker prefect deployment run \
+  "Recuperer les donnees Allocine/lancer-scraping-allocine"
+```
+
+Le paramètre `config_path` accepte un fichier accessible dans le worker. Sa valeur par défaut est `/app/ingestion/scraping/allocine/config.json`. Le flow écrit dans `raw.allocine_data` ; il ne rafraîchit pas les modèles dbt. Les délais et leur diagnostic sont décrits dans le [guide Allociné](scraping/allocine/README.md#délais-et-timeouts).
 
 ## Usage Poller
 

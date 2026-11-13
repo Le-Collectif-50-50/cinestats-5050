@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-12
+**Dernière révision:** 2026-11-13
 
 **Status:** actif
 
@@ -19,8 +19,8 @@
 | 5   | 2026-10-09 | Joel Teixeira | Copie des helpers de date et durée dans ingestion pour démarrer sans package backend |
 | 6 | 2026-10-11 | Joel Teixeira | Sélection dbt post-scraping incluant les modèles intermédiaires et finaux et leurs dépendances |
 | 7 | 2026-10-15 | Joel Teixeira | Persistance des URL d’affiche, migration additive, backfill local journalisé, export/import SQL ciblé et tests PostgreSQL isolés. |
-
 | 8 | 2026-11-12 | Joel Teixeira | Vérification du réalisateur CNC et examen de plusieurs candidats ; statut needs_review pour les correspondances non confirmées. |
+| 9 | 2026-11-13 | Joel Teixeira | Déploiement manuel, navigation DOMContentLoaded, délais configurables et reprise bornée des timeouts. |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -97,6 +97,40 @@ Les accès PostgreSQL sont isolés via `SCRAPER_POSTGRES_USER` et `SCRAPER_POSTG
 Dans l'environnement Airbyte actuel, la table source par défaut est `raw.id_matching` et reprend les noms de colonnes bruts du sheet (`VISA`, `TITRE`, `ID_ALLOCINE`). Les champs absents comme l'année CNC ou l'URL Allociné peuvent être laissés à `null`.
 
 La configuration applique actuellement `scrape_limit: 10`, ce qui borne les runs de debug et évite un scraping trop large par défaut. Ajuster cette valeur, la mettre à `null` ou la supprimer pour changer le volume traité.
+
+### Délais et timeouts
+
+Le déploiement `Recuperer les donnees Allocine/lancer-scraping-allocine` lance uniquement ce scraper. Publication et déclenchement : [guide Prefect](../../README.md#publier-et-lancer-le-scraping-seul).
+
+| Réglage | Valeur runtime | Périmètre |
+| --- | --- | --- |
+| `navigation_timeout_seconds` | 60 s | Chargement de chaque page jusqu’à `DOMContentLoaded`, réglable dans `config.json`, strictement positif et fini. |
+| `record_timeout_seconds` | 240 s | Budget d’une tentative par film avec ID fourni, incluant fiche, casting et interactions. `0` désactive ce garde-fou. |
+| Connexion CDP | 15 s par tentative | Connexion à Browserless, distincte du chargement Allociné. |
+| `CONNECTION_TIMEOUT` Browserless | 600 000 ms dans Compose | Durée maximale de session distante ; indépendante des deux budgets précédents. |
+
+Sans ID fourni, le connecteur multiplie le budget film par six : 1 440 s pour la recherche et cinq candidats au maximum. Ce budget peut dépasser la durée de session Browserless. Plusieurs films partagent aussi une session. Une fermeture proche de dix minutes exige donc un diagnostic de session, même avec une navigation rapide.
+
+Allociné attend maintenant `DOMContentLoaded`, puis conserve les pauses, le consentement et le défilement avant lecture du HTML. L’ancienne attente `networkidle` exigeait une période sans connexions réseau ; des requêtes publicitaires peuvent empêcher cette condition. [Playwright déconseille cette attente](https://playwright.dev/python/docs/api/class-page#page-goto-option-wait-until). Les autres scrapers conservent leur réglage de navigation existant.
+
+Augmenter le timeout peut aider une page lente. Cela ne corrige ni un blocage HTTP 403/429, ni une session Browserless expirée, ni un navigateur saturé. Le passage de 30 à 60 s par page et de 150 à 240 s par film apporte une marge ; son effet en production reste à mesurer. Les valeurs présentes dans une configuration personnalisée continuent à prévaloir.
+
+Un timeout de navigation produit `Navigation timed out after ...` avec URL et condition attendue. Le connecteur ferme la session, en ouvre une autre et retente le film une fois au maximum. Le budget film s’applique à chaque tentative. Après deux échecs, le résultat reste `error`, rééligible lors d’un prochain run ; aucun HTML partiel n’est utilisé après un timeout. Les réponses 403/429 restent `blocked`. Le backfill des affiches utilise les mêmes paramètres de navigation mais conserve une seule tentative par candidat.
+
+Pour diagnostiquer, activer `verbose: true` et conserver `parallel_sessions: 1`. Comparer les durées et le nombre de succès sur des lots comparables. Distinguer dans les logs :
+
+- `Navigation timed out` : chargement d’une page.
+- `Record timed out` : budget total du film épuisé.
+- `connect_over_cdp` : accès au navigateur distant.
+- `Browser connection lost` : fermeture ou panne de session ; vérifier les logs Browserless et les ressources Docker.
+
+Vérifications locales sans scraping ni écriture en base :
+
+```bash
+python3 -m pytest -q tests/ingestion/test_allocine_timeouts.py \
+  tests/ingestion/test_allocine_identity.py tests/ingestion/test_allocine_date_utils.py
+bash -n ingestion/prefect/start_worker.sh
+```
 
 Fichiers fournis dans le repo:
 

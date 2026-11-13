@@ -7,7 +7,7 @@ from socket import gaierror
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import urlopen
 
-from playwright.async_api import async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 
 CHROMIUM_WS_ENDPOINT = getenv("PLAYWRIGHT_WS_ENDPOINT")
 CDP_CONNECT_TIMEOUT_MS = 15000
@@ -115,6 +115,8 @@ class AsyncBrowserSession:
         headless=True,
         debug_pause_between_actions=False,
         verbose=False,
+        navigation_timeout_seconds=30.0,
+        navigation_wait_until="networkidle",
     ):
         self.ws_endpoint = ws_endpoint
         self.user_agent = user_agent or DEFAULT_USER_AGENT
@@ -123,6 +125,8 @@ class AsyncBrowserSession:
         self.headless = headless
         self.debug_pause_between_actions = debug_pause_between_actions
         self.verbose = verbose
+        self.navigation_timeout_seconds = navigation_timeout_seconds
+        self.navigation_wait_until = navigation_wait_until
         self.playwright = None
         self.browser = None
         self.context = None
@@ -319,7 +323,18 @@ class AsyncBrowserSession:
         try:
             if self.verbose:
                 print(f"  [browser] GET {url}")
-            response = await self.page.goto(url, wait_until="networkidle", timeout=30000)
+            try:
+                response = await self.page.goto(
+                    url,
+                    wait_until=self.navigation_wait_until,
+                    timeout=self.navigation_timeout_seconds * 1000,
+                )
+            except PlaywrightTimeoutError as exc:
+                # Message reconnu par la reprise bornée du connecteur Allociné.
+                raise RuntimeError(
+                    f"Navigation timed out after {self.navigation_timeout_seconds:g}s "
+                    f"for {url} (wait_until={self.navigation_wait_until})."
+                ) from exc
             if self.verbose:
                 http_status = response.status if response is not None else "no-response"
                 print(f"  [browser] Loaded (HTTP {http_status})")
@@ -328,12 +343,13 @@ class AsyncBrowserSession:
                     f"Website blocked the request for {url} with HTTP status {response.status}."
                 )
             
-            # Ensure page has settled before proceeding
-            try:
-                await self.page.wait_for_load_state("networkidle", timeout=5000)
-            except Exception as e:
-                if self.verbose:
-                    print(f"  [browser] Warning: Failed to wait for networkidle: {e}")
+            # Allociné attend le DOM : ses requêtes publicitaires peuvent rester actives.
+            if self.navigation_wait_until == "networkidle":
+                try:
+                    await self.page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  [browser] Warning: Failed to wait for networkidle: {e}")
             
             await self._debug_pause(f"Page loaded: {url}")
 

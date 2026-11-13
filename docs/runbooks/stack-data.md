@@ -13,7 +13,7 @@
 | 1 | 2026-10-06 | Nicolas Revel | Première version du runbook | 
 | 2 | 2026-10-09 | Joel Teixeira | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
 | 3 | 2026-10-11 | Joel Teixeira | Restauration de SELECT pour scraper_user et persistance de la lecture après recréation des tables Airbyte. Configuration requise pour Airbyte activé par défaut et migration du fichier .env existant. |
-| 4 | 2026-11-13 | Joel Teixeira | Dépendance libatomic1 persistante dans l'image Prefect et contrôle du démarrage du pilote Playwright au build. |
+| 4 | 2026-11-13 | Joel Teixeira | Dépendance libatomic1 persistante dans l'image Prefect et contrôle du démarrage du pilote Playwright au build. Déploiement Allociné manuel et retrait des indications de scraping Mubi planifié. |
 
 Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 
@@ -89,12 +89,13 @@ sudo docker compose build prefect-server         # image ric-prefect, partagée 
 sudo docker compose up -d prefect-server         # serveur seul, aucun flux planifié
 ```
 
-**Ne démarre le worker qu'en connaissance de cause.** `ingestion/prefect/start_worker.sh` (lancé par le worker) enregistre et planifie automatiquement :
+Au démarrage, `ingestion/prefect/start_worker.sh` publie :
 
-- `lancer-scraping-mubi-cnc` : **toutes les 10 minutes**, avec un navigateur Chrome sur Mubi ;
-- `traiter-les-demandes-ingestion` : toutes les 5 minutes, interroge `ops.ingestion_run_requests`.
+- `lancer-ingestion-donnees` : ingestion complète, déclenchement manuel ;
+- `lancer-scraping-allocine` : scraping Allociné seul, déclenchement manuel, concurrence limitée à 1 et aucun calendrier automatique ;
+- `traiter-les-demandes-ingestion` : poller toutes les 5 minutes par défaut, qui peut déclencher l’ingestion complète selon les demandes en base.
 
-Le premier est un scraping d'un site tiers, planifié sans pause : à valider avant le premier démarrage du worker.
+Aucun scraping Mubi n’est planifié par ce script. Pour publier les changements, attendre la fin des runs actifs, puis recréer le worker. Le [guide ingestion](../../ingestion/README.md#publier-et-lancer-le-scraping-seul) donne les commandes de contrôle et de lancement Allociné. Utiliser `sudo docker` sur le VPS.
 
 ### Dépannage du pilote Playwright
 
@@ -147,7 +148,7 @@ Seuls Caddy (80 et 443) et SSH sont joignables depuis Internet : 8000 (Airbyte),
 - Airbyte est installé (`abctl` 0.30.4, mode économe : environ 3,3 Go de RAM au repos, il reste environ 3,4 Go pour le worker et Chrome). Reste à le configurer : voir ci-dessous.
 - Compte de service Google (Sheets en lecture seule) et URL des 12 feuilles pour `airbyte/bootstrap.py`.
 - Corrections côté code de la branche : `sslmode` configurable dans les scrapers (aujourd'hui `disable` en dur), rôle dédié aux scrapers.
-- Décision sur le scraping planifié (voir §4).
+- Mesurer les timeouts Allociné après livraison des réglages (voir le [guide Allociné](../../ingestion/scraping/allocine/README.md#délais-et-timeouts)).
 
 ## 8. Configurer la phase Airbyte
 

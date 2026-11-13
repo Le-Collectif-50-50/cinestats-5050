@@ -18,7 +18,6 @@ delete_deployment_if_exists "Synchroniser les sources/synchroniser-les-sources"
 delete_deployment_if_exists "Preparer les donnees/preparer-les-donnees"
 delete_deployment_if_exists "Recuperer les donnees Allocine/recuperer-les-donnees-allocine"
 delete_deployment_if_exists "Finaliser les donnees/finaliser-les-donnees"
-delete_deployment_if_exists "Recuperer les donnees Allocine/lancer-scraping-allocine"
 delete_deployment_if_exists "Recuperer les donnees Mubi/lancer-scraping-mubi"
 delete_deployment_if_exists "Recuperer les donnees Mubi (CNC)/lancer-scraping-mubi-cnc"
 delete_deployment_if_exists "Traiter les demandes d'ingestion/traiter-les-demandes-d-ingestion"
@@ -33,15 +32,15 @@ prefect deploy "${FLOWS_FILE}:main_ingestion_flow" \
 	exit 1
 }
 
-#prefect deploy "${FLOWS_FILE}:run_allocine_scraping" \
-#	--name "lancer-scraping-allocine" \
-#	--description "Execution manuelle du scraping Allocine seul avec configuration parametrable." \
-#	--concurrency-limit 1 \
-#	--interval 720 \
-#	--pool "${POOL_NAME}" >/tmp/prefect-deploy-allocine.log 2>&1 || {
-#	cat /tmp/prefect-deploy-allocine.log
-#	exit 1
-#}
+# Déploiement manuel : aucun scraping périodique au démarrage du worker.
+prefect --no-prompt deploy "${FLOWS_FILE}:run_allocine_scraping" \
+	--name "lancer-scraping-allocine" \
+	--description "Execution manuelle du scraping Allocine seul, sans Airbyte ni dbt, avec configuration parametrable." \
+	--concurrency-limit 1 \
+	--pool "${POOL_NAME}" >/tmp/prefect-deploy-allocine.log 2>&1 || {
+	cat /tmp/prefect-deploy-allocine.log
+	exit 1
+}
 
 # Auto-run du scraping Mubi par decouverte desactive: ce flux crawle tous les
 # festivals Mubi (volume eleve, au-dela de l'accord CNC). Remplace par le flux
