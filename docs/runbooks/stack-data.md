@@ -240,3 +240,19 @@ Matin calme et L’Abbé Pierre n’avaient déjà aucune date, et celui de Rivi
 rouge aucun réalisateur : le dernier timeout n’avait pas effacé ces valeurs.
 Bamako avait un ancien `visa_mismatch`, avec `VALIDATION_MANUELLE=TRUE` dans
 `raw.id_matching` ; cette validation existante doit être respectée.
+
+
+La validation du correctif sur le même Browserless, sans changement de quotas
+ni de délais de navigation, a réussi les quatre films en **306,50 s** : quatre
+tentatives, aucun timeout de navigation et un remplacement de session après
+fermeture bloquée sur L’Abbé Pierre. Les résultats sont comparés aux huit
+tentatives et quatre erreurs du lot initial (861,68 s). Ce petit lot valide
+la reprise de l’incident ; il ne mesure pas tout le catalogue.
+
+Le code du commit `2440596` a été livré le 13 novembre 2026 à 19 h 40 (Paris),
+avec sauvegarde sous `~/cinestats-data/backups/issue-50-2440596ba52f4cf8f2e5c5da2796b6f1c52f2dc7/`.
+`~/cinestats-data/HOTFIX_50_REF` suit le commit et les empreintes du correctif
+ciblé ; `DEPLOYED_REF` reste le marqueur de la copie globale antérieure.
+Le `.env`, les images et les quotas n’ont pas été modifiés. Pour revenir en
+arrière, attendre la fin des runs et restaurer les fichiers sauvegardés ; les
+collectes déjà ajoutées restent historisées et ne sont pas supprimées.

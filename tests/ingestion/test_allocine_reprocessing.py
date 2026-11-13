@@ -10,6 +10,14 @@ from ingestion.scraping.allocine import connector, main
 from ingestion.scraping.allocine.connector import AllocineAirbyteSource, ConnectorConfig
 
 
+def test_explicit_recovery_with_no_completed_statuses_skips_exclusion_query():
+    config = ConnectorConfig.from_dict({"database_url": "postgresql://unused"})
+    config.completed_statuses = []
+    connection = MagicMock()
+    assert AllocineAirbyteSource()._fetch_completed_records(connection, config) == {}
+    connection.execute.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "current_id, previous_id, strategy, pending",
     [

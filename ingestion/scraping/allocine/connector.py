@@ -1007,6 +1007,10 @@ class AllocineAirbyteSource:
         return pending_rows
 
     def _fetch_completed_records(self, connection, config: ConnectorConfig) -> dict[str, dict]:
+        if not config.completed_statuses:
+            # Reprise explicite en mémoire : aucun statut n'exclut un film.
+            # Évite aussi un IN vide non typé (NULL INTEGER) côté PostgreSQL.
+            return {}
         if not self._table_exists(
             connection, config.output_schema, config.output_table
         ):
