@@ -13,8 +13,7 @@
 | 1 | 2026-10-06 | Nicolas Revel | Première version du runbook | 
 | 2 | 2026-10-09 | Joel Teixeira | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
 | 3 | 2026-10-11 | Joel Teixeira | Restauration de SELECT pour scraper_user et persistance de la lecture après recréation des tables Airbyte. Configuration requise pour Airbyte activé par défaut et migration du fichier .env existant. |
-| 4 | 2026-11-13 | Joel Teixeira | Dépendance libatomic1 persistante dans l'image Prefect et contrôle du démarrage du pilote Playwright au build. Déploiement Allociné manuel et retrait des indications de scraping Mubi planifié. |
-| 5 | 2026-11-13 | Joel Teixeira | Quatre déploiements au démarrage, ingestion sans scraping et limites manuelles des scrapers. |
+| 4 | 2026-11-13 | Joel Teixeira | Dépendance libatomic1 persistante dans l'image Prefect et contrôle du démarrage du pilote Playwright au build. Déploiement Allociné manuel et retrait des indications de scraping Mubi planifié. Quatre déploiements au démarrage, ingestion sans scraping et limites manuelles des scrapers. Diagnostic des timeouts casting Allociné (issue 50), isolation du navigateur et procédure de reprise. |
 
 Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 
@@ -150,7 +149,7 @@ Seuls Caddy (80 et 443) et SSH sont joignables depuis Internet : 8000 (Airbyte),
 - Airbyte est installé (`abctl` 0.30.4, mode économe : environ 3,3 Go de RAM au repos, il reste environ 3,4 Go pour le worker et Chrome). Reste à le configurer : voir ci-dessous.
 - Compte de service Google (Sheets en lecture seule) et URL des 12 feuilles pour `airbyte/bootstrap.py`.
 - Corrections côté code de la branche : `sslmode` configurable dans les scrapers (aujourd'hui `disable` en dur), rôle dédié aux scrapers.
-- Mesurer les timeouts Allociné après livraison des réglages (voir le [guide Allociné](../../ingestion/scraping/allocine/README.md#délais-et-timeouts)).
+- Surveiller les timeouts Allociné après correction de l’issue 50 (voir le [diagnostic ci-dessous](#incident-50--timeouts-casting-allociné)).
 
 ## 8. Configurer la phase Airbyte
 
@@ -177,3 +176,125 @@ valeur `Lancer l'ingestion complete/lancer-ingestion-donnees` du `.env` vers
 `Lancer l'ingestion complete/lancer-ingestion-complete`. Les configs Allociné ne
 sont plus transmises au flow d’ingestion. Le serveur Prefect et Browserless n’ont
 pas besoin d’être recréés pour ce changement de code.
+
+
+### Incident 50 — timeouts casting Allociné
+
+Le 13 novembre 2026, les quatre visas `111392`, `144996`, `152608` et
+`154529` échouaient sur `/casting/`. Le code effectif du connecteur et sa
+configuration correspondaient au commit `0217635` (empreintes vérifiées),
+avec Playwright 1.65.0, Browserless 1.61.1 et Chrome 121.0.6167.85.
+Le fichier `DEPLOYED_REF` indiquait aussi `0217635`, mais des fichiers avaient
+été livrés séparément : les flows et le parseur correspondaient déjà au `main`
+`3939d9a`. Ce marqueur seul ne décrit donc pas tout l’arbre exécuté.
+L’image Browserless observée était
+`sha256:57d19e414d9fe4ae9d2ab12ba768c97f38d51246c5b31af55a009205c136012f`.
+Réglages : 60 s par navigation, 240 s par tentative, deux tentatives,
+une session parallèle, 1,5 CPU et 2 Gio pour Browserless.
+
+La reproduction séquentielle sans écriture a produit huit timeouts casting
+et quatre résultats `error` en 861,68 s. Les fiches principales répondaient
+HTTP 200. Pendant les transitions vers le casting, les requêtes publicitaires
+et vidéo continuaient (notamment `sync.drift-pixel.ai`, `ap.lijit.com` et
+`static1.dmcdn.net`). Browserless atteignait environ 150 % CPU, 1,90 Gio et
+893 tâches ; le compteur de throttling CPU augmentait. Aucun OOM kill ni
+atteinte de la limite PID n’a été observé. Les fermetures/reconnexions
+expliquaient aussi une partie du temps hors des budgets de navigation.
+
+Sur Chromium local, les mêmes quatre couples fiche/casting étaient accessibles
+sans timeout en 230,70 s. Le correctif local les lisait en 206,45 s ; dates et
+réalisateurs identiques. Une comparaison complète des champs de *Matin calme*
+avant/après n’a trouvé aucune différence, y compris les crédits et l’affiche.
+Les quatre fiches utilisent actuellement un `span.date.blue-link` pour la date ;
+le sélecteur commun accepte aussi `a.date.blue-link`, couvert par les tests.
+Ces essais de transport utilisaient des entrées en mémoire sans référence CNC
+ni validation manuelle : leurs statuts d’identité ne mesurent pas la couverture
+métier. Le test serveur du candidat utilise les références CNC et la validation
+manuelle déjà présentes en production.
+
+Le correctif allège les ressources, ferme la page précédente avant navigation,
+isole chaque film dans une session et borne ouverture/fermeture. Si la page
+ne se ferme pas sous 5 s, la session entière est remplacée avant la navigation
+suivante, dans le budget du film. Les deux
+tentatives maximales et les délais 60/240 s restent inchangés. Une panne d’un
+candidat de recherche reste technique (`error` ou `blocked`) et n’est plus
+masquée par `needs_review`. Le mécanisme observé est une saturation pendant
+la réutilisation des pages chargées de publicités ; le diagnostic n’isole pas
+un défaut interne précis de cette ancienne version de Chrome.
+
+Avant une reprise, attendre la fin des runs métier, relever `DEPLOYED_REF`,
+les empreintes des fichiers et les versions effectives. Tester le candidat
+isolé sur le même Browserless sans écrire en base. Livrer ensuite le code
+validé, avec sauvegarde des fichiers remplacés. Le worker lance le scraper
+dans un nouveau processus à chaque run : une modification des seuls fichiers
+Python/configuration du scraper montés sous `/app` est relue sans redémarrer
+les services. Une modification d’image, de `.env` ou de flows exige toujours
+la procédure de reconstruction/recréation ci-dessus.
+
+Pour des visas avec un ancien succès incomplet, suivre la
+[reprise ciblée](../../ingestion/scraping/allocine/README.md#rejouer-des-visas-après-un-incident-technique),
+puis publier avec `main-ingestion --no-run-airbyte-sync` lorsque les sources
+`raw` sont déjà synchronisées. Contrôler les dates et crédits dans `fnl` après
+la réussite dbt. Les requêtes initiales ont confirmé que les anciens succès de
+Matin calme et L’Abbé Pierre n’avaient déjà aucune date, et celui de Rivière
+rouge aucun réalisateur : le dernier timeout n’avait pas effacé ces valeurs.
+Bamako avait un ancien `visa_mismatch`, avec `VALIDATION_MANUELLE=TRUE` dans
+`raw.id_matching` ; cette validation existante doit être respectée.
+
+
+La validation du correctif sur le même Browserless, sans changement de quotas
+ni de délais de navigation, a réussi les quatre films en **306,50 s** : quatre
+tentatives, aucun timeout de navigation et un remplacement de session après
+fermeture bloquée sur L’Abbé Pierre. Les résultats sont comparés aux huit
+tentatives et quatre erreurs du lot initial (861,68 s). Ce petit lot valide
+la reprise de l’incident ; il ne mesure pas tout le catalogue.
+
+Le code actif du correctif est `b06daed` (13 novembre 2026, 19 h 42, Paris).
+Il inclut le traitement explicite d’une liste de statuts terminés vide : aucune
+exclusion SQL n’est exécutée lors de cette reprise en mémoire. La première
+livraison à 19 h 40 a conservé la sauvegarde sous `~/cinestats-data/backups/issue-50-2440596ba52f4cf8f2e5c5da2796b6f1c52f2dc7/`.
+`~/cinestats-data/HOTFIX_50_REF` suit le commit et les empreintes du correctif
+ciblé ; `DEPLOYED_REF` reste le marqueur de la copie globale antérieure.
+Le `.env`, les images et les quotas n’ont pas été modifiés. Pour revenir en
+arrière, attendre la fin des runs et restaurer les fichiers sauvegardés ; les
+collectes déjà ajoutées restent historisées et ne sont pas supprimées.
+
+
+La reprise effective en base a ajouté quatre `success`, tous au premier essai,
+en 292,37 s (`run_id=18bb57b4-9078-49f6-b88a-e824a7141ca1`). Elle relit les
+identités dans `raw.id_matching` et les réalisateurs dans `raw.films` ; les
+quatre résultats sont contrôlés avant l’insertion. Les essais de diagnostic
+précédents n’avaient rien écrit en base.
+
+
+La publication a terminé en état `Completed` le 13 novembre 2026 à 19 h 49
+(Paris), run Prefect `e4f4a47b-127f-462c-b5d1-4d79e60983d0` (`bright-sponge`).
+Airbyte a été explicitement désactivé pour cette reprise ; les deux phases dbt
+ont été exécutées. La phase 2 termine avec `PASS=138 WARN=6 ERROR=0 SKIP=0`.
+Les six avertissements et leurs compteurs sont identiques au run précédent
+(18 h 20) : identifiants externes absents/dupliqués et 280 crédits non rapprochés.
+
+Contrôle après publication, dans `staging.stg_allocine_films`,
+`fnl.fnl_films` et les crédits de réalisation :
+
+| Visa CNC | Film | Date publiée | Réalisation publiée |
+| --- | --- | --- | --- |
+| 111392 | Bamako | 2006-10-18 | Abderrahmane Sissako |
+| 144996 | Matin calme / Vanishing | 2022-04-05 (télévision) | Denis Dercourt |
+| 152608 | L’Abbé Pierre | 2023-11-08 | Frédéric Tellier |
+| 154529 | Rivière rouge / Rio rojo | 2023-09-20 | Guillermo Quintero |
+
+Le staging des quatre visas porte le nouveau `run_id`. Les trois premières
+dates étaient auparavant nulles ; le dernier film avait déjà sa date, mais
+aucun crédit de réalisation. La date TV de Matin calme est celle affichée par
+sa fiche Allociné : le modèle actuel ne distingue pas le support de sortie.
+
+Le correctif est conservé dans la [PR #54](https://github.com/Le-Collectif-50-50/cinestats-5050/pull/54).
+Sa fusion reste à effectuer. Les quatre vulnérabilités SoupSieve 2.9.2 signalées
+sur [main avant le correctif](https://github.com/Le-Collectif-50-50/cinestats-5050/actions/runs/43467894939)
+sont corrigées dans le verrou racine par SoupSieve 4.1, avec Python ≥ 3.11.5.
+L’audit local réussit avec les seules exclusions Starlette déjà présentes.
+Cette mise à jour du verrou ne modifie pas les dépendances du conteneur Prefect
+déjà déployé, définies séparément dans `ingestion/prefect/Dockerfile`.
+Un redéploiement global doit inclure le correctif Allociné pour ne pas
+remplacer les fichiers réparés par ceux d’un `main` antérieur.

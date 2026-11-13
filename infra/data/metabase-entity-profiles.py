@@ -70,7 +70,7 @@ SELECT {GENDER} AS genre, COUNT(*) AS personnes
 FROM people h WHERE h.type='Individual' GROUP BY 1 ORDER BY 1""", 20, 7, 0, 10, 'bar',
             {'graph.dimensions': ['genre'], 'graph.metrics': ['personnes'], 'graph.show_values': True},
             'Personnes distinctes sur la sélection, sociétés exclues. Genre enregistré dans le référentiel ; aucune inférence supplémentaire.')
-        add('Représentation par métier', f"""
+        add('Représentation par métier', """
 SELECT COALESCE(r.role_inclusive_name, r.role_name, c.role_id::text) AS metier,
        COUNT(DISTINCT h.credit_holder_id) FILTER (WHERE h.gender='female') AS femmes,
        COUNT(DISTINCT h.credit_holder_id) FILTER (WHERE h.gender='male') AS hommes,

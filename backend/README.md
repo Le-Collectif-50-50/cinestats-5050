@@ -2,9 +2,9 @@
 
 ## Metadata du document
 
-**Resonsable** Nicolas Revel
+**Owner:** Nicolas Revel
 
-**Dernière révision:** 2026-10-09
+**Dernière révision:** 2026-11-13
 
 **Status:** active
 
@@ -14,8 +14,11 @@
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-10-09 | Joel Teixeira | Tests de compatibilité FastAPI/AnyIO et signature Metabase lors des mises à jour de dépendances |
+| 3   | 2026-11-13 | Joel Teixeira | SoupSieve 4.1, minimum Python 3.11.5 et environnement local Python 3.12. |
 
 ## Comment lancer le backend ?
+
+Python doit être en version 3.11.5 ou ultérieure : SoupSieve 4.1 corrige les quatre vulnérabilités signalées sur 2.9.2 et impose ce minimum. Le conteneur local et Tox utilisent Python 3.12, comme le backend de production. Après mise à jour, recréer tout environnement Python 3.10 puis relancer `poetry install --with dev`.
 
 Pour lancer le backend seul
 

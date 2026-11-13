@@ -11,6 +11,15 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_p
 
 CHROMIUM_WS_ENDPOINT = getenv("PLAYWRIGHT_WS_ENDPOINT")
 CDP_CONNECT_TIMEOUT_MS = 15000
+BROWSER_CLOSE_TIMEOUT_SECONDS = 5
+BROWSER_OPEN_TIMEOUT_SECONDS = 45
+
+# Ressources publicitaires/vidéo observées lors des timeouts Allociné (#50).
+# Les documents métier, scripts du site et contrôles d'accès restent chargés.
+ALLOCINE_EXTRA_BLOCKED_DOMAINS = (
+    "lijit.com", "drift-pixel.ai", "dmcdn.net", "dailymotion.com",
+    "tynt.com", "4dex.io", "a-mo.net", "cootlogix.com", "yellowblue.io",
+)
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -117,6 +126,7 @@ class AsyncBrowserSession:
         verbose=False,
         navigation_timeout_seconds=30.0,
         navigation_wait_until="networkidle",
+        lightweight=False,
     ):
         self.ws_endpoint = ws_endpoint
         self.user_agent = user_agent or DEFAULT_USER_AGENT
@@ -127,6 +137,7 @@ class AsyncBrowserSession:
         self.verbose = verbose
         self.navigation_timeout_seconds = navigation_timeout_seconds
         self.navigation_wait_until = navigation_wait_until
+        self.lightweight = lightweight
         self.playwright = None
         self.browser = None
         self.context = None
@@ -246,50 +257,55 @@ class AsyncBrowserSession:
                 Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
                 Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr'] });
             """)
-        await self.context.route(
-            "**/*",
-            lambda route, request: (
-                route.abort()
-                if any(domain in request.url for domain in AD_BLOCKED_DOMAINS)
-                else route.continue_()
-            ),
-        )
+        await self.context.route("**/*", self._route_request)
         self.page = await self.context.new_page()
         return self
+
+    async def _route_request(self, route, request):
+        hostname = urlparse(request.url).hostname or ""
+        heavy = self.lightweight and (
+            request.resource_type in {"image", "media", "font"}
+            or any(hostname == domain or hostname.endswith("." + domain)
+                   for domain in ALLOCINE_EXTRA_BLOCKED_DOMAINS)
+        )
+        if heavy or any(domain in request.url for domain in AD_BLOCKED_DOMAINS):
+            await route.abort()
+        else:
+            await route.continue_()
 
     async def __aexit__(self, exc_type, exc, tb):
         """Gracefully close all browser resources with proper error handling."""
         # Close page
         if self.page:
             try:
-                await self.page.close()
+                await asyncio.wait_for(self.page.close(), BROWSER_CLOSE_TIMEOUT_SECONDS)
             except Exception as close_exc:
                 if self.verbose:
-                    print(f"  [browser] Warning: Failed to close page: {close_exc}")
+                    print(f"  [browser] Warning: Failed to close page: {type(close_exc).__name__}: {close_exc}")
 
         # Close context
         if self.context:
             try:
-                await self.context.close()
+                await asyncio.wait_for(self.context.close(), BROWSER_CLOSE_TIMEOUT_SECONDS)
             except Exception as close_exc:
                 if self.verbose:
-                    print(f"  [browser] Warning: Failed to close context: {close_exc}")
+                    print(f"  [browser] Warning: Failed to close context: {type(close_exc).__name__}: {close_exc}")
 
         # Close browser
         if self.browser:
             try:
-                await self.browser.close()
+                await asyncio.wait_for(self.browser.close(), BROWSER_CLOSE_TIMEOUT_SECONDS)
             except Exception as close_exc:
                 if self.verbose:
-                    print(f"  [browser] Warning: Failed to close browser: {close_exc}")
+                    print(f"  [browser] Warning: Failed to close browser: {type(close_exc).__name__}: {close_exc}")
 
         # Stop playwright
         if self.playwright:
             try:
-                await self.playwright.stop()
+                await asyncio.wait_for(self.playwright.stop(), BROWSER_CLOSE_TIMEOUT_SECONDS)
             except Exception as close_exc:
                 if self.verbose:
-                    print(f"  [browser] Warning: Failed to stop playwright: {close_exc}")
+                    print(f"  [browser] Warning: Failed to stop playwright: {type(close_exc).__name__}: {close_exc}")
 
     async def _dismiss_allocine_fullscreen_if_present(self, url: str) -> bool:
         """Dismiss Allocine fullscreen consent/paywall overlay when it appears."""
@@ -320,7 +336,27 @@ class AsyncBrowserSession:
         Navigate to a URL, simulate human-like scrolling and waiting,
         and return the resulting HTML content.
         """
+        started_at = time.monotonic()
         try:
+            if self.lightweight and self.page.url != "about:blank":
+                # Fermer les publicités de la fiche avant d'ouvrir le casting.
+                try:
+                    await asyncio.wait_for(self.page.close(), BROWSER_CLOSE_TIMEOUT_SECONDS)
+                except asyncio.TimeoutError:
+                    # Le renderer peut ne plus répondre alors que le transport
+                    # CDP fonctionne. Recréer la session avant la page suivante,
+                    # sans relire la fiche ni exploiter son DOM après un timeout.
+                    if self.verbose:
+                        print("  [browser] Page cleanup timed out; replacing browser session.")
+                    await self.__aexit__(None, None, None)
+                    try:
+                        await asyncio.wait_for(
+                            self.__aenter__(), BROWSER_OPEN_TIMEOUT_SECONDS
+                        )
+                    except asyncio.TimeoutError as exc:
+                        raise RuntimeError("Browser session replacement timed out") from exc
+                else:
+                    self.page = await self.context.new_page()
             if self.verbose:
                 print(f"  [browser] GET {url}")
             try:
@@ -337,7 +373,7 @@ class AsyncBrowserSession:
                 ) from exc
             if self.verbose:
                 http_status = response.status if response is not None else "no-response"
-                print(f"  [browser] Loaded (HTTP {http_status})")
+                print(f"  [browser] Loaded (HTTP {http_status}, {time.monotonic() - started_at:.1f}s)")
             if response is not None and response.status in BLOCKED_STATUS_CODES:
                 raise WebsiteBlockedError(
                     f"Website blocked the request for {url} with HTTP status {response.status}."
@@ -403,3 +439,6 @@ class AsyncBrowserSession:
                     "This may indicate the browser session was terminated unexpectedly."
                 ) from e
             raise
+        finally:
+            if self.verbose:
+                print(f"  [browser] Fetch finished in {time.monotonic() - started_at:.1f}s: {url}")

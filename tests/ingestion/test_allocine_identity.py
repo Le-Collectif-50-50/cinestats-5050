@@ -62,7 +62,10 @@ class IdentityTests(unittest.TestCase):
 
     def test_incomplete_search_needs_review(self):
         row = self.run_search({10: ['Robert Budina'], 20: RuntimeError('timeout')})
-        self.assertEqual(row['scrape_status'], 'needs_review')
+        self.assertEqual(row['scrape_status'], 'error')
+        self.assertIsNone(row['allocine_id'])
+        row = self.run_search({10: WebsiteBlockedError('HTTP 429'), 20: ['Robert Budina']})
+        self.assertEqual(row['scrape_status'], 'blocked')
         row = self.run_search({10: ['Robert Budina'], **{i: ['Other Director'] for i in range(20, 25)}})
         self.assertEqual(row['scrape_status'], 'needs_review')
 

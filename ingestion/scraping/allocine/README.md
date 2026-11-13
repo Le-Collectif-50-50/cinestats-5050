@@ -20,10 +20,7 @@
 | 6 | 2026-10-11 | Joel Teixeira | Sélection dbt post-scraping incluant les modèles intermédiaires et finaux et leurs dépendances |
 | 7 | 2026-10-15 | Joel Teixeira | Persistance des URL d’affiche, migration additive, backfill local journalisé, export/import SQL ciblé et tests PostgreSQL isolés. |
 | 8 | 2026-11-12 | Joel Teixeira | Vérification du réalisateur CNC et examen de plusieurs candidats ; statut needs_review pour les correspondances non confirmées. |
-| 9 | 2026-11-13 | Joel Teixeira | Déploiement manuel, navigation DOMContentLoaded, délais configurables et reprise bornée des timeouts. |
-| 10 | 2026-11-13 | Joel Teixeira | Limite max_films dans le déploiement manuel séparé et override CLI --limit pour sync/read. |
-| 11 | 2026-11-13 | Joel Teixeira | Reprise automatique des ID Allociné corrigés, sélection ciblée --source-id et prise en compte de VALIDATION_MANUELLE sans reprise répétée des succès. |
-| 12 | 2026-11-13 | Joel Teixeira | Extraction de la date sur les balises a et span de la fiche Allociné. |
+| 9 | 2026-11-13 | Joel Teixeira | Déploiement manuel, navigation DOMContentLoaded et reprise bornée ; navigation allégée, isolation des pages et sessions, diagnostic et reprise de l’issue 50. Limite max_films dans le déploiement manuel séparé et override CLI --limit pour sync/read. Reprise automatique des ID Allociné corrigés, sélection ciblée --source-id et prise en compte de VALIDATION_MANUELLE sans reprise répétée des succès. Extraction de la date sur les balises a et span de la fiche Allociné. |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -121,18 +118,21 @@ Le déploiement `Recuperer les donnees Allocine/lancer-scrapping-allocine` lance
 | --- | --- | --- |
 | `navigation_timeout_seconds` | 60 s | Chargement de chaque page jusqu’à `DOMContentLoaded`, réglable dans `config.json`, strictement positif et fini. |
 | `record_timeout_seconds` | 240 s | Budget d’une tentative par film avec ID fourni, incluant fiche, casting et interactions. `0` désactive ce garde-fou. |
-| Connexion CDP | 15 s par tentative | Connexion à Browserless, distincte du chargement Allociné. |
+| Ouverture de session | 45 s au total | Inclut les reprises CDP (15 s par connexion) et la création du contexte/page. |
+| Fermeture de session | 5 s par ressource | Page, contexte, navigateur et pilote sont fermés séparément ; au plus 20 s hors latence d’annulation. |
 | `CONNECTION_TIMEOUT` Browserless | 600 000 ms dans Compose | Durée maximale de session distante ; indépendante des deux budgets précédents. |
 
-Sans ID fourni, le connecteur multiplie le budget film par six : 1 440 s pour la recherche et cinq candidats au maximum. Ce budget peut dépasser la durée de session Browserless. Plusieurs films partagent aussi une session. Une fermeture proche de dix minutes exige donc un diagnostic de session, même avec une navigation rapide.
+Chaque film et chaque reprise ouvrent une session indépendante. Sans ID fourni, le connecteur multiplie le budget film par six : 1 440 s pour la recherche et cinq candidats au maximum. Une recherche peut encore dépasser les 600 s de Browserless ; une expiration provoque une erreur technique et une seule reprise, jamais une publication de résultat partiel.
 
 Allociné attend maintenant `DOMContentLoaded`, puis conserve les pauses, le consentement et le défilement avant lecture du HTML. L’ancienne attente `networkidle` exigeait une période sans connexions réseau ; des requêtes publicitaires peuvent empêcher cette condition. [Playwright déconseille cette attente](https://playwright.dev/python/docs/api/class-page#page-goto-option-wait-until). Les autres scrapers conservent leur réglage de navigation existant.
 
-Augmenter le timeout peut aider une page lente. Cela ne corrige ni un blocage HTTP 403/429, ni une session Browserless expirée, ni un navigateur saturé. Le passage de 30 à 60 s par page et de 150 à 240 s par film apporte une marge ; son effet en production reste à mesurer. Les valeurs présentes dans une configuration personnalisée continuent à prévaloir.
+Le connecteur active le mode navigateur `lightweight` : images, médias et polices ne sont pas téléchargés, et les domaines publicitaires/vidéo identifiés pendant le diagnostic sont filtrés. Les URL d’affiche restent extraites du DOM. Une nouvelle page remplace la précédente avant chaque navigation, pour arrêter ses requêtes publicitaires. Si la fermeture de cette page dépasse 5 s, le navigateur est déconnecté et une nouvelle session est ouverte (45 s maximum), sans recommencer la fiche déjà lue. Ce remplacement appartient au budget de scraping et n’augmente pas le nombre maximal de tentatives. Les documents métier, scripts Allociné, contrôles d’accès et interactions de consentement restent actifs. Ce mode est désactivé par défaut pour les autres consommateurs du navigateur, dont Mubi et le backfill des affiches. Les délais de navigation (60 s) et de scraping (240 s) ne sont pas augmentés.
 
-Un timeout de navigation produit `Navigation timed out after ...` avec URL et condition attendue. Le connecteur ferme la session, en ouvre une autre et retente le film une fois au maximum. Le budget film s’applique à chaque tentative. Après deux échecs, le résultat reste `error`, rééligible lors d’un prochain run ; aucun HTML partiel n’est utilisé après un timeout. Les réponses 403/429 restent `blocked`. Le backfill des affiches utilise les mêmes paramètres de navigation mais conserve une seule tentative par candidat.
+Un timeout de navigation produit `Navigation timed out after ...` avec URL et condition attendue. Le connecteur ferme la session, en ouvre une autre et retente le film une fois au maximum. Le budget de scraping s’applique à chaque tentative, en plus des budgets d’ouverture et de fermeture. Un ID fourni est borné à deux fois (45 + 240 + 20) s par défaut, hors latence d’annulation et délai entre films. Une recherche est bornée à deux fois (45 + 1 440 + 20) s. Avec `record_timeout_seconds=0`, le budget global de scraping est explicitement désactivé. Après deux échecs, le résultat reste `error`. Il est rééligible si aucun ancien traitement terminé ne couvre cette cible ; sinon, utiliser la reprise ciblée ci-dessous. Dans tous les cas, aucun HTML partiel n’est utilisé après un timeout. Les réponses 403/429 restent `blocked`. Le backfill des affiches utilise les mêmes paramètres de navigation mais conserve une seule tentative par candidat.
 
-Pour diagnostiquer, activer `verbose: true` et conserver `parallel_sessions: 1`. Comparer les durées et le nombre de succès sur des lots comparables. Distinguer dans les logs :
+Les erreurs techniques rencontrées pendant une recherche restent `error` et les refus restent `blocked` ; ils interrompent l’examen des candidats. `needs_review` est réservé aux identités non confirmées ou ambiguës.
+
+Pour diagnostiquer, activer `verbose: true` et conserver `parallel_sessions: 1`. Les logs donnent le numéro de tentative, la durée de navigation, la durée complète de chaque page et celle du film. Comparer les durées et le nombre de succès sur des lots comparables. Distinguer dans les logs :
 
 - `Navigation timed out` : chargement d’une page.
 - `Record timed out` : budget total du film épuisé.
@@ -197,6 +197,25 @@ canonique, il désigne le visa CNC (`VISA`), pas l'ID Allociné. `read` accepte
 aussi ce filtre. Relancer dbt après scraping pour publier les enrichissements.
 Sans validation manuelle, un nouveau scraping peut encore produire
 `visa_mismatch` ou `needs_review`.
+
+### Rejouer des visas après un incident technique
+
+`--source-id` conserve le filtre des traitements terminés : un succès ancien
+peut donc empêcher la reprise, même si le dernier essai brut est une erreur.
+Pour reprendre un ensemble explicite après vérification des identités, utiliser
+le connecteur en mémoire avec `config.source_ids` renseigné et
+`config.completed_statuses = []`. Ne pas désactiver ce filtre dans le JSON partagé.
+Limiter le lot, conserver une seule session parallèle et contrôler tous les
+résultats avant d’appeler `_insert_records(config, records)` : quatre `success`
+avec date et réalisation renseignées pour le lot de l’issue 50. Cette méthode
+ajoute de nouveaux essais ; elle ne supprime ni ne modifie les succès historiques.
+
+Après le scraping, exécuter séparément l’ingestion dbt. Le staging conserve le
+dernier `success` par visa ; comparer le dernier essai brut, le dernier succès
+et les tables `fnl.fnl_films` / `fnl.fnl_film_credits`. Ne pas déduire la
+publication du seul statut Completed de Prefect. La date du 5 avril 2022 de
+Matin calme ([fiche Allociné *Vanishing*](https://www.allocine.fr/film/fichefilm_gen_cfilm=296988.html)) correspond à une diffusion télévisée,
+pas à une sortie en salle : le champ actuel ne distingue pas ces supports.
 
 ### Reprendre une correspondance validée manuellement
 
@@ -502,7 +521,7 @@ Le connecteur lit `REALISATEUR` dans la table `films` du schéma source, par `VI
 
 Un visa identique confirme le candidat ; un visa différent le rejette, même si le réalisateur correspond, sauf validation manuelle de l'ID fourni selon la procédure ci-dessus. Le réalisateur est lu dans le casting, avec repli sur les données structurées `Movie.director` de la fiche principale. Sans visa comparable, les ensembles de noms complets des réalisateurs doivent correspondre exactement après normalisation de la casse, des accents, de la ponctuation et de l’ordre des mots. Les coréalisations séparées par `/`, `;`, `&` ou `et` sont comparées séparément. Les initiales, alias, noms partiels et variantes ambiguës ne sont pas rapprochés automatiquement.
 
-Sans ID Allociné fourni, le scraper examine au maximum cinq candidats distincts. Il ne retient une correspondance que si un seul candidat est confirmé et si tous les candidats ont pu être examinés. Plus de cinq résultats, plusieurs correspondances, une erreur de lecture ou aucune correspondance confirmée produisent `needs_review`. Une recherche sans résultat reste `not_found`. Le budget de temps d’une recherche est six fois `record_timeout_seconds` pour couvrir la recherche et les cinq candidats ; celui d’un ID fourni reste inchangé.
+Sans ID Allociné fourni, le scraper examine au maximum cinq candidats distincts. Il ne retient une correspondance que si un seul candidat est confirmé et si tous les candidats ont pu être examinés. Plus de cinq résultats, plusieurs correspondances ou aucune correspondance confirmée produisent `needs_review`. Une erreur technique interrompt la recherche avec `error` et un refus du site avec `blocked`, sans publier un candidat partiellement vérifié. Une recherche sans résultat reste `not_found`. Le budget de temps d’une recherche est six fois `record_timeout_seconds` pour couvrir la recherche et les cinq candidats ; celui d’un ID fourni reste inchangé.
 
 Les lignes `needs_review` ne sont pas considérées comme terminées et pourront être retentées. Le staging dbt existant ne consomme que `success`, donc elles ne sont pas publiées comme enrichissements. Les anciens résultats déjà enregistrés ne sont pas requalifiés automatiquement.
 
