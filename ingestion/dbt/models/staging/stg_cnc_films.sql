@@ -65,7 +65,8 @@ SELECT
         ELSE FALSE
     END AS has_sofica,
     CASE
-        WHEN LOWER("CREDIT_D_IMPOT") = 'x' THEN TRUE
+        WHEN LOWER(TRIM("CREDIT_D_IMPOT")) IN ('x', 'oui') THEN TRUE
+        WHEN LOWER(TRIM("CREDIT_D_IMPOT")) = 'd' THEN NULL
         ELSE FALSE
     END AS has_tax_credit,
     CASE

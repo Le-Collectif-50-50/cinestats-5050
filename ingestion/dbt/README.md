@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-12
+**Dernière révision:** 2026-11-13
 
 **Status:** actif
 
@@ -19,6 +19,7 @@
 | 5 | 2026-10-15 | Joel Teixeira | URL d’affiche nullable dans le staging Allociné ; prérequis de migration. |
 | 6 | 2026-11-11 | Joel Teixeira | Couverture des 29 genres observés : corrections orthographiques, classement du Péplum et catégories explicites Divers, Erotique et Évènement Sportif. |
 | 7 | 2026-11-12 | Joel Teixeira | Alignement des corrections sur le schéma Airbyte : clés composées des crédits et genres, retrait du champ Allociné des rôles et filtre GENRE_ID. Dashboard Metabase de revue du scraping Allociné, des écarts de visa et des recherches sans résultat (`not_found`). |
+| 8 | 2026-11-13 | Joel Teixeira | Intégration des ajouts manuels de personnes et crédits, dernier succès Allociné par visa, contrôles de références et conversion du crédit d’impôt. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -75,7 +76,7 @@ Pour vérifier le périmètre sans écrire en base, remplacer `dbt build` par `d
 4. `intermediate.int_allocine_films`: projection des données Allociné et jointure avec `stg_id_matching`.
 5. `ops.v_allocine_pipeline_status`: vue dashboard Metabase pour le suivi Allociné.
 
-Les modèles intermédiaires CNC et Allociné actuels ne sélectionnent pas automatiquement la dernière version par visa ou par enregistrement source. Les anciennes déclarations YAML de déduplication, dont les fichiers SQL sont absents, ne constituent pas des tests actifs. Leur suppression ne supprime aucune relation PostgreSQL existante.
+Le staging Allociné conserve le dernier succès par visa source (repli sur `source_record_id` si le visa est absent), selon `extracted_at`, puis `run_id` et `record_hash`. Une tentative ultérieure en erreur ne remplace pas ce succès. Les visas absents ou encore dupliqués font échouer le test dédié. Le rapprochement des métadonnées Allociné utilise le visa et l’identifiant Allociné ; la table finale joint ces métadonnées par `film_id`. Des visas distincts partageant un identifiant Allociné restent signalés dans les contrôles de matching. Cette règle ne valide pas l’identité d’un ancien résultat de scraping.
 
 ## Classification des genres
 
@@ -87,7 +88,7 @@ Les corrections de nominations utilisent `award_nomination_id`. Les corrections 
 
 Dans Airbyte, ne pas dédupliquer `film_credits` sur `CREDIT HOLDER ID` seul : une personne peut avoir plusieurs rôles et films. Utiliser une clé composée des trois champs ou le mode overwrite sans déduplication. dbt ne peut pas restaurer les associations supprimées en amont.
 
-Dans `int_id_matching`, `film_id` et `cnc_visa` doivent être renseignés et uniques. Le titre `cnc_name` doit être renseigné mais peut être partagé par plusieurs films. Les tests de présence et d'unicité des identifiants Allociné, Mubi et TMDB ont une sévérité `warn`. Les tests d'unicité de `fnl_films.film_id` et `fnl_films.cnc_visa` sont également des avertissements : les doublons restent présents, sans déduplication arbitraire ni arrêt du pipeline. Leur présence impose de vérifier le grain des analyses avant de compter des films. Ne pas utiliser `--warn-error` pour cette politique.
+Dans `int_id_matching`, `film_id` et `cnc_visa` doivent être renseignés et uniques. Le titre `cnc_name` doit être renseigné mais peut être partagé par plusieurs films. Les tests de présence et d'unicité des identifiants Allociné, Mubi et TMDB ont une sévérité `warn`. Les tests d'unicité de `fnl_films.film_id` et `fnl_films.cnc_visa` sont bloquants : la table finale doit contenir une ligne par film. Les avertissements sur les identifiants externes ne sont pas transformés en erreurs via `--warn-error`.
 
 Dans `int_credit_holders_role`, les identifiants des personnes restent dérivés de leur nom complet. Ceux des sociétés sont dérivés de `company:` suivi de leur raison sociale, car leur champ `full_name` est nul. Une raison sociale absente ou vide ne produit pas d'identifiant valide : le test final `not_null` reste bloquant. Cette convention n'effectue pas de résolution des homonymes.
 
@@ -202,3 +203,51 @@ GRANT USAGE ON SCHEMA raw TO dbt_user;
 ## Referenced by
 
 - [ingestion/README.md](../README.md)
+
+## Ajouts manuels de réalisateurs et autres crédits
+
+`fnl_credit_holders` inclut les personnes présentes uniquement dans `credit_holders`.
+Les champs manuels non vides priment sur les valeurs issues du scraping ; un champ
+vide ne supprime pas une valeur existante. Les identifiants doivent être des UUID
+cohérents avec les personnes existantes. Une correction ne rapproche pas des
+homonymes et ne fusionne pas deux UUID automatiquement.
+
+`fnl_film_credits` réunit les crédits scrapés et `int_fix_film_credits` avec une
+association unique par `(film_id, role_id, credit_holder_id)`. Une ligne manuelle
+est un ajout, pas une demande de remplacement ou de suppression. Le film et le
+rôle doivent déjà exister ; une nouvelle personne peut être ajoutée dans
+`credit_holders` pendant la même synchronisation Airbyte. Les tests vérifient les
+trois références ainsi que la conservation de chaque correction.
+
+Les deux stagings concernés acceptent tous les auteurs, y compris Hugo Laurens.
+Ils excluent explicitement les lignes de démonstration observées : la personne
+`000a676c-8ef7-5b14-8a67-9431ceeb933e` nommée `Example Example`, et l’association
+film `0016b072-7ad8-f224-cfd7-053b56ff2720`, rôle
+`d894803c-210d-2b5b-6e7e-50f2d418bfcf`, personne
+`d8f8d53c-51b8-f89b-1a8d-da48da142694`, datée du 25/04/2026 par Hugo Laurens.
+Les filtres des autres onglets de correction ne sont pas modifiés.
+Les dates et auteurs doivent être renseignés. Les valeurs vides des champs de
+personne sont normalisées en NULL avant l’application des corrections.
+
+`CREDIT_D_IMPOT` reconnaît `X` et `OUI`, sans distinction de casse et après
+suppression des espaces extérieurs. Le code `D`, dont le sens reste à confirmer,
+est conservé comme valeur inconnue (`NULL`), et non assimilé à une absence d’aide.
+
+### Vérifications
+
+Les tests singuliers contrôlent l’unicité des crédits, les visas Allociné et la
+conservation des ajouts manuels. Les tests de schéma contrôlent les références et
+l’unicité des personnes et films. Les tests SQL de régression utilisent des CTE
+fictives en transaction `READ ONLY`, sans création de schéma ni écriture :
+
+```bash
+DBT_TEST_SSH=<alias-ssh> DBT_TEST_DATABASE=<base-postgresql> \
+  ingestion/dbt/.venv-dbt/bin/python -m unittest discover \
+  -s tests/ingestion -p test_dbt_manual_recovery.py -v
+```
+
+Le compte SSH doit permettre `sudo -n -u postgres psql`. La base doit disposer de
+l’extension `unaccent`, utilisée par le modèle CNC. Sans `DBT_TEST_SSH`, ces tests
+sont ignorés explicitement. Ils couvrent les ajouts, les overrides, les doublons,
+les lignes exemples, les corrections de Hugo, les reprises après erreur et les
+codes de crédit d’impôt. Ils ne remplacent pas un `dbt build` complet avant livraison.

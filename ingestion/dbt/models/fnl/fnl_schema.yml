@@ -11,11 +11,7 @@ models:
         description: "Identifiant unique du film dans Cinéstats 50/50."
         tests:
           - not_null
-          - unique:
-              config:
-                severity: warn
-                store_failures: true
-                schema: ops
+          - unique
       - name: allocine_id
         description: "Identifiant du film sur Allociné."
       - name: mubi_id
@@ -26,11 +22,7 @@ models:
         description: "Visa d'exploitation CNC du film."
         tests:
           - not_null
-          - unique:
-              config:
-                severity: warn
-                store_failures: true
-                schema: ops
+          - unique
       - name: movie_name
         description: "Titre du film tel qu'affiché dans Cinéstats 50/50, privilégiant le titre Allociné."
         tests:
@@ -101,6 +93,7 @@ models:
         description: "Identifiant unique de la personne ou entité créditée."
         tests:
           - not_null
+          - unique
       - name: type
         description: "Type de crédit (personne physique, société, etc.)."
       - name: first_name
@@ -117,6 +110,7 @@ models:
   - name: fnl_film_credits
     description: >
       Table finale associant chaque film à ses personnes créditées et au rôle occupé.
+      Inclut les ajouts manuels du gsheet, sans supprimer les crédits existants.
       Base de l'analyse de la répartition des rôles par genre dans les productions
       cinématographiques françaises.
     columns:
@@ -124,14 +118,26 @@ models:
         description: "Identifiant du film concerné."
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('fnl_films')
+                field: film_id
       - name: role_id
         description: "Identifiant du rôle occupé sur le film."
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('fnl_role')
+                field: role_id
       - name: credit_holder_id
         description: "Identifiant de la personne ou entité créditée."
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('fnl_credit_holders')
+                field: credit_holder_id
 
   - name: fnl_film_genre
     description: "Table finale associant chaque film à son ou ses genres cinématographiques."

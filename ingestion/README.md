@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-10-15
+**Dernière révision:** 2026-11-13
 
 **Status:** actif
 
@@ -20,6 +20,7 @@
 | 6   | 2026-10-09 | Joel Teixeira | Autorisation TLS du compte scraper_user depuis le VPS data dans pg_hba.conf et son générateur |
 | 7 | 2026-10-11 | Joel Teixeira | Lecture de raw.id_matching restaurable et privilèges SELECT par défaut pour les futures tables créées par airbyte_user dans raw. Activation Airbyte par défaut pour les runs manuels, le CLI et le poller ; noms de connexions partagés via environnement et désactivation explicite. Finalisation dbt étendue aux modèles intermédiaires et finaux et à leurs dépendances |
 | 8 | 2026-10-15 | Joel Teixeira | URL des affiches Allociné : migration, backfill explicite et staging dbt. |
+| 9 | 2026-11-13 | Joel Teixeira | Dernier succès Allociné par visa et intégration des personnes et crédits manuels dans les modèles finaux. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -63,7 +64,7 @@ Découpage d'exécution:
 2. les modèles taggés `phase2` s'exécutent après scraping;
 3. `raw.allocine_data` ne doit donc pas être testé ni relu pendant `dbt phase 1`.
 
-Actuellement, `phase1` sélectionne `stg_cnc_films`. Le tag `phase2` couvre `stg_allocine_films`, `v_allocine_pipeline_status` et tous les modèles des dossiers `intermediate/` et `fnl/`. La finalisation utilise `+tag:phase2` pour construire aussi leurs dépendances amont et exécuter les tests associés. Les sources brutes référencées, dont les corrections et les sorties Mubi alimentées séparément, doivent déjà être disponibles. Les modèles intermédiaires CNC et Allociné actuels n'appliquent pas la déduplication « dernière version » des anciens modèles.
+Actuellement, `phase1` sélectionne `stg_cnc_films`. Le tag `phase2` couvre `stg_allocine_films`, `v_allocine_pipeline_status` et tous les modèles des dossiers `intermediate/` et `fnl/`. La finalisation utilise `+tag:phase2` pour construire aussi leurs dépendances amont et exécuter les tests associés. Les sources brutes référencées, dont les corrections et les sorties Mubi alimentées séparément, doivent déjà être disponibles. Le staging Allociné conserve désormais le dernier succès par visa source ; les crédits et personnes ajoutés manuellement sont intégrés aux tables finales. Voir les contrats et tests dans le README dbt.
 
 Point important:
 

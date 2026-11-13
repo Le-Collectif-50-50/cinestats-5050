@@ -2,6 +2,15 @@
   config(materialized = 'table')
 }}
 
+-- Conserver le dernier succès par visa source, même si une tentative ultérieure échoue.
+WITH ranked AS (
+    SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY COALESCE(NULLIF(visa_number::TEXT, ''), source_record_id::TEXT)
+        ORDER BY extracted_at DESC NULLS LAST, run_id::TEXT DESC, record_hash DESC
+    ) AS version_rank
+    FROM {{ source('raw', 'allocine_data') }}
+    WHERE scrape_status = 'success'
+)
 SELECT
     CAST(visa_number AS INTEGER) AS cnc_visa,
     CAST(NULLIF(REGEXP_REPLACE(allocine_visa_number, '[^0-9]', '', 'g'), '') AS INTEGER) AS allocine_visa,
@@ -41,5 +50,5 @@ SELECT
     scrape_status AS scrapping_status,
     error_message AS error_message,
     record_hash AS record_hash
-FROM {{ source('raw', 'allocine_data') }}
-WHERE scrape_status IN ('success')
+FROM ranked
+WHERE version_rank = 1

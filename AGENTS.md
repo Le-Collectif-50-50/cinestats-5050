@@ -31,6 +31,7 @@ Lire le [README](README.md) pour la vue d'ensemble, puis uniquement les document
 - Mettre à jour la documentation concernée dans la même PR. Rédiger en français ; conserver les champs `Owner`, `Dernière révision`, `Status` en tête et l'historique ci-dessous au format `#`, `Date`, `Auteur`, `Observations`.
 - Exécuter les vérifications adaptées à la zone modifiée, selon le README et les configurations du composant. Indiquer les vérifications effectuées et les limites restantes.
 - Maintenir les consignes communes ici ; conserver `CLAUDE.md` comme simple import. Placer les procédures détaillées dans les sous-documents et les référencer.
+- Dans les champs auteur des historiques de chaque doc, ne jamais signer "Codex", "Claude", ou autre assistant IA, sauf si explicitement demandé.
 
 ## Historique du document
 

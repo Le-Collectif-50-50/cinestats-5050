@@ -14,6 +14,13 @@ SELECT
     CAST(_airbyte_extracted_at AS TIMESTAMP) AS airbyte_extraction_date,
     CAST(_airbyte_meta AS JSON) AS airbyte_meta
 FROM {{ source('raw', 'film_credits') }}
-WHERE "UPDATED_BY" IS NOT NULL
-    AND "UPDATED_DATE" IS NOT NULL
-    AND "UPDATED_BY" <> 'Hugo Laurens'
+WHERE NULLIF(TRIM("UPDATED_BY"), '') IS NOT NULL
+    AND NULLIF(TRIM("UPDATED_DATE"), '') IS NOT NULL
+    -- Signature exacte de la ligne exemple ; les autres lignes de Hugo sont acceptées.
+    AND NOT (
+        COALESCE("FILM_ID", '') = '0016b072-7ad8-f224-cfd7-053b56ff2720'
+        AND COALESCE("ROLE_ID", '') = 'd894803c-210d-2b5b-6e7e-50f2d418bfcf'
+        AND COALESCE("CREDIT_HOLDER_ID", '') = 'd8f8d53c-51b8-f89b-1a8d-da48da142694'
+        AND "UPDATED_DATE" = '25/04/2026'
+        AND "UPDATED_BY" = 'Hugo Laurens'
+    )

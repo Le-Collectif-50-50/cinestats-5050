@@ -1,6 +1,6 @@
 SELECT
     DISTINCT
-    casting.credit_holder_id,
+    COALESCE(casting.credit_holder_id, fix.id) AS credit_holder_id,
     COALESCE(fix.type, casting.type) AS type,
     COALESCE(fix.first_name, casting.first_name) AS first_name,
     COALESCE(fix.last_name, casting.last_name) AS last_name,
@@ -10,6 +10,6 @@ SELECT
 FROM {{ ref('int_credit_holders_role') }} AS casting
 LEFT JOIN {{ ref('int_credit_holders_genre') }} AS genre
     ON LOWER(casting.full_name) = LOWER(genre.full_name)
-LEFT JOIN {{ ref('int_fix_credit_holders') }} AS fix
+FULL OUTER JOIN {{ ref('int_fix_credit_holders') }} AS fix
     ON casting.credit_holder_id = fix.id
-ORDER BY casting.credit_holder_id
+ORDER BY credit_holder_id
