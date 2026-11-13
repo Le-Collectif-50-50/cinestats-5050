@@ -4,10 +4,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from test_allocine_posters import database as database
+import test_allocine_posters
 
 from ingestion.scraping.allocine import connector, main
 from ingestion.scraping.allocine.connector import AllocineAirbyteSource, ConnectorConfig
+
+database = test_allocine_posters.database
 
 
 def test_explicit_recovery_with_no_completed_statuses_skips_exclusion_query():

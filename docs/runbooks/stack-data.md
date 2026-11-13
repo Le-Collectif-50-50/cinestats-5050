@@ -290,9 +290,11 @@ aucun crédit de réalisation. La date TV de Matin calme est celle affichée par
 sa fiche Allociné : le modèle actuel ne distingue pas le support de sortie.
 
 Le correctif est conservé dans la [PR #54](https://github.com/Le-Collectif-50-50/cinestats-5050/pull/54).
-Sa fusion reste à effectuer : l’audit CI échoue sur les quatre vulnérabilités
-SoupSieve 2.9.2 déjà présentes sur
-[main avant le correctif](https://github.com/Le-Collectif-50-50/cinestats-5050/actions/runs/43467894939).
-CodeQL Python/TypeScript et le contrôle frontend réussissent. Aucun contrôle
-n’a été désactivé. Un redéploiement global doit inclure ce correctif pour ne pas
+Sa fusion reste à effectuer. Les quatre vulnérabilités SoupSieve 2.9.2 signalées
+sur [main avant le correctif](https://github.com/Le-Collectif-50-50/cinestats-5050/actions/runs/43467894939)
+sont corrigées dans le verrou racine par SoupSieve 4.1, avec Python ≥ 3.11.5.
+L’audit local réussit avec les seules exclusions Starlette déjà présentes.
+Cette mise à jour du verrou ne modifie pas les dépendances du conteneur Prefect
+déjà déployé, définies séparément dans `ingestion/prefect/Dockerfile`.
+Un redéploiement global doit inclure le correctif Allociné pour ne pas
 remplacer les fichiers réparés par ceux d’un `main` antérieur.
