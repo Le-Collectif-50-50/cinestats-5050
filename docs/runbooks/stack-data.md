@@ -249,10 +249,50 @@ fermeture bloquée sur L’Abbé Pierre. Les résultats sont comparés aux huit
 tentatives et quatre erreurs du lot initial (861,68 s). Ce petit lot valide
 la reprise de l’incident ; il ne mesure pas tout le catalogue.
 
-Le code du commit `2440596` a été livré le 13 novembre 2026 à 19 h 40 (Paris),
-avec sauvegarde sous `~/cinestats-data/backups/issue-50-2440596ba52f4cf8f2e5c5da2796b6f1c52f2dc7/`.
+Le code actif du correctif est `b06daed` (13 novembre 2026, 19 h 42, Paris).
+Il inclut le traitement explicite d’une liste de statuts terminés vide : aucune
+exclusion SQL n’est exécutée lors de cette reprise en mémoire. La première
+livraison à 19 h 40 a conservé la sauvegarde sous `~/cinestats-data/backups/issue-50-2440596ba52f4cf8f2e5c5da2796b6f1c52f2dc7/`.
 `~/cinestats-data/HOTFIX_50_REF` suit le commit et les empreintes du correctif
 ciblé ; `DEPLOYED_REF` reste le marqueur de la copie globale antérieure.
 Le `.env`, les images et les quotas n’ont pas été modifiés. Pour revenir en
 arrière, attendre la fin des runs et restaurer les fichiers sauvegardés ; les
 collectes déjà ajoutées restent historisées et ne sont pas supprimées.
+
+
+La reprise effective en base a ajouté quatre `success`, tous au premier essai,
+en 292,37 s (`run_id=18bb57b4-9078-49f6-b88a-e824a7141ca1`). Elle relit les
+identités dans `raw.id_matching` et les réalisateurs dans `raw.films` ; les
+quatre résultats sont contrôlés avant l’insertion. Les essais de diagnostic
+précédents n’avaient rien écrit en base.
+
+
+La publication a terminé en état `Completed` le 13 novembre 2026 à 19 h 49
+(Paris), run Prefect `e4f4a47b-127f-462c-b5d1-4d79e60983d0` (`bright-sponge`).
+Airbyte a été explicitement désactivé pour cette reprise ; les deux phases dbt
+ont été exécutées. La phase 2 termine avec `PASS=138 WARN=6 ERROR=0 SKIP=0`.
+Les six avertissements et leurs compteurs sont identiques au run précédent
+(18 h 20) : identifiants externes absents/dupliqués et 280 crédits non rapprochés.
+
+Contrôle après publication, dans `staging.stg_allocine_films`,
+`fnl.fnl_films` et les crédits de réalisation :
+
+| Visa CNC | Film | Date publiée | Réalisation publiée |
+| --- | --- | --- | --- |
+| 111392 | Bamako | 2006-10-18 | Abderrahmane Sissako |
+| 144996 | Matin calme / Vanishing | 2022-04-05 (télévision) | Denis Dercourt |
+| 152608 | L’Abbé Pierre | 2023-11-08 | Frédéric Tellier |
+| 154529 | Rivière rouge / Rio rojo | 2023-09-20 | Guillermo Quintero |
+
+Le staging des quatre visas porte le nouveau `run_id`. Les trois premières
+dates étaient auparavant nulles ; le dernier film avait déjà sa date, mais
+aucun crédit de réalisation. La date TV de Matin calme est celle affichée par
+sa fiche Allociné : le modèle actuel ne distingue pas le support de sortie.
+
+Le correctif est conservé dans la [PR #54](https://github.com/Le-Collectif-50-50/cinestats-5050/pull/54).
+Sa fusion reste à effectuer : l’audit CI échoue sur les quatre vulnérabilités
+SoupSieve 2.9.2 déjà présentes sur
+[main avant le correctif](https://github.com/Le-Collectif-50-50/cinestats-5050/actions/runs/43467894939).
+CodeQL Python/TypeScript et le contrôle frontend réussissent. Aucun contrôle
+n’a été désactivé. Un redéploiement global doit inclure ce correctif pour ne pas
+remplacer les fichiers réparés par ceux d’un `main` antérieur.
