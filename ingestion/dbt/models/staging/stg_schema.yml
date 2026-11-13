@@ -93,10 +93,6 @@ models:
   - name: stg_fix_film_credits
     description: "Table de staging issue du gsheet Cinéstats 50/50, permettant d’apporter des corrections aux crédits des films (associations entre films, rôles et personnes créditées)."
     columns:
-      - name: film_credit_id
-        description: "Identifiant unique du crédit de film."
-        tests:
-          - not_null
       - name: film_id
         description: "Identifiant du film concerné."
       - name: role_id
@@ -123,10 +119,12 @@ models:
         description: "Identifiant unique de l’allocation budgétaire par pays."
         tests: 
           - not_null
-      - name: country_id
-        description: "Identifiant du pays concerné."
       - name: film_id
         description: "Identifiant du film associé."
+      - name: country_id
+        description: "Identifiant du pays concerné."
+      - name: country_name
+        description: "Nom du pays concerné."
       - name: budget_allocation
         description: "Pourcentage ou montant du budget attribué à ce pays pour le film."
       - name: updated_date
@@ -145,10 +143,6 @@ models:
   - name: stg_fix_film_genres
     description: "Table de staging issue du gsheet Cinéstats 50/50, permettant d'apporter des corrections aux associations entre films et genres (fnl_film_genres)."
     columns:
-      - name: film_genre_id
-        description: "Identifiant unique de la relation film-genre."
-        tests: 
-          - not_null
       - name: film_id
         description: "Identifiant du film."
       - name: genre_id
@@ -239,8 +233,6 @@ models:
         description: "Nom du rôle."
       - name: is_key_role
         description: "Indique si le rôle est considéré comme un rôle clé dans une production."
-      - name: allocine_name
-        description: "Nom du rôle tel qu’utilisé sur Allociné."
       - name: inclusive_name
         description: "Nom inclusif du rôle pour harmonisation des données."
       - name: updated_date

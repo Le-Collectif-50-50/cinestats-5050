@@ -3,7 +3,7 @@
 }}
 
 SELECT
-    CAST("ID" AS TEXT)::UUID AS id,
+    CAST("CREDIT_HOLDER_ID" AS TEXT)::UUID AS id,
     TRIM("TYPE") AS type,
     TRIM("FIRST_NAME") AS first_name,
     TRIM("LAST_NAME") AS last_name,
@@ -20,4 +20,4 @@ SELECT
 FROM {{ source('raw', 'credit_holders') }}
 WHERE "UPDATED_BY" IS NOT NULL
     AND "UPDATED_DATE" IS NOT NULL
-    AND "ID" <> '9999999999999'
+    AND "UPDATED_BY" <> 'Hugo Laurens'

@@ -18,7 +18,7 @@
 | 4   | 2026-10-09 | Joel Teixeira | Correction du passage de configuration dans la commande `read`, qui échouait avec un `TypeError` avant le scraping |
 | 5   | 2026-10-09 | Joel Teixeira | Copie des helpers de date et durée dans ingestion pour démarrer sans package backend |
 | 6 | 2026-10-11 | Joel Teixeira | Sélection dbt post-scraping incluant les modèles intermédiaires et finaux et leurs dépendances |
-| 7 | 2026-10-15 | Data Team DataForGood | Persistance des URL d’affiche, migration additive, backfill local journalisé, export/import SQL ciblé et tests PostgreSQL isolés. |
+| 7 | 2026-10-15 | Joel Teixeira | Persistance des URL d’affiche, migration additive, backfill local journalisé, export/import SQL ciblé et tests PostgreSQL isolés. |
 
 | 8 | 2026-11-12 | Joel Teixeira | Vérification du réalisateur CNC et examen de plusieurs candidats ; statut needs_review pour les correspondances non confirmées. |
 

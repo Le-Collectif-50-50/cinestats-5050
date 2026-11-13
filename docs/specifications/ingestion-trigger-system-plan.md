@@ -2,7 +2,7 @@
 
 ## Metadata du document
 
-**Responsable:** Data Team DataForGood
+**Responsable:** Joel Teixeira
 
 **Dernière révision:** 2026-05-26
 

@@ -2,9 +2,9 @@
 
 ## Metadata du document
 
-**Owner:** Data Team DataForGood
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-11
+**Dernière révision:** 2026-11-12
 
 **Status:** actif
 
@@ -83,7 +83,9 @@ Le `CASE` de `int_film_genres` classe `Judiciaire` dans `Aventure/Policier/Thril
 
 ## Qualité des identifiants
 
-Les corrections de nominations, crédits et genres utilisent respectivement `award_nomination_id`, `film_credit_id` et `film_genre_id`. Les tests de staging et intermédiaires portent sur ces colonnes, et non sur une colonne générique `id`.
+Les corrections de nominations utilisent `award_nomination_id`. Les corrections de crédits sont dédupliquées par `(film_id, role_id, credit_holder_id)` et celles des associations film-genre par `(film_id, genre_id)`, en conservant la date de correction la plus récente. Les tests contrôlent la présence des composants et l’unicité de chaque association ; les anciens champs `film_credit_id` et `film_genre_id` ne sont plus exposés. Le référentiel des genres utilise `GENRE_ID` et `GENRE_NAME` dans la source ; le filtre de la ligne exemple porte sur `GENRE_ID`. Les corrections de rôles n’exposent plus `allocine_name`, absent de la source.
+
+Dans Airbyte, ne pas dédupliquer `film_credits` sur `CREDIT HOLDER ID` seul : une personne peut avoir plusieurs rôles et films. Utiliser une clé composée des trois champs ou le mode overwrite sans déduplication. dbt ne peut pas restaurer les associations supprimées en amont.
 
 Dans `int_id_matching`, `film_id` et `cnc_visa` doivent être renseignés et uniques. Le titre `cnc_name` doit être renseigné mais peut être partagé par plusieurs films. Les tests de présence et d'unicité des identifiants Allociné, Mubi et TMDB ont une sévérité `warn`. Les tests d'unicité de `fnl_films.film_id` et `fnl_films.cnc_visa` sont également des avertissements : les doublons restent présents, sans déduplication arbitraire ni arrêt du pipeline. Leur présence impose de vérifier le grain des analyses avant de compter des films. Ne pas utiliser `--warn-error` pour cette politique.
 
