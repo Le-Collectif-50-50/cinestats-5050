@@ -15,6 +15,7 @@
   "input_year_column": null,
   "input_allocine_id_column": "ID_ALLOCINE",
   "input_allocine_url_column": null,
+  "input_manual_validation_column": "VALIDATION_MANUELLE",
   "completed_statuses": ["success", "not_found", "visa_mismatch"],
   "scrape_limit": 10,
   "record_timeout_seconds": 240,

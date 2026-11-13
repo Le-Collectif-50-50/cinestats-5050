@@ -20,7 +20,7 @@
 | 6 | 2026-11-11 | Joel Teixeira | Couverture des 29 genres observés : corrections orthographiques, classement du Péplum et catégories explicites Divers, Erotique et Évènement Sportif. |
 | 7 | 2026-11-12 | Joel Teixeira | Alignement des corrections sur le schéma Airbyte : clés composées des crédits et genres, retrait du champ Allociné des rôles et filtre GENRE_ID. Dashboard Metabase de revue du scraping Allociné, des écarts de visa et des recherches sans résultat (`not_found`). |
 | 8 | 2026-11-13 | Joel Teixeira | Intégration des ajouts manuels de personnes et crédits, dernier succès Allociné par visa, contrôles de références et conversion du crédit d’impôt. |
-| 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. Bouton Allociné dans Metabase, suivi des demandes et statuts par heure avec filtre de plage de dates. |
+| 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. Bouton Allociné dans Metabase, suivi des demandes et statuts par heure avec filtre de plage de dates. Documentation de la reprise des correspondances validées dans id_matching. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -163,8 +163,18 @@ vérifier manuellement le titre et l'identifiant Allociné. Ce statut est consid
 comme terminé par le scraper et ne déclenche pas de reprise automatique.
 Les erreurs techniques (`error`, `blocked`) restent hors des compteurs et tables de revue ;
 elles figurent dans le graphique horaire.
+
+Pour accepter un `visa_mismatch` ou `needs_review` après vérification humaine,
+cocher `VALIDATION_MANUELLE` dans le Google Sheet `id_matching`, avec un ID
+Allociné renseigné, puis synchroniser Airbyte et relancer le scraper. Voir la
+[procédure de validation manuelle](../scraping/allocine/README.md#reprendre-une-correspondance-validée-manuellement).
+Le nouveau succès conserve les deux visas et retire l'anomalie de cette file.
+Une reconstruction dbt publie ensuite les enrichissements ; la case cochée ne
+relance pas les succès sur le même ID à chaque passage.
+
 La vue `ops.v_allocine_pipeline_status`, issue du staging filtré
-sur `success`, ne peut pas alimenter cette file. Aucun run dbt n'est nécessaire.
+sur `success`, ne peut pas alimenter cette file. Aucun run dbt n'est nécessaire
+pour afficher cette file de revue.
 
 ### Déclencher et suivre un scraping
 

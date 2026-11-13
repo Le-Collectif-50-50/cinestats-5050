@@ -22,7 +22,7 @@
 | 8 | 2026-11-12 | Joel Teixeira | Vérification du réalisateur CNC et examen de plusieurs candidats ; statut needs_review pour les correspondances non confirmées. |
 | 9 | 2026-11-13 | Joel Teixeira | Déploiement manuel, navigation DOMContentLoaded, délais configurables et reprise bornée des timeouts. |
 | 10 | 2026-11-13 | Joel Teixeira | Limite max_films dans le déploiement manuel séparé et override CLI --limit pour sync/read. |
-| 11 | 2026-11-13 | Joel Teixeira | Reprise automatique des ID Allociné corrigés et sélection ciblée --source-id pour sync/read. |
+| 11 | 2026-11-13 | Joel Teixeira | Reprise automatique des ID Allociné corrigés, sélection ciblée --source-id et prise en compte de VALIDATION_MANUELLE sans reprise répétée des succès. |
 | 12 | 2026-11-13 | Joel Teixeira | Extraction de la date sur les balises a et span de la fiche Allociné. |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
@@ -89,6 +89,7 @@ Exemple minimal:
   "input_year_column": null,
   "input_allocine_id_column": "ID_ALLOCINE",
   "input_allocine_url_column": null,
+  "input_manual_validation_column": "VALIDATION_MANUELLE",
   "scrape_limit": 10,
   "playwright_ws_endpoint": "${PLAYWRIGHT_WS_ENDPOINT:-ws://browserless:3000}"
 }
@@ -103,6 +104,12 @@ Les valeurs au format `${ENV_VAR:-default}` du `config.json` sont résolues depu
 Les accès PostgreSQL sont isolés via `SCRAPER_POSTGRES_USER` et `SCRAPER_POSTGRES_PASSWORD`. `POSTGRES_SSLMODE` pilote le mode TLS pour ce scraper, sans valeur SSL codée en dur. Voir `ingestion/README.md` pour créer le rôle et ses droits.
 
 Dans l'environnement Airbyte actuel, la table source par défaut est `raw.id_matching` et reprend les noms de colonnes bruts du sheet (`VISA`, `TITRE`, `ID_ALLOCINE`). Les champs absents comme l'année CNC ou l'URL Allociné peuvent être laissés à `null`.
+
+`input_manual_validation_column` désigne la colonne des cases à cocher
+(`VALIDATION_MANUELLE` par défaut). Une colonne absente, une valeur vide ou une
+configuration à `null` désactive cette validation. Les valeurs acceptées sont
+le booléen `true` et les textes `TRUE`, `VRAI`, `1`, sans distinction de casse
+et après retrait des espaces aux extrémités. Toute autre valeur reste inactive.
 
 La configuration applique actuellement `scrape_limit: 10`, ce qui borne les runs de debug et évite un scraping trop large par défaut. Ajuster cette valeur, la mettre à `null` ou la supprimer pour changer le volume traité.
 
@@ -165,7 +172,8 @@ Cette table sert de mémoire d'exécution pour la logique de skip incrémental.
 Pour chaque `source_record_id`, le scraper retient le dernier résultat dont le
 statut figure dans `completed_statuses` (`success`, `not_found`, `visa_mismatch`
 par défaut). Un ID Allociné renseigné dans `id_matching` n'est ignoré que s'il
-correspond à celui de ce résultat. Un changement d'ID remet donc le film parmi
+correspond à celui de ce résultat, sauf anomalie validée manuellement selon la
+procédure ci-dessous. Un changement d'ID remet donc le film parmi
 les candidats au prochain scraping, sans supprimer son historique. Un échec
 non terminé sur le nouvel ID ne bloque pas les tentatives suivantes.
 
@@ -187,12 +195,40 @@ python3 ingestion/scraping/allocine/main.py sync \
 `--source-id` est répétable et filtre avant la limite. Avec la configuration
 canonique, il désigne le visa CNC (`VISA`), pas l'ID Allociné. `read` accepte
 aussi ce filtre. Relancer dbt après scraping pour publier les enrichissements.
-Les règles de validation d'identité restent inchangées : un nouveau scraping
-peut encore produire `visa_mismatch` ou `needs_review`.
+Sans validation manuelle, un nouveau scraping peut encore produire
+`visa_mismatch` ou `needs_review`.
+
+### Reprendre une correspondance validée manuellement
+
+Dans `id_matching`, cocher `VALIDATION_MANUELLE` uniquement après vérification
+du lien entre le film CNC et l'ID Allociné renseigné. Compléter les champs
+existants `COMMENTAIRES`, `UPDATED BY` et `UPDATED DATE`. Décocher avant de
+modifier `VISA` ou `ID_ALLOCINE`, puis recocher après vérification : la case
+ne mémorise pas l'identité précédemment approuvée.
+
+1. Actualiser si nécessaire le schéma de la connexion Airbyte pour sélectionner
+   la nouvelle colonne, puis synchroniser `id_matching`. Vérifier sa présence
+   et sa valeur dans `raw.id_matching` ; une colonne absente reste inactive.
+2. Lancer le scraper. La validation rend les `visa_mismatch` éligibles malgré
+   leur statut terminé. Les `needs_review` sont déjà réessayés par défaut ;
+   la validation permet aussi leur reprise si ce statut a été ajouté à
+   `completed_statuses`. La limite de lot et `--source-id` restent applicables.
+3. Si la collecte aboutit, une anomalie d'identité validée devient `success`,
+   avec `match_strategy=manual_validation`. `visa_number` conserve le visa CNC
+   et `allocine_visa_number` conserve celui extrait d'Allociné, même différents.
+   Les erreurs techniques et blocages ne sont pas convertis en succès.
+4. Relancer dbt pour publier ce succès dans les modèles existants.
+
+Une case cochée ne déclenche aucun run à elle seule et ne relance pas un succès
+sur le même ID à chaque passage. Les correspondances confirmées automatiquement
+continuent à réussir sans case cochée. La validation exige un ID Allociné
+strictement positif fourni en entrée ; elle ne s'applique jamais aux candidats
+trouvés par recherche. Elle ne force pas la reprise d'un `not_found` terminé
+sur la même cible. Les tentatives précédentes restent dans l'historique.
 
 Tests de reprise : `python3 -m pytest -q tests/ingestion/test_allocine_reprocessing.py`.
-Le scénario PostgreSQL utilise la fixture temporaire décrite dans « Tests sans
-Allociné » et exige `RIC_POSTER_TEST_DB=1`.
+Les scénarios PostgreSQL utilisent la fixture temporaire décrite dans « Tests sans
+Allociné » et exigent `RIC_POSTER_TEST_DB=1`.
 
 Index créés au bootstrap:
 
@@ -464,7 +500,7 @@ Rafraîchir ensuite `stg_allocine_films` avec le profil dbt production appropri�
 
 Le connecteur lit `REALISATEUR` dans la table `films` du schéma source, par `VISA`, pour compléter les lignes de `id_matching`. Le compte scraper doit pouvoir lire cette table. Une référence absente ou plusieurs valeurs distinctes pour un visa empêchent la confirmation par réalisateur.
 
-Un visa identique confirme le candidat ; un visa différent le rejette, même si le réalisateur correspond. Le réalisateur est lu dans le casting, avec repli sur les données structurées `Movie.director` de la fiche principale. Sans visa comparable, les ensembles de noms complets des réalisateurs doivent correspondre exactement après normalisation de la casse, des accents, de la ponctuation et de l’ordre des mots. Les coréalisations séparées par `/`, `;`, `&` ou `et` sont comparées séparément. Les initiales, alias, noms partiels et variantes ambiguës ne sont pas rapprochés automatiquement.
+Un visa identique confirme le candidat ; un visa différent le rejette, même si le réalisateur correspond, sauf validation manuelle de l'ID fourni selon la procédure ci-dessus. Le réalisateur est lu dans le casting, avec repli sur les données structurées `Movie.director` de la fiche principale. Sans visa comparable, les ensembles de noms complets des réalisateurs doivent correspondre exactement après normalisation de la casse, des accents, de la ponctuation et de l’ordre des mots. Les coréalisations séparées par `/`, `;`, `&` ou `et` sont comparées séparément. Les initiales, alias, noms partiels et variantes ambiguës ne sont pas rapprochés automatiquement.
 
 Sans ID Allociné fourni, le scraper examine au maximum cinq candidats distincts. Il ne retient une correspondance que si un seul candidat est confirmé et si tous les candidats ont pu être examinés. Plus de cinq résultats, plusieurs correspondances, une erreur de lecture ou aucune correspondance confirmée produisent `needs_review`. Une recherche sans résultat reste `not_found`. Le budget de temps d’une recherche est six fois `record_timeout_seconds` pour couvrir la recherche et les cinq candidats ; celui d’un ID fourni reste inchangé.
 

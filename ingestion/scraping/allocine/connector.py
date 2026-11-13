@@ -118,6 +118,12 @@ CONNECTION_SPECIFICATION = {
             "title": "Optional existing Allocine URL column",
             "default": "allocine_url",
         },
+        "input_manual_validation_column": {
+            "type": ["string", "null"],
+            "title": "Validation manuelle de la correspondance Allociné",
+            "default": "VALIDATION_MANUELLE",
+            "description": "Colonne optionnelle de cases à cocher ; absente ou null, la validation reste désactivée.",
+        },
         "completed_statuses": {
             "type": "array",
             "title": "Statuses considered already processed",
@@ -263,6 +269,7 @@ class ConnectorConfig:
     inter_film_delay_max_seconds: float
     verbose: bool
     source_ids: list[str] | None = None
+    input_manual_validation_column: str | None = "VALIDATION_MANUELLE"
 
     @classmethod
     def from_dict(cls, raw_config: dict[str, Any]) -> "ConnectorConfig":
@@ -288,6 +295,9 @@ class ConnectorConfig:
             ),
             "input_allocine_url_column": raw_config.get(
                 "input_allocine_url_column", "allocine_url"
+            ),
+            "input_manual_validation_column": raw_config.get(
+                "input_manual_validation_column", "VALIDATION_MANUELLE"
             ),
             "completed_statuses": [
                 str(status).lower() for status in completed_statuses
@@ -389,6 +399,18 @@ def _normalize_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _is_manually_validated(source_row: dict[str, Any]) -> bool:
+    # Airbyte peut transmettre les cases Sheets comme booléens ou comme texte.
+    # Ne jamais utiliser bool("FALSE"), qui autoriserait une case décochée.
+    allocine_id = _normalize_int(source_row.get("allocine_id"))
+    return (
+        allocine_id is not None
+        and allocine_id > 0
+        and str(source_row.get("manual_validation", "")).strip().casefold()
+        in {"true", "vrai", "1"}
+    )
 
 
 def _normalize_positive_int(value: Any) -> int | None:
@@ -899,11 +921,17 @@ class AllocineAirbyteSource:
                 f"{_quote_identifier(config.input_allocine_url_column)} as allocine_url"
             )
 
+        # Une colonne pas encore synchronisée ne doit pas casser les anciens
+        # imports. La clé JSON absente donne NULL et n'accorde aucune validation.
+        select_columns.append(
+            "to_jsonb(source_input) ->> :manual_validation_column as manual_validation"
+        )
+
         query_sql = (
             f"select {', '.join(select_columns)} "
-            f"from {_relation(config.input_schema, config.input_table)}"
+            f"from {_relation(config.input_schema, config.input_table)} as source_input"
         )
-        query_params = {}
+        query_params = {"manual_validation_column": config.input_manual_validation_column}
         if config.source_ids is not None:
             query_sql += f" where {_quote_identifier(config.input_id_column)}::text in :source_ids"
             query_params["source_ids"] = config.source_ids
@@ -940,10 +968,15 @@ class AllocineAirbyteSource:
             completed = completed_records.get(normalized_id)
             if completed is not None:
                 allocine_id = _normalize_int(row.get("allocine_id"))
+                manually_retryable = (
+                    _is_manually_validated(row)
+                    and completed.get("scrape_status", "").lower()
+                    in {"visa_mismatch", "needs_review"}
+                )
                 # Un traitement terminé ne couvre que la cible actuelle. Une
                 # recherche peut trouver un ID alors que l'entrée reste vide.
                 if allocine_id:
-                    if allocine_id == _normalize_int(completed["allocine_id"]):
+                    if allocine_id == _normalize_int(completed["allocine_id"]) and not manually_retryable:
                         continue
                 elif completed["match_strategy"] == "search":
                     continue
@@ -963,7 +996,7 @@ class AllocineAirbyteSource:
             return {}
 
         query = text(
-            f"select distinct on (source_record_id) source_record_id, allocine_id, match_strategy "
+            f"select distinct on (source_record_id) source_record_id, allocine_id, match_strategy, scrape_status "
             f"from {_relation(config.output_schema, config.output_table)} "
             "where lower(coalesce(scrape_status, '')) in :completed_statuses "
             "order by source_record_id, extracted_at desc nulls last, run_id::text desc, record_hash desc"
@@ -1155,7 +1188,10 @@ class AllocineAirbyteSource:
                 diagnostics = []
                 incomplete = len(candidates) > MAX_SEARCH_CANDIDATES
                 for candidate in candidates[:MAX_SEARCH_CANDIDATES]:
-                    candidate_row = dict(source_row, allocine_id=candidate["id"], allocine_url=None)
+                    # Une validation porte sur l'ID saisi, jamais sur les
+                    # candidats découverts lorsqu'aucun ID n'était fourni.
+                    candidate_row = dict(source_row, allocine_id=candidate["id"],
+                                         allocine_url=None, manual_validation=False)
                     result = await self._scrape_one_record(
                         run_id, session, scraper, candidate_row, verbose=verbose
                     )
@@ -1225,6 +1261,9 @@ class AllocineAirbyteSource:
                 visa_number, allocine_visa_number,
                 source_row.get("cnc_director"), casting.get("Direction"),
             )
+            if status in {"visa_mismatch", "needs_review"} and _is_manually_validated(source_row):
+                status, reason = "success", None
+                base_record["match_strategy"] = "manual_validation"
             base_record["scrape_status"] = status
             base_record["error_message"] = reason
 
