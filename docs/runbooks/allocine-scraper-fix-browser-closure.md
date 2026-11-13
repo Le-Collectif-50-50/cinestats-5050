@@ -1,6 +1,6 @@
 # Allocine Scraper: Browser Closure Error Fix
 
-**Resonsable** Data Team DataForGood
+**Resonsable** Joel Teixeira
 
 **Dernière révision:** 2026-05-16
 

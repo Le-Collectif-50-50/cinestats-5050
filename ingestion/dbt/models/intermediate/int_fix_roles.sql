@@ -9,7 +9,6 @@ SELECT
     id,
     name,
     is_key_role,
-    allocine_name,
     inclusive_name
 FROM dedup
 WHERE rn = 1
