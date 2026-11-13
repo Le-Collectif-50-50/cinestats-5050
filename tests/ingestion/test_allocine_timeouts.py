@@ -16,6 +16,8 @@ def config(**overrides):
 def session_with_page(**kwargs):
     session = AsyncBrowserSession(**kwargs)
     session.page = SimpleNamespace(
+        url="about:blank",
+        close=AsyncMock(),
         goto=AsyncMock(return_value=SimpleNamespace(status=200)),
         wait_for_load_state=AsyncMock(),
         wait_for_timeout=AsyncMock(),
@@ -112,6 +114,156 @@ def test_navigation_timeout_reopens_browser_and_bounds_retries(recovers):
     assert records[0]["scrape_status"] == ("success" if recovers else "error")
     assert len(sessions) == 2
     for session, manager in sessions:
+        assert session.lightweight is True
         assert session.navigation_timeout_seconds == 60
         assert session.navigation_wait_until == "domcontentloaded"
+        manager.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.parametrize("url,kind,blocked", [
+    ("https://www.allocine.fr/film/1", "document", False),
+    ("https://assets.allocine.fr/app.js", "script", False),
+    ("https://www.google.com/recaptcha/api.js", "script", False),
+    ("https://challenges.cloudflare.com/turnstile/", "document", False),
+    ("https://images.example.org/poster.jpg", "image", True),
+    ("https://video.example.org/trailer.mp4", "media", True),
+    ("https://static.example.org/font.woff", "font", True),
+    ("https://sync.drift-pixel.ai/sync", "document", True),
+    ("https://ap.lijit.com/sync", "document", True),
+    ("https://www.allocine.fr/?next=lijit.com", "document", False),
+])
+def test_lightweight_routes_keep_content_and_access_controls(url, kind, blocked):
+    route = SimpleNamespace(abort=AsyncMock(), continue_=AsyncMock())
+    request = SimpleNamespace(url=url, resource_type=kind)
+    asyncio.run(AsyncBrowserSession(lightweight=True)._route_request(route, request))
+    assert route.abort.await_count == int(blocked)
+    assert route.continue_.await_count == int(not blocked)
+
+
+def test_default_routes_keep_images():
+    route = SimpleNamespace(abort=AsyncMock(), continue_=AsyncMock())
+    request = SimpleNamespace(url="https://mubi.com/poster.jpg", resource_type="image")
+    asyncio.run(AsyncBrowserSession()._route_request(route, request))
+    route.continue_.assert_awaited_once()
+
+
+def test_lightweight_closes_previous_page_before_navigation():
+    session = session_with_page(lightweight=True)
+    old_page = SimpleNamespace(url="https://www.allocine.fr/film/1", close=AsyncMock())
+    new_page = session.page
+    session.page = old_page
+    session.context = SimpleNamespace(new_page=AsyncMock(return_value=new_page))
+    asyncio.run(session.fetch_html("https://www.allocine.fr/film/1/casting/"))
+    old_page.close.assert_awaited_once()
+    new_page.goto.assert_awaited_once()
+
+
+def test_cleanup_continues_after_hung_page(monkeypatch):
+    monkeypatch.setattr("ingestion.scraping.browser.BROWSER_CLOSE_TIMEOUT_SECONDS", 0.01)
+    session = session_with_page()
+
+    async def hang():
+        await asyncio.Event().wait()
+
+    session.page.close = hang
+    session.context = SimpleNamespace(close=AsyncMock())
+    session.browser = SimpleNamespace(close=AsyncMock())
+    session.playwright = SimpleNamespace(stop=AsyncMock())
+    asyncio.run(session.__aexit__(None, None, None))
+    session.context.close.assert_awaited_once()
+    session.browser.close.assert_awaited_once()
+    session.playwright.stop.assert_awaited_once()
+
+
+def test_hung_previous_page_is_replaced_before_fetch(monkeypatch):
+    monkeypatch.setattr("ingestion.scraping.browser.BROWSER_CLOSE_TIMEOUT_SECONDS", 0.01)
+    session = session_with_page(lightweight=True)
+    fresh_page = session.page
+
+    async def hang():
+        await asyncio.Event().wait()
+
+    async def reopen():
+        session.page = fresh_page
+        return session
+
+    session.page = SimpleNamespace(url="https://www.allocine.fr/film/1", close=hang)
+    session.__aexit__ = AsyncMock()
+    session.__aenter__ = AsyncMock(side_effect=reopen)
+    assert "Film" in asyncio.run(session.fetch_html("https://www.allocine.fr/film/1/casting/"))
+    session.__aexit__.assert_awaited_once()
+    session.__aenter__.assert_awaited_once()
+    fresh_page.goto.assert_awaited_once()
+
+
+def test_session_replacement_has_finite_budget(monkeypatch):
+    monkeypatch.setattr("ingestion.scraping.browser.BROWSER_CLOSE_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr("ingestion.scraping.browser.BROWSER_OPEN_TIMEOUT_SECONDS", 0.01)
+    session = session_with_page(lightweight=True)
+
+    async def hang():
+        await asyncio.Event().wait()
+
+    session.page.url = "https://www.allocine.fr/film/1"
+    session.page.close = hang
+    session.__aexit__ = AsyncMock()
+    session.__aenter__ = hang
+    with pytest.raises(RuntimeError, match="session replacement timed out"):
+        asyncio.run(session.fetch_html("https://www.allocine.fr/film/1/casting/"))
+    session.page.content.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status,expected_sessions", [("success", 2), ("blocked", 2)])
+def test_each_film_gets_own_session_without_retrying_blocked(status, expected_sessions):
+    managers = []
+
+    def factory(**kwargs):
+        manager = SimpleNamespace(__aenter__=AsyncMock(), __aexit__=AsyncMock())
+        managers.append(manager)
+        return manager
+
+    source = AllocineAirbyteSource()
+    source._scrape_one_record = AsyncMock(return_value={"scrape_status": status})
+    asyncio.run(source._scrape_chunk("test", [{"allocine_id": 1}, {"allocine_id": 2}],
+        factory, None, config(inter_film_delay_min_seconds=0, inter_film_delay_max_seconds=0)))
+    assert len(managers) == expected_sessions
+    for manager in managers:
+        manager.__aexit__.assert_awaited_once()
+
+
+def test_failed_session_open_is_closed_and_retried():
+    managers = []
+
+    def factory(**kwargs):
+        manager = SimpleNamespace(__aenter__=AsyncMock(side_effect=RuntimeError("CDP timeout")),
+                                  __aexit__=AsyncMock())
+        managers.append(manager)
+        return manager
+
+    rows = asyncio.run(AllocineAirbyteSource()._scrape_chunk(
+        "test", [{"allocine_id": 1}], factory, None, config()))
+    assert rows[0]["scrape_status"] == "error"
+    assert len(managers) == 2
+    for manager in managers:
+        manager.__aexit__.assert_awaited_once()
+
+
+def test_session_open_timeout_is_bounded_and_distinct_from_record_timeout(monkeypatch):
+    monkeypatch.setattr("ingestion.scraping.allocine.connector.SESSION_OPEN_TIMEOUT_SECONDS", 0.01)
+    managers = []
+
+    async def hang():
+        await asyncio.Event().wait()
+
+    def factory(**kwargs):
+        manager = SimpleNamespace(__aenter__=hang, __aexit__=AsyncMock())
+        managers.append(manager)
+        return manager
+
+    rows = asyncio.run(AllocineAirbyteSource()._scrape_chunk(
+        "test", [{"allocine_id": 1}], factory, None, config()))
+    assert rows[0]["scrape_status"] == "error"
+    assert "session opening timed out" in rows[0]["error_message"]
+    assert len(managers) == 2
+    for manager in managers:
         manager.__aexit__.assert_awaited_once()

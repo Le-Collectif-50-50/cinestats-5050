@@ -30,6 +30,7 @@ DEFAULT_OUTPUT_TABLE = STREAM_NAME
 DEFAULT_COMPLETED_STATUSES = ["success", "not_found", "visa_mismatch"]
 DEFAULT_RECORD_TIMEOUT_SECONDS = 240.0
 DEFAULT_NAVIGATION_TIMEOUT_SECONDS = 60.0
+SESSION_OPEN_TIMEOUT_SECONDS = 45.0
 MAX_SEARCH_CANDIDATES = 5
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -606,7 +607,7 @@ class AllocineAirbyteSource:
         start_delay_s: float = 0.0,
         session_index: int = 0,
     ) -> list[dict[str, Any]]:
-        """Process a list of rows in a single browser session, with inter-film delays."""
+        """Traite chaque film dans une session neuve, avec deux essais au maximum."""
         records = []
         if start_delay_s:
             if config.verbose:
@@ -626,8 +627,20 @@ class AllocineAirbyteSource:
                 verbose=config.verbose,
                 navigation_timeout_seconds=config.navigation_timeout_seconds,
                 navigation_wait_until="domcontentloaded",
+                lightweight=True,
             )
-            session = await session_cm.__aenter__()
+            try:
+                session = await asyncio.wait_for(
+                    session_cm.__aenter__(), timeout=SESSION_OPEN_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError as exc:
+                await _close_session()
+                raise RuntimeError(
+                    f"Browser session opening timed out after {SESSION_OPEN_TIMEOUT_SECONDS:g}s"
+                ) from exc
+            except BaseException:
+                await _close_session()
+                raise
             if config.verbose:
                 print(f"[session {session_index}] Browser ready. Processing {len(chunk)} records.")
 
@@ -641,7 +654,6 @@ class AllocineAirbyteSource:
                 session_cm = None
                 session = None
 
-        await _open_session()
         try:
             browser_instability_markers = (
                 "browser connection lost",
@@ -675,6 +687,8 @@ class AllocineAirbyteSource:
                 while True:
                     started_at = time.monotonic()
                     try:
+                        if session is None:
+                            await _open_session()
                         scrape_task = self._scrape_one_record(
                             run_id=run_id,
                             session=session,
@@ -695,11 +709,18 @@ class AllocineAirbyteSource:
                             source_row=source_row,
                             timeout_seconds=timeout_seconds,
                         )
+                    except Exception as exc:
+                        record = self._build_timeout_error_record(
+                            run_id=run_id, source_row=source_row,
+                            timeout_seconds=timeout_seconds,
+                        )
+                        record["error_message"] = f"Browser session failed: {exc}"
+                        record["record_hash"] = _hash_record(record)
 
                     status = record.get("scrape_status", "?")
                     duration_seconds = time.monotonic() - started_at
                     print(
-                        f"[session {session_index}] Record {index + 1}/{len(chunk)} done: {label!r} -> {status} ({duration_seconds:.1f}s)"
+                        f"[session {session_index}] Record {index + 1}/{len(chunk)} attempt {attempt}/{max_attempts}: {label!r} -> {status} ({duration_seconds:.1f}s)"
                     )
                     if status == "success":
                         break
@@ -720,6 +741,7 @@ class AllocineAirbyteSource:
                         status == "error"
                         and (
                             "timed out" in normalized_reason
+                            or "browser session failed" in normalized_reason
                             or any(marker in normalized_reason for marker in browser_instability_markers)
                         )
                     )
@@ -730,18 +752,13 @@ class AllocineAirbyteSource:
                                 f"[session {session_index}] Browser became unstable; restarting session and retrying record {index + 1}/{len(chunk)} (attempt {attempt}/{max_attempts})."
                             )
                         await _close_session()
-                        await _open_session()
                         continue
 
-                    if browser_unstable and index < len(chunk) - 1:
-                        if config.verbose:
-                            print(
-                                f"[session {session_index}] Browser became unstable; restarting session for remaining records."
-                            )
-                        await _close_session()
-                        await _open_session()
                     break
                 records.append(record)
+                # Browserless limite la durée d'une connexion ; ne pas la
+                # partager entre tous les films d'un lot.
+                await _close_session()
         finally:
             await _close_session()
             if config.verbose:
@@ -1201,7 +1218,15 @@ class AllocineAirbyteSource:
                     if verbose:
                         print(f"  [candidate] {diagnostics[-1]}")
                     if result["scrape_status"] in {"error", "blocked"}:
-                        incomplete = True
+                        # Une panne technique ne doit pas devenir needs_review
+                        # ni laisser les autres candidats utiliser une page cassée.
+                        base_record.update(
+                            scrape_status=result["scrape_status"],
+                            source_url=search_url,
+                            error_message="Candidate lookup failed. " + "; ".join(diagnostics),
+                        )
+                        base_record["record_hash"] = _hash_record(base_record)
+                        return base_record
                     if result["scrape_status"] == "success":
                         matches.append(result)
                 if len(matches) == 1 and not incomplete:
