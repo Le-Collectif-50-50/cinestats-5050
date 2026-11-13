@@ -99,13 +99,13 @@ def main() -> int:
         "--source-id",
         action="append",
         dest="source_ids",
-        help="Backfill : source_record_id exact ; option répétable",
+        help="source_record_id exact (sync, read ou backfill-posters) ; option répétable",
     )
     args = parser.parse_args()
-    if args.command != "backfill-posters" and (
-        args.dry_run or args.source_ids
-    ):
-        parser.error("--dry-run et --source-id sont réservés à backfill-posters")
+    if args.command != "backfill-posters" and args.dry_run:
+        parser.error("--dry-run est réservé à backfill-posters")
+    if args.source_ids and args.command not in {"sync", "read", "backfill-posters"}:
+        parser.error("--source-id est réservé à sync, read et backfill-posters")
     if args.limit is not None and args.command not in {"sync", "read", "backfill-posters"}:
         parser.error("--limit est réservé à sync, read et backfill-posters")
     if args.limit is not None and args.limit < 1:
@@ -120,6 +120,8 @@ def main() -> int:
     config = _load_json(args.config_path) or {}
     if args.limit is not None and args.command in {"sync", "read"}:
         config["scrape_limit"] = args.limit
+    if args.source_ids and args.command in {"sync", "read"}:
+        config["source_ids"] = args.source_ids
 
     if args.command == "backfill-posters":
         from ingestion.scraping.allocine.poster_backfill import backfill_posters

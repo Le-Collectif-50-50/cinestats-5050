@@ -22,6 +22,7 @@
 | 8 | 2026-11-12 | Joel Teixeira | Vérification du réalisateur CNC et examen de plusieurs candidats ; statut needs_review pour les correspondances non confirmées. |
 | 9 | 2026-11-13 | Joel Teixeira | Déploiement manuel, navigation DOMContentLoaded, délais configurables et reprise bornée des timeouts. |
 | 10 | 2026-11-13 | Joel Teixeira | Limite max_films dans le déploiement manuel séparé et override CLI --limit pour sync/read. |
+| 11 | 2026-11-13 | Joel Teixeira | Reprise automatique des ID Allociné corrigés et sélection ciblée --source-id pour sync/read. |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -31,7 +32,7 @@ Objectif: remplacer le handoff CSV historique dans `database/data/allocine/` par
 
 1. Lit actuellement les films candidats depuis `raw.id_matching`.
 2. Crée automatiquement la table mémoire de sortie si elle n'existe pas encore.
-3. Lit les lignes déjà réussies dans `raw.allocine_data` pour ignorer les enregistrements déjà traités.
+3. Compare la cible actuelle au dernier traitement terminé dans `raw.allocine_data` pour ignorer uniquement les correspondances déjà traitées.
 4. Utilise le parseur HTML Allociné et la session navigateur Playwright du package ingestion :
    - `ingestion/scraping/allocine/allocine_scraper.py`
    - `ingestion/scraping/browser.py`
@@ -154,6 +155,38 @@ Exemple par défaut:
 2. table: `allocine_data`
 
 Cette table sert de mémoire d'exécution pour la logique de skip incrémental.
+
+Pour chaque `source_record_id`, le scraper retient le dernier résultat dont le
+statut figure dans `completed_statuses` (`success`, `not_found`, `visa_mismatch`
+par défaut). Un ID Allociné renseigné dans `id_matching` n'est ignoré que s'il
+correspond à celui de ce résultat. Un changement d'ID remet donc le film parmi
+les candidats au prochain scraping, sans supprimer son historique. Un échec
+non terminé sur le nouvel ID ne bloque pas les tentatives suivantes.
+
+Sans ID en entrée, une recherche déjà terminée reste ignorée, même si elle a
+découvert un ID Allociné. Retirer un ID précédemment fourni déclenche une
+nouvelle recherche. Un retour vers un ancien ID est comparé au dernier résultat
+terminé, et non à n'importe quel succès historique.
+
+Airbyte doit d'abord synchroniser la correction GSheet. Le flow d'ingestion
+Airbyte/dbt ne lance pas de scraping : cette reprise s'applique lors du prochain
+run du scraper. La limite de volume et le tirage des candidats restent actifs.
+Pour traiter un visa précis, sans forcer les cibles déjà traitées :
+
+```bash
+python3 ingestion/scraping/allocine/main.py sync \
+  --config ingestion/scraping/allocine/config.json --source-id 144246 --limit 1
+```
+
+`--source-id` est répétable et filtre avant la limite. Avec la configuration
+canonique, il désigne le visa CNC (`VISA`), pas l'ID Allociné. `read` accepte
+aussi ce filtre. Relancer dbt après scraping pour publier les enrichissements.
+Les règles de validation d'identité restent inchangées : un nouveau scraping
+peut encore produire `visa_mismatch` ou `needs_review`.
+
+Tests de reprise : `python3 -m pytest -q tests/ingestion/test_allocine_reprocessing.py`.
+Le scénario PostgreSQL utilise la fixture temporaire décrite dans « Tests sans
+Allociné » et exige `RIC_POSTER_TEST_DB=1`.
 
 Index créés au bootstrap:
 

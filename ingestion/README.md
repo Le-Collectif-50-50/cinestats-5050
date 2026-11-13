@@ -181,8 +181,8 @@ Les URL d’affiche sont conservées dans `raw.allocine_data.poster_url` et expo
 Le job `scraping/allocine/`:
 
 1. lit `raw.id_matching`;
-2. relit `raw.allocine_data` pour éviter de retraiter ce qui est déjà terminé;
-3. scrape seulement les IDs manquants;
+2. relit le dernier traitement terminé par source dans `raw.allocine_data`;
+3. scrape les films non terminés et ceux dont la cible Allociné a changé depuis ce traitement ; la reprise s'applique au prochain run du scraper, après synchronisation Airbyte de `id_matching`;
 4. écrit les résultats enrichis dans `raw.allocine_data`;
 5. est lancé directement ou via Prefect, pas via Airbyte.
 

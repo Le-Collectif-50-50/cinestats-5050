@@ -130,6 +130,11 @@ CONNECTION_SPECIFICATION = {
             "minimum": 1,
             "description": "Optional debug limit applied after filtering already processed records.",
         },
+        "source_ids": {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+            "description": "Optional exact source_record_ids to consider; normal retry rules still apply.",
+        },
         "record_timeout_seconds": {
             "type": "number",
             "title": "Per-record scrape timeout",
@@ -257,6 +262,7 @@ class ConnectorConfig:
     inter_film_delay_min_seconds: float
     inter_film_delay_max_seconds: float
     verbose: bool
+    source_ids: list[str] | None = None
 
     @classmethod
     def from_dict(cls, raw_config: dict[str, Any]) -> "ConnectorConfig":
@@ -287,6 +293,7 @@ class ConnectorConfig:
                 str(status).lower() for status in completed_statuses
             ],
             "scrape_limit": _normalize_positive_int(raw_config.get("scrape_limit")),
+            "source_ids": raw_config.get("source_ids"),
             "record_timeout_seconds": _normalize_non_negative_float(
                 raw_config.get("record_timeout_seconds", DEFAULT_RECORD_TIMEOUT_SECONDS),
                 field_name="record_timeout_seconds",
@@ -892,17 +899,24 @@ class AllocineAirbyteSource:
                 f"{_quote_identifier(config.input_allocine_url_column)} as allocine_url"
             )
 
-        query = text(
+        query_sql = (
             f"select {', '.join(select_columns)} "
             f"from {_relation(config.input_schema, config.input_table)}"
         )
+        query_params = {}
+        if config.source_ids is not None:
+            query_sql += f" where {_quote_identifier(config.input_id_column)}::text in :source_ids"
+            query_params["source_ids"] = config.source_ids
+        query = text(query_sql)
+        if config.source_ids is not None:
+            query = query.bindparams(bindparam("source_ids", expanding=True))
 
         try:
             with engine.begin() as connection:
                 self._assert_input_table_exists(connection, config)
                 self._ensure_output_table_exists(connection, config)
-                rows = [dict(row._mapping) for row in connection.execute(query)]
-                processed_ids = self._fetch_processed_ids(connection, config)
+                rows = [dict(row._mapping) for row in connection.execute(query, query_params)]
+                completed_records = self._fetch_completed_records(connection, config)
                 # CNC reference supplies the director absent from id_matching.
                 directors = {}
                 if self._table_exists(connection, config.input_schema, "films"):
@@ -923,8 +937,16 @@ class AllocineAirbyteSource:
         for row in rows:
             normalized_id = _normalize_record_id(row)
             row["source_record_id"] = normalized_id
-            if normalized_id and normalized_id in processed_ids:
-                continue
+            completed = completed_records.get(normalized_id)
+            if completed is not None:
+                allocine_id = _normalize_int(row.get("allocine_id"))
+                # Un traitement terminé ne couvre que la cible actuelle. Une
+                # recherche peut trouver un ID alors que l'entrée reste vide.
+                if allocine_id:
+                    if allocine_id == _normalize_int(completed["allocine_id"]):
+                        continue
+                elif completed["match_strategy"] == "search":
+                    continue
             pending_rows.append(row)
 
         # Shuffle pending rows so concurrent runs are less likely to pick the same records.
@@ -934,23 +956,24 @@ class AllocineAirbyteSource:
             return pending_rows[: config.scrape_limit]
         return pending_rows
 
-    def _fetch_processed_ids(self, connection, config: ConnectorConfig) -> set[str]:
+    def _fetch_completed_records(self, connection, config: ConnectorConfig) -> dict[str, dict]:
         if not self._table_exists(
             connection, config.output_schema, config.output_table
         ):
-            return set()
+            return {}
 
         query = text(
-            f"select distinct source_record_id "
+            f"select distinct on (source_record_id) source_record_id, allocine_id, match_strategy "
             f"from {_relation(config.output_schema, config.output_table)} "
-            "where lower(coalesce(scrape_status, '')) in :completed_statuses"
+            "where lower(coalesce(scrape_status, '')) in :completed_statuses "
+            "order by source_record_id, extracted_at desc nulls last, run_id::text desc, record_hash desc"
         ).bindparams(bindparam("completed_statuses", expanding=True))
         return {
-            str(value)
-            for value in connection.execute(
+            str(row.source_record_id): dict(row._mapping)
+            for row in connection.execute(
                 query, {"completed_statuses": config.completed_statuses}
-            ).scalars()
-            if value not in (None, "")
+            )
+            if row.source_record_id not in (None, "")
         }
 
     def _assert_input_table_exists(self, connection, config: ConnectorConfig) -> None:
