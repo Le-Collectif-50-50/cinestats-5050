@@ -120,7 +120,7 @@ def render(manifest, source_url, revision_date):
         "", "## Historique du document", "",
         "| # | Date | Auteur | Observations |", "| --- | --- | --- | --- |",
         f"| 1 | {revision_date} | Joel Teixeira | État généré depuis la version du code liée ci-dessus. |",
-        "", "Les versions précédentes restent disponibles dans l’historique Git de la branche `dbt-lineage`.", "",
+        "", "Les versions précédentes restent disponibles dans l’historique Git de `docs/dbt-lineage.md` sur `main`.", "",
     ])
     return "\n".join(lines)
 

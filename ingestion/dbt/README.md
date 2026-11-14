@@ -25,7 +25,7 @@
 | 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
-| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. Publication automatique du lineage dbt complet dans GitHub, avec vues détaillées par schéma, sans connexion PostgreSQL. |
+| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. Publication automatique du lineage dbt complet dans `docs/dbt-lineage.md` sur `main`, avec vues détaillées par schéma, sans connexion PostgreSQL. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -63,7 +63,7 @@ docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt build --p
 
 ## Consulter le lineage dans GitHub
 
-Le [document de lineage](https://github.com/Le-Collectif-50-50/cinestats-5050/blob/dbt-lineage/README.md)
+Le [document de lineage](https://github.com/Le-Collectif-50-50/cinestats-5050/blob/main/docs/dbt-lineage.md)
 présente d’abord un diagramme Mermaid complet : toutes les sources et tous les modèles
 actifs, regroupés par schéma, avec leurs dépendances de bout en bout dans dbt.
 Les vues par schéma restent disponibles dans une section repliable, suivies
@@ -86,14 +86,20 @@ Le workflow [dbt lineage](../../.github/workflows/dbt-lineage.yml) :
 5. Joint le document à chaque run sous l’artefact `dbt-lineage`. Pour une PR,
    cet artefact permet de relire le Markdown ; les diagrammes seront rendus
    dans le document publié sur GitHub après fusion.
-6. Après un push sur `main`, publie le document comme `README.md` sur la branche
-   `dbt-lineage`, avec le `GITHUB_TOKEN` intégré et la permission `contents: write`.
+6. Après un push sur `main`, publie le document dans `docs/dbt-lineage.md` sur
+   `main`, avec le `GITHUB_TOKEN` intégré et la permission `contents: write`.
    Les PR, y compris celles de forks, ne disposent pas de cette permission.
 
-La branche dédiée conserve l’historique des documents sans commit automatique
-sur `main`. Sa mise à jour ne relance pas ce workflow. Si une règle du dépôt
-interdit sa création ou son écriture par GitHub Actions, la publication échoue ;
-autoriser cette branche pour le bot, sans désactiver les protections de `main`.
+Chaque publication modifiée ajoute un commit du bot dans `main`, limité à
+`docs/dbt-lineage.md`. Le README principal est conservé. Ce push avec le
+`GITHUB_TOKEN` ne déclenche pas de nouveau workflow ; le chemin du document
+n’entre pas non plus dans les filtres de ce workflow. Voir la
+[documentation GitHub du token](https://docs.github.com/en/actions/concepts/security/github_token).
+Si les sources du graphe ont changé sur `main` depuis le commit analysé, le run
+laisse la publication au run suivant pour éviter un graphe périmé.
+Le push est effectué sans forcer : une modification concurrente de `main` peut
+faire échouer la publication. Une règle interdisant les commits directs du bot
+sur `main` la bloque également ; les protections ne sont pas modifiées par ce workflow.
 L’artefact du run reste disponible même si la publication échoue.
 
 Le graphe couvre les dépendances déclarées par `ref()` et `source()` entre sources,
