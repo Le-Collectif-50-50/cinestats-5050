@@ -51,6 +51,48 @@ class ManualRecoverySQLTests(unittest.TestCase):
         )
         return json.loads(proc.stdout)
 
+    def test_last_name_preserves_remaining_words_in_all_credit_categories(self):
+        import hashlib
+        import uuid
+
+        cases = [
+            ("Eliane de Latour", "de Latour"),
+            ("Leonardo Di Caprio", "Di Caprio"),
+            ("Jean-Pierre Van der Meersch", "Van der Meersch"),
+            ("Lupita Nyong’o", "Nyong’o"),
+            ("Élodie Dupont-Martin", "Dupont-Martin"),
+            ("Jean Claude Van Damme", "Claude Van Damme"),
+            ("Cher", ""),
+            ("Eliane   de  Latour", "de Latour"),
+            ("Eliane\u00a0de\u202fLatour", "de Latour"),
+        ]
+        categories = ["direction", "casting", "screenwriters", "production",
+                      "technical_team", "distribution", "soundtrack"]
+        columns = dict(allocine_id="text", direction="text[]", casting="text[]",
+                       **{key: "jsonb" for key in categories[2:]}, companies="jsonb")
+        rows = []
+        expected = {}
+        for category in categories:
+            for name, last_name in cases:
+                key = str(len(rows))
+                value = [name] if category in categories[:2] else [dict(name=name)]
+                rows.append(dict(allocine_id=key, **{category: value}))
+                expected[key] = (name, last_name)
+        result = self.run_model("intermediate/int_credit_holders_role.sql", {
+            "stg_allocine_films": fixture(columns, rows),
+            "stg_id_matching": fixture(dict(film_id="uuid", allocine_id="text"),
+                                       [dict(film_id=FILM, allocine_id=r["allocine_id"]) for r in rows]),
+        })
+        self.assertEqual(len(result), len(rows))
+        for row in result:
+            name, last_name = expected[row["allocine_id"]]
+            with self.subTest(name=name, allocine_id=row["allocine_id"]):
+                self.assertEqual(row["last_name"], last_name)
+                self.assertEqual(row["full_name"], name)
+                self.assertEqual(row["first_name"], name.split(" ")[0])
+                self.assertEqual(row["credit_holder_id"], str(uuid.UUID(hashlib.md5(name.encode()).hexdigest())))
+                self.assertEqual(row["film_id"], FILM)
+
     def test_film_title_matching_priority_and_fallbacks(self):
         cases = [
             (" Dans les yeux de Thomas Pesquet ", "Titre Allociné", "CNC", "Dans les yeux de Thomas Pesquet"),
