@@ -276,7 +276,8 @@ class ConnectorConfig:
     def from_dict(cls, raw_config: dict[str, Any]) -> "ConnectorConfig":
         database_url = raw_config.get("database_url") or _build_database_url(raw_config)
         completed_statuses = (
-            raw_config.get("completed_statuses") or DEFAULT_COMPLETED_STATUSES
+            raw_config["completed_statuses"]
+            if raw_config.get("completed_statuses") is not None else DEFAULT_COMPLETED_STATUSES
         )
 
         values = {
@@ -547,8 +548,12 @@ class AllocineAirbyteSource:
         config = ConnectorConfig.from_dict(raw_config)
         records = asyncio.run(self._read_async(config))
         if not records:
+            if raw_config.get("require_success"):
+                raise ValueError("Aucun film éligible pour ce visa : vérifier id_matching ou activer le forçage")
             return 0
         self._insert_records(config, records)
+        if raw_config.get("require_success") and any(record.get("scrape_status") != "success" for record in records):
+            raise ValueError("Scraping ciblé non confirmé : consulter le statut et le motif dans Metabase")
         return len(records)
 
     async def _read_async(self, config: ConnectorConfig) -> list[dict[str, Any]]:

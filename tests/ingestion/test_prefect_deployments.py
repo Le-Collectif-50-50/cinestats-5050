@@ -46,7 +46,7 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(flow.parameters.properties["max_films"]["default"], 10)
             self.assertEqual(flow.parameters.properties["max_films"]["exclusiveMinimum"], 0)
             for kwargs, expected in [({}, "10"), ({"max_films": 25}, "25")]:
-                with patch.object(flows, "get_run_logger"), patch.object(flows, "_run") as run:
+                with patch.object(flows, "get_run_logger"), patch.object(flows, "_run_airbyte_sync_step"), patch.object(flows, "_run") as run:
                     flow.fn(**kwargs)
                     self.assertEqual(run.call_args.args[0][-2:], ["--limit", expected])
             for invalid in (0, -1, True, 1.5):

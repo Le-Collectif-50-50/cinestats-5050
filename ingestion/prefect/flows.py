@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import os
+import re
 import socket
 import shlex
 import subprocess
@@ -110,6 +111,21 @@ DO $$ BEGIN
 END $$;
 
 ALTER TABLE ops.ingestion_run_requests
+  ADD COLUMN IF NOT EXISTS visa_number TEXT,
+  ADD COLUMN IF NOT EXISTS force_rescrape BOOLEAN NOT NULL DEFAULT false;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'ops.ingestion_run_requests'::regclass
+                   AND conname = 'allocine_target_parameters') THEN
+    ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT allocine_target_parameters
+      CHECK ((visa_number IS NULL AND NOT force_rescrape) OR (
+        request_type = 'allocine' AND visa_number IS NOT NULL
+        AND visa_number ~ '^[0-9]+$' AND visa_number ~ '[1-9]' AND max_films = 1));
+  END IF;
+END $$;
+
+ALTER TABLE ops.ingestion_run_requests
   DROP COLUMN IF EXISTS requested_extraction_date;
 """
 
@@ -135,6 +151,18 @@ def _main_deployment_name() -> str:
 def _validate_film_limit(max_films: int) -> None:
     if isinstance(max_films, bool) or not isinstance(max_films, int) or max_films < 1:
         raise ValueError("max_films doit être un entier strictement positif")
+
+
+def _validate_allocine_target(visa_number: str | None, force_rescrape: bool) -> None:
+    if not isinstance(force_rescrape, bool):
+        raise ValueError("force_rescrape doit être un booléen")
+    if visa_number is None:
+        if force_rescrape:
+            raise ValueError("Le forçage exige un visa CNC explicite")
+    elif not isinstance(visa_number, str) or not re.fullmatch(r"[0-9]+", visa_number) or not any(
+        digit != "0" for digit in visa_number
+    ):
+        raise ValueError("Le visa CNC doit être une chaîne de chiffres strictement positive")
 
 
 @dataclass(frozen=True)
@@ -400,6 +428,14 @@ async def _trigger_ingestion_request_run(
         _validate_film_limit(max_films)
         deployment_name = ALLOCINE_DEPLOYMENT_NAME
         parameters = {"request_id": str(request_id), "max_films": max_films}
+        visa_number = request_row.get("visa_number")
+        force_rescrape = request_row.get("force_rescrape", False)
+        _validate_allocine_target(visa_number, force_rescrape)
+        if visa_number is not None:
+            if max_films != 1:
+                raise ValueError("Une demande par visa doit avoir max_films=1")
+            parameters.update(visa_number=visa_number, force_rescrape=force_rescrape,
+                              airbyte_connection_names=settings.airbyte_connection_names)
     elif request_type == "ingestion":
         deployment_name = settings.main_deployment_name
         parameters = _build_request_parameters(settings, request_id=request_id)
@@ -641,9 +677,16 @@ def run_dbt_phase_1() -> None:
     _run_dbt_phase_1_step()
 
 
-def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH), max_films: int = 10) -> None:
+def _run_allocine_scraping_step(
+    config_path: str = str(ALLOCINE_CONFIG_PATH), max_films: int = 10,
+    visa_number: str | None = None, force_rescrape: bool = False,
+) -> None:
     _validate_film_limit(max_films)
     logger = get_run_logger()
+    _validate_allocine_target(visa_number, force_rescrape)
+    target_args = ["--source-id", visa_number, "--require-success"] if visa_number is not None else []
+    if force_rescrape:
+        target_args.append("--force")
     logger.info("Task parameters: config_path=%s, max_films=%s", config_path, max_films)
     _run(
         [
@@ -655,7 +698,7 @@ def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH), ma
             config_path,
             "--limit",
             str(max_films),
-        ],
+        ] + target_args,
         step_name="Recuperer les donnees Allocine",
         cwd=REPO_ROOT,
     )
@@ -663,18 +706,28 @@ def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH), ma
 
 @flow(
     name="Recuperer les donnees Allocine",
-    description="Lance le scraping Allocine avec la configuration fournie.",
+    description="Airbyte puis scraping Allociné ; avec visa_number, publication dbt incluse.",
 )
 def run_allocine_scraping(
     config_path: str = str(ALLOCINE_CONFIG_PATH), max_films: FilmLimit = 10,
     request_id: str | None = None,
+    visa_number: str | None = None, force_rescrape: bool = False,
+    airbyte_connection_names: list[str] | None = None,
 ) -> None:
     request_uuid = UUID(request_id) if request_id is not None else None
     settings = IngestionRequestSettings.from_env() if request_uuid is not None else None
     if settings is not None:
         _mark_request_processing(settings, request_id=request_uuid)
     try:
-        _run_allocine_scraping_step(config_path=config_path, max_films=max_films)
+        _validate_allocine_target(visa_number, force_rescrape)
+        _validate_film_limit(max_films)
+        _run_airbyte_sync_step(enabled=True, connection_names=airbyte_connection_names)
+        if visa_number is None:
+            _run_allocine_scraping_step(config_path=config_path, max_films=max_films)
+        else:
+            _run_allocine_scraping_step(config_path=config_path, max_films=1,
+                                       visa_number=visa_number, force_rescrape=force_rescrape)
+            _run_dbt_phase_2_step()
     except Exception as exc:
         if settings is not None:
             _mark_request_failed(settings, request_id=request_uuid, error_message=str(exc))
