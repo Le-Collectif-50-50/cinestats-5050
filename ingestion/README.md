@@ -25,6 +25,7 @@
 | 11 | 2026-11-13 | Joel Teixeira | Reprise Allociné lorsque l'ID cible change dans id_matching ; sélection ciblée par visa dans le CLI. Déclenchement Allociné depuis Metabase avec limite de films et suivi des demandes. |
 
 | 12 | 2026-11-14 | Joel Teixeira | Deuxième bouton Metabase par visa, forçage explicite et parcours Prefect Airbyte → scraping ciblé → dbt. |
+| 13 | 2026-11-14 | Joel Teixeira | Référence de la revue #53 : qualification des visas sans ID Allociné, correspondances confirmées et contrôles de publication. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -392,6 +393,7 @@ Artefacts associés:
 1. [Runbook infra](../docs/runbooks/ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md): installation et exploitation locale Airbyte/dbt/PostgreSQL.
 1. [Specification Airbyte/dbt](../docs/specifications/ingestion-specification-airbyte-dbt-mises-a-jour-donnees.md): contrats cible et critères d'acceptation.
 1. [Architecture ingestion](../docs/architecture/ingestion-architecture-airbyte-dbt-prefect-scraping.md): cible de référence, état actuel relatif et roadmap de convergence.
+1. [Revue du matching incomplet — issue 53](../docs/reference/ingestion-revue-matching-issue-53.md) : lot de 236 visas, décisions documentées et contrôles des 18 correspondances confirmées.
 
 ## Referenced by
 
