@@ -1,0 +1,103 @@
+name: dbt lineage
+
+on:
+  pull_request:
+    paths:
+      - 'ingestion/**'
+      - 'scripts/generate_dbt_lineage.py'
+      - 'tests/ingestion/test_dbt_lineage.py'
+      - '.github/workflows/dbt-lineage.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ingestion/**'
+      - 'scripts/generate_dbt_lineage.py'
+      - 'tests/ingestion/test_dbt_lineage.py'
+      - '.github/workflows/dbt-lineage.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dbt-lineage-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Valeurs fictives : parse ne se connecte pas à PostgreSQL.
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: '1'
+      POSTGRES_DB: lineage
+      DBT_USER_POSTGRES_PASSWORD: unused
+      DBT_SEND_ANONYMOUS_USAGE_STATS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Installer les versions dbt du worker existant
+        run: python -m pip install dbt-core==1.11.7 dbt-postgres==1.10.0
+      - name: Tester le générateur
+        run: python -m unittest discover -s tests/ingestion -p test_dbt_lineage.py
+      - name: Résoudre les packages dbt si déclarés
+        working-directory: ingestion/dbt
+        run: |
+          if [ -f packages.yml ] || [ -f dependencies.yml ]; then
+            dbt deps --profiles-dir profiles
+          fi
+      - name: Analyser dbt sans connexion à la base
+        run: dbt parse --no-partial-parse --project-dir ingestion/dbt --profiles-dir ingestion/dbt/profiles
+      - name: Générer le document Markdown et Mermaid
+        env:
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.sha }}
+        run: |
+          python scripts/generate_dbt_lineage.py ingestion/dbt/target/manifest.json \
+            "$RUNNER_TEMP/lineage/README.md" \
+            --source-url "$SOURCE_URL" --revision-date "$(git show -s --format=%cs HEAD)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dbt-lineage
+          path: ${{ runner.temp }}/lineage/README.md
+          if-no-files-found: error
+      - name: Indiquer où lire le résultat
+        env:
+          LINEAGE_URL: ${{ github.server_url }}/${{ github.repository }}/blob/dbt-lineage/README.md
+        run: |
+          echo 'Document de ce run : artefact **dbt-lineage** (README.md).' >> "$GITHUB_STEP_SUMMARY"
+          echo "Version publiée après un push sur main : [Lineage dbt]($LINEAGE_URL)." >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dbt-lineage
+          path: ${{ runner.temp }}/lineage
+      - name: Publier uniquement le document sur dbt-lineage
+        run: |
+          git fetch origin
+          if git show-ref --verify --quiet refs/remotes/origin/dbt-lineage; then
+            git switch -C dbt-lineage origin/dbt-lineage
+          else
+            git switch --orphan dbt-lineage
+          fi
+          cp "$RUNNER_TEMP/lineage/README.md" README.md
+          git add README.md
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: actualiser le lineage dbt'
+          git push origin HEAD:refs/heads/dbt-lineage

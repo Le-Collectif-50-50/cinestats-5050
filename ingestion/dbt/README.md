@@ -25,7 +25,7 @@
 | 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
-| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. |
+| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. Publication automatique du lineage dbt complet dans GitHub, avec vues détaillées par schéma, sans connexion PostgreSQL. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -60,6 +60,62 @@ docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt parse --p
 docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt build --profile ric --project-dir /app/ingestion/dbt --select tag:phase1
 docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt build --profile ric --project-dir /app/ingestion/dbt --select +tag:phase2
 ```
+
+## Consulter le lineage dans GitHub
+
+Le [document de lineage](https://github.com/Le-Collectif-50-50/cinestats-5050/blob/dbt-lineage/README.md)
+présente d’abord un diagramme Mermaid complet : toutes les sources et tous les modèles
+actifs, regroupés par schéma, avec leurs dépendances de bout en bout dans dbt.
+Les vues par schéma restent disponibles dans une section repliable, suivies
+d’un inventaire lié au code analysé. GitHub affiche ces diagrammes
+directement dans le Markdown, sans extension ni service supplémentaire.
+Le lien devient disponible après le premier push concerné sur `main` ayant réussi.
+
+Le workflow [dbt lineage](../../.github/workflows/dbt-lineage.yml) :
+
+1. Se déclenche sur les PR et les push sur `main` qui modifient `ingestion/**`,
+   le générateur, ses tests ou le workflow lui-même. Aucun déclenchement planifié
+   ni lié à un changement des données en base.
+2. Installe sur le runner les versions dbt déjà utilisées dans
+   `ingestion/prefect/Dockerfile` : Core 1.11.7 et Postgres 1.10.0.
+   Maintenir ces versions ensemble lors des mises à jour.
+3. Exécute `dbt parse --no-partial-parse` avec un profil aux valeurs fictives.
+   Cette commande ne se connecte pas à PostgreSQL et ne lance ni modèle ni scraper.
+4. Convertit le `manifest.json` en Markdown/Mermaid avec un script Python
+   utilisant uniquement la bibliothèque standard. Le manifest complet n’est pas publié.
+5. Joint le document à chaque run sous l’artefact `dbt-lineage`. Pour une PR,
+   cet artefact permet de relire le Markdown ; les diagrammes seront rendus
+   dans le document publié sur GitHub après fusion.
+6. Après un push sur `main`, publie le document comme `README.md` sur la branche
+   `dbt-lineage`, avec le `GITHUB_TOKEN` intégré et la permission `contents: write`.
+   Les PR, y compris celles de forks, ne disposent pas de cette permission.
+
+La branche dédiée conserve l’historique des documents sans commit automatique
+sur `main`. Sa mise à jour ne relance pas ce workflow. Si une règle du dépôt
+interdit sa création ou son écriture par GitHub Actions, la publication échoue ;
+autoriser cette branche pour le bot, sans désactiver les protections de `main`.
+L’artefact du run reste disponible même si la publication échoue.
+
+Le graphe couvre les dépendances déclarées par `ref()` et `source()` entre sources,
+modèles, seeds et snapshots actifs. Il ne décrit pas les colonnes, les références
+SQL écrites en dur, les traitements Airbyte/Prefect/scraping, ni l’état réel en base.
+Les tests, analyses et macros ne sont pas des nœuds du graphe.
+
+Pour reproduire sans accès à PostgreSQL, depuis la racine avec l’environnement
+dbt du [runbook local](runbook_dbt_local.md) activé :
+
+```bash
+export POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=1 POSTGRES_DB=lineage
+export DBT_USER_POSTGRES_PASSWORD=unused DBT_SEND_ANONYMOUS_USAGE_STATS=false
+dbt parse --no-partial-parse --project-dir ingestion/dbt --profiles-dir ingestion/dbt/profiles
+python scripts/generate_dbt_lineage.py ingestion/dbt/target/manifest.json /tmp/dbt-lineage.md \
+  --source-url "https://github.com/Le-Collectif-50-50/cinestats-5050/tree/$(git rev-parse HEAD)" \
+  --revision-date "$(git show -s --format=%cs HEAD)"
+python -m unittest discover -s tests/ingestion -p test_dbt_lineage.py
+```
+
+Références : [dbt parse](https://docs.getdbt.com/reference/commands/parse),
+[diagrammes Mermaid sur GitHub](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/creating-diagrams).
 
 ## Tags
 
