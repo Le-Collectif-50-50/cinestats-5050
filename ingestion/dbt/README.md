@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-13
+**Dernière révision:** 2026-11-14
 
 **Status:** actif
 
@@ -21,6 +21,9 @@
 | 7 | 2026-11-12 | Joel Teixeira | Alignement des corrections sur le schéma Airbyte : clés composées des crédits et genres, retrait du champ Allociné des rôles et filtre GENRE_ID. Dashboard Metabase de revue du scraping Allociné, des écarts de visa et des recherches sans résultat (`not_found`). |
 | 8 | 2026-11-13 | Joel Teixeira | Intégration des ajouts manuels de personnes et crédits, dernier succès Allociné par visa, contrôles de références et conversion du crédit d’impôt. |
 | 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. Bouton Allociné dans Metabase, suivi des demandes et statuts par heure avec filtre de plage de dates. Documentation de la reprise des correspondances validées dans id_matching. Fiches métier Film et Credit Holder dans Metabase, recherche, navigation croisée et vue finale des affiches. |
+
+| 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
+| 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -79,6 +82,28 @@ Pour vérifier le périmètre sans écrire en base, remplacer `dbt build` par `d
 
 Le staging Allociné conserve le dernier succès par visa source (repli sur `source_record_id` si le visa est absent), selon `extracted_at`, puis `run_id` et `record_hash`. Une tentative ultérieure en erreur ne remplace pas ce succès. Les visas absents ou encore dupliqués font échouer le test dédié. Le rapprochement des métadonnées Allociné utilise le visa et l’identifiant Allociné ; la table finale joint ces métadonnées par `film_id`. Des visas distincts partageant un identifiant Allociné restent signalés dans les contrôles de matching. Cette règle ne valide pas l’identité d’un ancien résultat de scraping.
 
+## Priorité du titre final
+
+`fnl_films.movie_name` utilise le titre non vide de `int_id_matching.cnc_name`
+(onglet `id_matching`, colonne `TITRE`) en priorité, puis le titre Allociné non vide,
+puis le titre CNC de `raw.films`. Les espaces de bord sont retirés des deux premiers
+choix ; une chaîne vide ou composée uniquement d'espaces déclenche le repli.
+Cette priorité s'applique à tous les films : les titres du matching constituent
+le choix éditorial, même lorsqu'un titre Allociné existe.
+
+Pour le visa `144246`, le titre du matching « Dans les yeux de Thomas Pesquet »
+doit ainsi remplacer « 16 levers de soleil » dans le modèle final. Cette correction
+de titre ne valide ni le format de l'œuvre ni ses dates, genres ou crédits (#46).
+Après déploiement du modèle, reconstruire `fnl_films` dans le cadre du run dbt
+habituel pour publier le résultat. Aucun nouveau scraping n'est nécessaire lorsque
+seul le titre change. Les identifiants et les associations ne sont pas modifiés.
+
+Le test `test_film_title_matching_priority_and_fallbacks` dans
+`tests/ingestion/test_dbt_manual_recovery.py` exécute le modèle complet sur six cas
+PostgreSQL : correction prioritaire, titre Allociné absent, matching nul ou vide,
+et repli CNC. Comme les autres tests SQL de ce module, il nécessite
+`DBT_TEST_SSH` et `DBT_TEST_DATABASE` et s'exécute en transaction read-only.
+
 ## Classification des genres
 
 Le `CASE` de `int_film_genres` classe `Judiciaire` dans `Aventure/Policier/Thriller` et accepte `Epouvante-horreur` avec ou sans accent initial pour `Fantastique/Horreur/SF`. `Péplum` rejoint `Biopic/Guerre/Histoire`. `Divers`, `Erotique` et `Évènement Sportif` conservent chacun une catégorie explicite. Ce mapping couvre les 29 genres distincts observés dans `staging.stg_allocine_films` le 11 novembre 2026. Les nouveaux genres sans correspondance restent nuls et font échouer les tests de présence des tables finales : ajouter leur classement explicitement, sans catégorie de repli « Autre ».
@@ -96,6 +121,79 @@ Dans `int_credit_holders_role`, les identifiants des personnes restent dérivés
 Les crédits dont `film_id` est nul sont exclus de `fnl_film_credits` et conservés dans `ops.film_credits_unmatched`. Cette quarantaine expose l'identifiant Allociné, la personne ou société, le rôle et les visas/titres des entrées de scraping à examiner. Le test `film_credits_unmatched_review` signale leur présence avec une sévérité `warn`. Aucune correspondance n'est attribuée automatiquement par titre ou par visa de la requête de scraping. Les personnes et sociétés restent dans leur référentiel final.
 
 Les jointures intermédiaires Mubi convertissent les identifiants numériques du scraping en texte pour les comparer aux identifiants du matching.
+
+## Naviguer dans les dashboards Operations
+
+[Pipeline Overview](https://metabase.cinestats5050.fr/dashboard/2) est le point
+d'entrée pour demander une ingestion et suivre les demandes Metabase de type
+`ingestion`. Le statut concerne la dernière demande enregistrée, pas un état
+global en temps réel. L'historique compte les demandes par heure de Paris ; les
+lancements manuels Prefect ne sont pas inscrits dans cette file. Les graphiques
+Allociné et leurs filtres ont été retirés de cette vue ; Metabase a archivé les
+quatre questions attachées à ce dashboard (39, 40, 41 et 46).
+
+Les introductions et liens croisent quatre parcours :
+
+- [Qualité dbt](https://metabase.cinestats5050.fr/dashboard/3) : derniers résultats
+  par contrôle, ou résultats de l'exécution sélectionnée. Le rapprochement des
+  anomalies avec les titres et visas utilise toujours le matching courant.
+- [Scraping Allociné](https://metabase.cinestats5050.fr/dashboard/7) : lancement
+  séparé, revue métier et tentatives par heure. Le filtre de période ne concerne
+  que le graphique ; les compteurs de revue ne recensent pas `error` et `blocked`.
+- [Suivi par visa CNC](https://metabase.cinestats5050.fr/dashboard/11) : provenance
+  et propagation d'un film entre les couches.
+- [Fiche Film](https://metabase.cinestats5050.fr/dashboard/9) : données finales
+  destinées à la consultation métier.
+
+Les cinq questions Mubi sans dashboard (47 à 51) sont regroupées dans la
+sous-collection **Explorations Mubi**. Leurs identifiants et requêtes sont
+conservés ; leurs titres et descriptions précisent les unités. Le compteur de
+matching compte des lignes, pas des films distincts, et ignore le statut
+`no_awards` ; le compteur de collecte des récompenses déduplique les liens et
+considère `no_awards` comme terminé. Ils ne mesurent donc pas le même périmètre.
+
+Le [script de réconciliation](../../infra/data/metabase-operations.py) cible
+explicitement cette instance et ses identifiants. Il vérifie les noms des quatre
+dashboards, leur collection et la connexion avant modification. Sans `--apply`,
+il valide les trois requêtes d'ingestion et le filtre temporel Allociné, puis
+affiche le plan sans écrire.
+
+```bash
+python3 infra/data/metabase-operations.py --env-file ingestion/.env
+python3 infra/data/metabase-operations.py --env-file ingestion/.env --apply
+```
+
+Réappliquer cette réconciliation **après** les scripts de publication des
+dashboards spécialisés : ceux-ci possèdent encore leurs propres dispositions et
+peuvent remplacer les introductions ou replacer les cartes. La réconciliation
+préserve les filtres des dashboards spécialisés, notamment la période Allociné
+déjà configurée ; elle retire uniquement les deux filtres obsolètes de Pipeline
+Overview. Le type de widget temporel de la question Allociné est aligné sur le
+filtre du dashboard : une période relative ne doit pas cibler un widget limité
+aux plages fixes, sous peine d'erreur à l'exécution. La valeur de période reste
+inchangée. Le script ne modifie ni les actions, ni les données, ni les permissions.
+
+Pendant une reconstruction dbt, une relation peut être temporairement absente.
+Actualiser le dashboard après la fin de l'ingestion avant de conclure à une
+requête défectueuse. Les détails d'anomalies peuvent dépasser la limite
+d'affichage de Metabase ; le nombre de lignes affichées ne représente alors pas
+le total des anomalies.
+
+### Restreindre Operations et Trigger
+
+`Trigger` est déjà une sous-collection d'`Operations`. Ce rangement ne garantit
+pas un accès identique : les permissions des sous-collections existantes doivent
+être vérifiées séparément dans **Administration → Permissions → Collections**.
+Pour Operations, Trigger et Explorations Mubi, attribuer **Aucun accès** à **Tous les
+utilisateurs** et aux autres groupes non Ops ; attribuer **Consultation** au
+groupe Operations, ou **Édition** à ses éditeurs. Les administrateurs conservent
+leur accès. Les droits se cumulent : un autre groupe permissif rétablit l'accès.
+Voir la [documentation Metabase](https://www.metabase.com/docs/latest/permissions/collections).
+
+Après enregistrement, vérifier avec un compte non Ops l'absence de la collection
+et le refus d'accès à son URL directe et à ses questions. Ces réglages exigent
+un administrateur ; la clé API Operations utilisée pour les dashboards ne peut
+pas lire ni modifier le graphe des permissions (HTTP 403).
 
 ## Suivre la qualité dbt dans Metabase
 
@@ -200,9 +298,12 @@ inscrits dans cette file Metabase.
 Le [graphique](analyses/metabase/scraping_execution_status.sql) compte les tentatives
 stockées par heure de Paris et `scrape_status`, toutes exécutions confondues,
 sur toute la période sélectionnée, sans limite de nombre de tranches horaires.
+Le filtre est relatif, avec **sept derniers jours** par défaut. La question SQL
+accepte également un paramètre relatif ; ce type doit rester aligné avec celui
+du dashboard, y compris lors d'une republication.
 Les heures sans tentative et les dates nulles sont exclues.
 Il inclut `success`, `not_found`, `needs_review`, `visa_mismatch`, `error`, `blocked` et
-les statuts inconnus. La plage de dates filtre les tentatives avant agrégation ; les filtres visa et titre
+les statuts inconnus. La période relative filtre les tentatives avant agrégation ; les filtres visa et titre
 s’appliquent également au graphique.
 L'heure est tronquée au début de la tranche : 14:37 est compté dans 14:00.
 Les tentatives de plusieurs runs dans la même heure sont additionnées. Un run qui
@@ -423,3 +524,45 @@ Déployer le code avant de modifier le format des GSheets, puis reconstruire les
 stagings et leurs dépendances via le pipeline complet. Le parsing dbt et les
 tests SQL vérifient les anciennes dates, les heures/minutes/secondes, les dates
 invalides et la priorité des corrections indépendamment de leur ordre d’entrée.
+
+## Suivi des données par visa CNC dans Metabase
+
+Le dashboard **Suivi des données par visa CNC**, dans **Cinestats 50/50 - Operations**,
+utilise la connexion `cinestats-ops-db`. Son filtre obligatoire **Visa CNC** vaut
+`144246` par défaut. Chaque carte reçoit ce filtre ; changer le visa actualise
+l'ensemble du suivi.
+
+Les sections exposent la ligne `raw.films` synchronisée, toutes les lignes de
+`raw.id_matching` correspondantes, le dernier essai Allociné tous statuts, le
+dernier succès, les modèles staging et intermédiaires, les corrections manuelles,
+les films et affiches finaux, les crédits avec leurs personnes et rôles, les genres,
+les financements, les enrichissements Mubi transformés et la quarantaine liée aux
+identifiants Allociné courants ou historiques. Les détails champ/valeur exposent
+chaque colonne disponible, y compris les métadonnées. Les 30 essais les plus récents
+complètent la lecture de l'état courant.
+
+**Sémantique de « latest » :** les tables Airbyte sont leur snapshot courant ; elles
+ne prouvent pas le contenu actuel du GSheet ni le fichier CNC originel. Les tables
+dbt reflètent leur dernière reconstruction. Le dernier essai et le dernier succès
+sont classés par `extracted_at DESC NULLS LAST`, puis `run_id` et `record_hash`
+décroissants, comme le staging pour les succès. Les doublons de matching restent
+visibles. Les champs `NULL` et les associations absentes ne sont pas remplacés par
+le legacy. La concordance des identifiants ne prouve pas l'identité de l'œuvre.
+
+Pour #46, contrôler la fiche confirmée, le format long/court, la date, les genres
+et la réalisation. Le dashboard ne clôture pas le ticket automatiquement.
+
+Vérifier les requêtes sur 144246 puis publier ou actualiser le dashboard :
+
+```bash
+python3 infra/data/metabase-visa-lineage.py --env-file ingestion/.env --check
+python3 infra/data/metabase-visa-lineage.py --env-file ingestion/.env
+```
+
+La clé `METABASE_API_KEY` reste dans l'environnement ou le fichier `.env` explicite.
+Le script vérifie toutes les requêtes avant publication. Il retrouve dashboard et
+questions par nom dans Operations et conserve les cartes manuelles. Les noms doivent
+rester uniques. Seules les descriptions, questions et dispositions Metabase sont
+modifiées ; la consultation ne déclenche aucune ingestion. L'accès dépend des
+permissions de la collection Operations, sans partage public créé par ce script.
+Les droits de sa sous-collection Trigger se contrôlent séparément.

@@ -24,7 +24,7 @@ models:
           - not_null
           - unique
       - name: movie_name
-        description: "Titre du film tel qu'affiché dans Cinéstats 50/50, privilégiant le titre Allociné."
+        description: "Titre affiché : titre non vide du matching en priorité, puis titre Allociné non vide, puis titre CNC source. Les espaces de bord sont retirés des deux premiers choix."
         tests:
           - not_null
       - name: cnc_agreement_year
