@@ -25,7 +25,7 @@
 | 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
-| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. Publication automatique du lineage dbt complet dans `docs/dbt-lineage.md` sur `main`, avec vues détaillées par schéma, sans connexion PostgreSQL. |
+| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. Publication automatique du lineage dbt complet dans `docs/dbt-lineage.md` sur `main`, avec vues détaillées par schéma, sans connexion PostgreSQL, et identité de publication GitHub App dédiée. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -87,20 +87,36 @@ Le workflow [dbt lineage](../../.github/workflows/dbt-lineage.yml) :
    cet artefact permet de relire le Markdown ; les diagrammes seront rendus
    dans le document publié sur GitHub après fusion.
 6. Après un push sur `main`, publie le document dans `docs/dbt-lineage.md` sur
-   `main`, avec le `GITHUB_TOKEN` intégré et la permission `contents: write`.
+   `main`, avec un token temporaire de l’application GitHub dédiée, limité au dépôt
+   et à la permission `contents: write`.
    Les PR, y compris celles de forks, ne disposent pas de cette permission.
 
 Chaque publication modifiée ajoute un commit du bot dans `main`, limité à
-`docs/dbt-lineage.md`. Le README principal est conservé. Ce push avec le
-`GITHUB_TOKEN` ne déclenche pas de nouveau workflow ; le chemin du document
-n’entre pas non plus dans les filtres de ce workflow. Voir la
-[documentation GitHub du token](https://docs.github.com/en/actions/concepts/security/github_token).
+`docs/dbt-lineage.md`. Le README principal est conservé. Le message du commit
+contient `[skip ci]` ; le chemin du document n’entre pas non plus dans les filtres
+de ce workflow. Le token de publication est révoqué à la fin du job.
 Si les sources du graphe ont changé sur `main` depuis le commit analysé, le run
 laisse la publication au run suivant pour éviter un graphe périmé.
 Le push est effectué sans forcer : une modification concurrente de `main` peut
 faire échouer la publication. Une règle interdisant les commits directs du bot
 sur `main` la bloque également ; les protections ne sont pas modifiées par ce workflow.
 L’artefact du run reste disponible même si la publication échoue.
+
+### Configurer l’identité de publication
+
+Créer l’application privée **CineStats dbt lineage** dans le compte du Collectif
+50/50 et l’installer uniquement sur `cinestats-5050`, avec **Contents: Read and write**
+(et Metadata: Read-only imposé par GitHub), sans webhook ni permission Workflows.
+Enregistrer sa clé privée dans le secret Actions `DBT_LINEAGE_APP_PRIVATE_KEY` et
+son identifiant dans la variable `DBT_LINEAGE_APP_ID`. Ne jamais versionner la clé.
+Conserver le passage par PR pour les autres identités dans la protection de `main`
+et ajouter uniquement cette application à `bypass_pull_request_allowances.apps`.
+Le `GITHUB_TOKEN` natif ne dispose pas de cette exception.
+
+Pour renouveler la clé : générer une nouvelle clé dans les paramètres de
+l’application, remplacer le secret Actions, vérifier une publication puis révoquer
+l’ancienne clé. Pour désactiver la publication : retirer l’exception de protection
+et désinstaller l’application. Les contrôles et artefacts des PR restent disponibles.
 
 Le graphe couvre les dépendances déclarées par `ref()` et `source()` entre sources,
 modèles, seeds et snapshots actifs. Il ne décrit pas les colonnes, les références

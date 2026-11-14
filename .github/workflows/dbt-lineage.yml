@@ -77,11 +77,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write
+      contents: read
     steps:
+      - name: Créer un token limité au dépôt pour la publication
+        uses: actions/create-github-app-token@v3
+        id: lineage-token
+        with:
+          app-id: ${{ vars.DBT_LINEAGE_APP_ID }}
+          private-key: ${{ secrets.DBT_LINEAGE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.lineage-token.outputs.token }}
       - uses: actions/download-artifact@v4
         with:
           name: dbt-lineage
@@ -103,5 +113,5 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'docs: actualiser le lineage dbt'
+          git commit -m 'docs: actualiser le lineage dbt [skip ci]'
           git push origin HEAD:refs/heads/main
