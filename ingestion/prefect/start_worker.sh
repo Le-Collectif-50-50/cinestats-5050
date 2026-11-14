@@ -43,7 +43,7 @@ prefect --no-prompt deploy "${FLOWS_FILE}:main_ingestion_flow" \
 # Scrapers manuels : aucun calendrier ni lancement au démarrage du worker.
 prefect --no-prompt deploy "${FLOWS_FILE}:run_allocine_scraping" \
 	--name "lancer-scrapping-allocine" \
-	--description "Scraping Allocine manuel, max_films=10 par defaut, sans Airbyte ni dbt." \
+	--description "Allocine manuel : Airbyte puis scraping par lot (max_films=10) ; avec visa_number, scraping cible et dbt inclus." \
 	--concurrency-limit 1 \
 	--pool "${POOL_NAME}" >/tmp/prefect-deploy-allocine.log 2>&1 || {
 	cat /tmp/prefect-deploy-allocine.log

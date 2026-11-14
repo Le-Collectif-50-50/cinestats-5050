@@ -1,6 +1,7 @@
 -- Suivi technique des demandes Metabase, y compris celles sans résultat film.
 SELECT requested_at AS demande_le, requested_by_metabase_user AS demandeur,
        request_reason AS motif, max_films AS films_maximum,
+       visa_number AS visa_cnc, force_rescrape AS retraitement_force,
        CASE request_status
            WHEN 'pending' THEN 'En attente'
            WHEN 'processing' THEN 'Transmise / en cours'

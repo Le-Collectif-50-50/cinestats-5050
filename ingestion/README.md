@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-13
+**Dernière révision:** 2026-11-14
 
 **Status:** actif
 
@@ -23,6 +23,8 @@
 | 9 | 2026-11-13 | Joel Teixeira | Dernier succès Allociné par visa et intégration des personnes et crédits manuels dans les modèles finaux. Déploiement Allociné manuel réactivé et délais de navigation documentés. |
 | 10 | 2026-11-13 | Joel Teixeira | Quatre déploiements Prefect : ingestion sans scraping, scrapers Allociné et Mubi CNC manuels avec max_films=10, migration du nom ciblé par le poller. |
 | 11 | 2026-11-13 | Joel Teixeira | Reprise Allociné lorsque l'ID cible change dans id_matching ; sélection ciblée par visa dans le CLI. Déclenchement Allociné depuis Metabase avec limite de films et suivi des demandes. |
+
+| 12 | 2026-11-14 | Joel Teixeira | Deuxième bouton Metabase par visa, forçage explicite et parcours Prefect Airbyte → scraping ciblé → dbt. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -275,7 +277,7 @@ Au démarrage, `start_worker.sh` publie exactement quatre déploiements gérés 
 | Déploiement | Étapes | Déclenchement | Paramètre de volume |
 | --- | --- | --- | --- |
 | `lancer-ingestion-complete` | Airbyte → dbt phase 1 → dbt phase 2 | Manuel ou demande Metabase | Aucun scraping |
-| `lancer-scrapping-allocine` | Scraping Allociné seul | Manuel ou demande Metabase, aucun calendrier | `max_films=10` |
+| `lancer-scrapping-allocine` | Lot : Airbyte → scraping ; visa : Airbyte → scraping ciblé → dbt phase 2 | Manuel ou demande Metabase, aucun calendrier | `max_films=10` |
 | `lancer-scrapping-mubi` | Scraping Mubi piloté CNC | Manuel, aucun calendrier | `max_films=10` |
 | `traiter-les-demandes-ingestion` | Poll de `ops.ingestion_run_requests` | Toutes les 300 secondes par défaut | `max_requests_per_run=1` |
 
@@ -298,10 +300,18 @@ scraper. Airbyte est activé par défaut et utilise
 La phase 1 exécute `dbt build --select tag:phase1` ; la phase 2 exécute
 `dbt build --select +tag:phase2`. `run_dbt_phase_2_step=false` permet de sauter
 cette dernière. Les flags CLI correspondants restent disponibles.
-Les scrapers seuls ne lancent ni Airbyte ni dbt : relancer l’ingestion pour
-publier leurs résultats dans les modèles finaux.
+Les lots Allociné sans visa attendent Airbyte avant le scraping, puis nécessitent
+une ingestion séparée pour publier leurs résultats dans les modèles finaux.
+Le scraper Mubi ne lance ni Airbyte ni dbt.
+Avec `visa_number`, le même déploiement Allociné attend les syncs Airbyte configurés,
+scrape uniquement ce visa (`max_films` est ramené à 1), puis exécute
+`dbt build --select +tag:phase2`. `force_rescrape=true` rejoue les traitements
+terminés uniquement pour ce visa, sans supprimer leur historique ni désactiver
+les contrôles de correspondance. Sans film éligible ou avec un statut différent
+de `success`, le parcours ciblé échoue et ne lance pas dbt. Les tentatives
+non confirmées restent consultables dans Metabase.
 
-### Publier et lancer le scraping seul
+### Publier et lancer les scrapers
 
 Après livraison du code, attendre la fin des runs actifs puis recréer le worker :
 
@@ -334,7 +344,10 @@ délais Allociné sont décrits dans le [guide Allociné](scraping/allocine/READ
 Le bouton **Lancer le scraping Allociné** du dashboard **Scraping Allociné — À examiner**
 ouvre un formulaire identité, motif et nombre maximum de films (10 par défaut).
 Il traite les films éligibles selon la configuration du scraper ; les filtres du
-dashboard ne ciblent pas ce lancement. Voir le [guide Metabase](dbt/README.md#examiner-les-correspondances-du-scraping-dans-metabase)
+dashboard ne ciblent pas ce lancement. Le deuxième bouton **Scraper un visa CNC**
+demande identité, motif, visa CNC et **Forcer le retraitement** (Non par défaut).
+Il déclenche le parcours complet Airbyte → scraping ciblé → dbt, indépendamment
+des filtres du dashboard. Les deux boutons partagent le même verrou de demande active. Voir le [guide Metabase](dbt/README.md#examiner-les-correspondances-du-scraping-dans-metabase)
 pour les graphiques et la procédure de publication.
 
 ## Usage Poller
@@ -344,7 +357,7 @@ Le polling Metabase est maintenant porté directement par des flows Prefect:
 1. `Traiter les demandes d'ingestion` lit la file `ops.ingestion_run_requests` déjà initialisée;
 2. `request_id` est maintenant généré automatiquement par PostgreSQL via `gen_random_uuid()`;
 3. il claim au plus une ligne `pending` par run via `FOR UPDATE SKIP LOCKED` et la passe en `processing`;
-4. il route `request_type=ingestion` (valeur par défaut, historique conservé) vers `lancer-ingestion-complete`, et `request_type=allocine` vers `lancer-scrapping-allocine` avec `max_films` et `request_id`;
+4. il route `request_type=ingestion` (valeur par défaut, historique conservé) vers `lancer-ingestion-complete`, et `request_type=allocine` vers `lancer-scrapping-allocine` avec `max_films`, `request_id` et, pour le deuxième bouton, `visa_number`, `force_rescrape` et les connexions Airbyte configurées;
 5. le flow concerné écrit l'état terminal `success` ou `failed` dans la même table ; le poller réconcilie aussi les annulations/crashes Prefect des demandes Allociné au passage suivant;
 6. `Requeue les demandes d'ingestion stale` reste disponible en CLI/code comme maintenance explicite pour les lignes `processing` trop anciennes sans flow run associé; il n'est pas publié automatiquement comme deployment schedulé.
 

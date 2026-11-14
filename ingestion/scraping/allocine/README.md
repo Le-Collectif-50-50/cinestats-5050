@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-13
+**Dernière révision:** 2026-11-14
 
 **Status:** actif
 
@@ -21,6 +21,7 @@
 | 7 | 2026-10-15 | Joel Teixeira | Persistance des URL d’affiche, migration additive, backfill local journalisé, export/import SQL ciblé et tests PostgreSQL isolés. |
 | 8 | 2026-11-12 | Joel Teixeira | Vérification du réalisateur CNC et examen de plusieurs candidats ; statut needs_review pour les correspondances non confirmées. |
 | 9 | 2026-11-13 | Joel Teixeira | Déploiement manuel, navigation DOMContentLoaded et reprise bornée ; navigation allégée, isolation des pages et sessions, diagnostic et reprise de l’issue 50. Limite max_films dans le déploiement manuel séparé et override CLI --limit pour sync/read. Reprise automatique des ID Allociné corrigés, sélection ciblée --source-id et prise en compte de VALIDATION_MANUELLE sans reprise répétée des succès. Extraction de la date sur les balises a et span de la fiche Allociné. |
+| 10 | 2026-11-14 | Joel Teixeira | Forçage CLI limité aux identifiants explicites et parcours Metabase par visa avec Airbyte et dbt. |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -202,9 +203,26 @@ Sans validation manuelle, un nouveau scraping peut encore produire
 
 `--source-id` conserve le filtre des traitements terminés : un succès ancien
 peut donc empêcher la reprise, même si le dernier essai brut est une erreur.
-Pour reprendre un ensemble explicite après vérification des identités, utiliser
-le connecteur en mémoire avec `config.source_ids` renseigné et
-`config.completed_statuses = []`. Ne pas désactiver ce filtre dans le JSON partagé.
+Pour forcer un visa explicite, utiliser :
+
+```bash
+python3 ingestion/scraping/allocine/main.py sync \
+  --config ingestion/scraping/allocine/config.json --source-id 144246 --limit 1 --force
+```
+
+`--force` exige `sync` et au moins un `--source-id`. Il remplace
+`completed_statuses` par une liste vide en mémoire, sans modifier le JSON partagé.
+Les contrôles de visa et de correspondance restent actifs ; l'historique est conservé.
+`--require-success`, utilisé par Prefect pour le parcours ciblé, exige également
+un identifiant explicite : aucun film éligible ou tout statut autre que `success`
+fait échouer la commande. Les tentatives non confirmées sont écrites avant l'échec.
+Le deuxième bouton Metabase **Scraper un visa CNC** expose ce ciblage et le
+forçage (Non par défaut). Le déploiement Prefect attend d'abord Airbyte, lance
+le scraping ciblé, puis dbt phase 2 avec ses dépendances. Une étape en échec
+arrête les suivantes ; la demande passe en succès seulement après dbt.
+
+Pour une reprise programmée de plusieurs visas, le connecteur en mémoire reste
+utilisable avec `config.source_ids` et `config.completed_statuses = []`.
 Limiter le lot, conserver une seule session parallèle et contrôler tous les
 résultats avant d’appeler `_insert_records(config, records)` : quatre `success`
 avec date et réalisation renseignées pour le lot de l’issue 50. Cette méthode

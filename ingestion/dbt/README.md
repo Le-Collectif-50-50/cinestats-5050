@@ -21,6 +21,7 @@
 | 7 | 2026-11-12 | Joel Teixeira | Alignement des corrections sur le schéma Airbyte : clés composées des crédits et genres, retrait du champ Allociné des rôles et filtre GENRE_ID. Dashboard Metabase de revue du scraping Allociné, des écarts de visa et des recherches sans résultat (`not_found`). |
 | 8 | 2026-11-13 | Joel Teixeira | Intégration des ajouts manuels de personnes et crédits, dernier succès Allociné par visa, contrôles de références et conversion du crédit d’impôt. |
 | 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. Bouton Allociné dans Metabase, suivi des demandes et statuts par heure avec filtre de plage de dates. Documentation de la reprise des correspondances validées dans id_matching. Fiches métier Film et Credit Holder dans Metabase, recherche, navigation croisée et vue finale des affiches. |
+| 10 | 2026-11-14 | Joel Teixeira | Deuxième bouton Allociné par visa, forçage explicite et suivi du parcours Airbyte → scraping → dbt. |
 
 | 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
@@ -423,7 +424,9 @@ La concurrence Prefect du scraper reste limitée à 1, y compris pour les runs m
 
 La table des demandes distingue **En attente**, **Transmise / en cours**, **Terminée** et **Échec**.
 « Terminée » signifie une fin technique normale, pas que tous les films ont réussi ;
-un lot vide peut aussi terminer normalement. Le poller réconcilie les états terminaux
+un lot vide peut aussi terminer normalement. Pour une demande par visa,
+« Terminée » exige un scraping confirmé (`success`), puis dbt réussi. La table
+affiche le visa demandé et le choix de forçage. Le poller réconcilie les états terminaux
 Prefect, y compris les annulations et crashes, au passage suivant. Les identifiants Prefect
 permettent de retrouver les logs. Les runs lancés directement dans Prefect ne sont pas
 inscrits dans cette file Metabase.
@@ -446,23 +449,37 @@ Le scraper écrit le lot à la fin : ce graphique ne mesure donc pas une progres
 Un run sans ligne écrite n'y figure pas ; consulter la table des demandes et Prefect.
 Le `run_id` métier du scraper est distinct de l'identifiant du flow Prefect.
 
-### Publier le formulaire et les cartes
+Le deuxième bouton **Scraper un visa CNC** demande identité, motif, visa CNC
+et **Forcer le retraitement** (Non par défaut). Le visa doit être une chaîne de
+chiffres strictement positive. Ce formulaire est indépendant des filtres du dashboard.
+Il attend Airbyte (connexions configurées dans le worker), scrape uniquement ce visa,
+puis lance `dbt build --select +tag:phase2`. Le forçage conserve l'historique et
+les contrôles de correspondance. Sans film éligible ou sans résultat `success`,
+la demande échoue avant dbt. Les deux boutons partagent le verrou Allociné existant.
+Le bouton par lot attend lui aussi Airbyte avant le scraping, mais exige ensuite
+une ingestion séparée pour publier ses résultats. Un échec Airbyte empêche le scraping.
+Le parcours ciblé impose Airbyte et dbt ; les options de désactivation de
+l'ingestion séparée ne s'appliquent pas à ce parcours.
+
+### Publier les formulaires et les cartes
 
 Ordre requis :
 
 1. Sur la base projet vérifiée, appliquer `infra/data/ops-ingestion-table.sql` en propriétaire
-   ou administrateur. La migration ajoute `request_type` (défaut `ingestion`), `max_films`
-   et les contraintes Allociné, sans supprimer l'historique. Les droits existants suffisent.
+   ou administrateur. La migration ajoute `request_type` (défaut `ingestion`), `max_films`,
+   `visa_number`, `force_rescrape` et les contraintes Allociné, sans supprimer l'historique. Les droits existants suffisent.
 2. Publier `ingestion/prefect/flows.py` sur le worker puis actualiser le déploiement
-   `Recuperer les donnees Allocine/lancer-scrapping-allocine` pour exposer `request_id`.
+   `Recuperer les donnees Allocine/lancer-scrapping-allocine` pour exposer `request_id`,
+   `visa_number`, `force_rescrape` et `airbyte_connection_names`. Publier également
+   `ingestion/scraping/allocine/main.py` et `connector.py` sur le worker.
    Garder la concurrence à 1 et l'absence de calendrier. Le poller lit le nouveau code
    à son prochain run ; ne pas lancer de scraping pour valider la configuration.
 3. Exécuter les commandes ci-dessous. Une synchronisation du schéma `cinestats-ops-db`
    par un administrateur est facultative pour ces requêtes SQL natives ; elle rend les
    nouvelles colonnes visibles dans l’explorateur de données.
    Le modèle de la file utilisé par Pipeline Overview est le modèle 38 sur Cinestats.
-   `--action-model-id` crée ou actualise l'action SQL et son bouton ; son ID est conservé
-   dans le fichier d'état. Aux passages suivants, le script le réutilise automatiquement.
+   `--action-model-id` crée ou actualise les deux actions SQL et leurs boutons ; les IDs
+   `action_id` (lot) et `visa_action_id` (visa) sont conservés dans le fichier d'état. Aux passages suivants, le script le réutilise automatiquement.
 
 Depuis la racine, vérifier puis créer ou actualiser le dashboard :
 

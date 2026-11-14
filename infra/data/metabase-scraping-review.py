@@ -64,7 +64,8 @@ def dashboard_cards():
         name="Demandes de scraping Allociné", query=REQUESTS_QUERY.read_text(encoding="utf-8"),
         display="table", col=0, row=14, size_x=24, size_y=8,
         description="50 dernières demandes Metabase. Terminée signifie que le processus a fini, "
-                    "même si certains films sont en erreur ou si aucun film n'était éligible. "
+                    "même si certains films sont en erreur ou si aucun film n'était éligible pour un lot. "
+                    "Par visa, Terminée exige un scraping confirmé puis dbt réussi. "
                     "Transmise / en cours inclut l'attente du worker. Hors filtres visa et titre.",
     ))
     for index, (name, status) in enumerate([
@@ -110,12 +111,24 @@ def dataset_query(database_id, query, extracted_at_field_id=None):
             "native": {"query": query, "template-tags": tags}}
 
 
-def action_body(database_id, model_id):
+def action_body(database_id, model_id, *, targeted=False):
     fields = [
         ("email", "Votre nom ou adresse e-mail", "text", "string", None),
         ("reason", "Motif de la demande", "text", "text", None),
         ("max_films", "Nombre maximum de films", "number", "number", 10),
     ]
+    if targeted:
+        fields = fields[:2] + [
+            ("visa_number", "Visa CNC", "text", "string", None),
+            ("force_rescrape", "Forcer le retraitement", "text", "select", "Non"),
+        ]
+    action_name = "Scraper un visa CNC" if targeted else "Demander un scraping Allociné"
+    description = (
+        "Airbyte → scraping du visa saisi → dbt. Forcer rejoue aussi les traitements terminés. "
+        "Les contrôles de correspondance restent actifs. Une seule demande Allociné active à la fois."
+        if targeted else "Synchroniser les sources via Airbyte, puis traiter les films éligibles dans la limite demandée. "
+        "Demander ensuite une ingestion pour publier les résultats. Une demande active à la fois."
+    )
     tags, parameters, form_fields = {}, [], {}
     for order, (name, title, tag_type, input_type, default) in enumerate(fields):
         tag = {"id": name, "name": name, "display-name": title, "type": tag_type, "required": True}
@@ -130,35 +143,49 @@ def action_body(database_id, model_id):
         form_fields[name] = {"id": name, "name": name, "title": title, "order": order,
                              "inputType": input_type, "fieldType": "number" if tag_type == "number" else "string",
                              "required": True, "hidden": False, "width": "large"}
+        if name == "force_rescrape":
+            form_fields[name]["valueOptions"] = ["Non", "Oui"]
         if default is not None:
             form_fields[name]["defaultValue"] = default
-            form_fields[name]["description"] = "Entier strictement positif ; les filtres du dashboard ne ciblent pas ce lancement."
+            form_fields[name]["description"] = (
+                "Retraiter ce visa même s’il a déjà été traité ; historique conservé."
+                if name == "force_rescrape" else
+                "Entier strictement positif ; les filtres du dashboard ne ciblent pas ce lancement."
+            )
     return {
-        "name": "Demander un scraping Allociné", "type": "query", "model_id": model_id,
+        "name": action_name, "type": "query", "model_id": model_id,
         "database_id": database_id,
-        "description": "Traiter les films éligibles, dans la limite demandée. Une demande active à la fois.",
+        "description": description,
         "dataset_query": {"database": database_id, "type": "native", "native": {
-            "query": ACTION_QUERY.read_text(encoding="utf-8"), "template-tags": tags}},
+            "query": (ACTION_QUERY.with_name("metabase-trigger-allocine-visa.sql") if targeted else ACTION_QUERY).read_text(encoding="utf-8"), "template-tags": tags}},
         "parameters": parameters,
         "visualization_settings": {
-            "name": "Demander un scraping Allociné", "type": "button", "fields": form_fields,
-            "description": "Nombre entier positif (10 par défaut). Les filtres visa et titre ne ciblent pas ce lancement. "
-                           "Une demande déjà active doit se terminer avant un nouveau lancement.",
+            "name": action_name, "type": "button", "fields": form_fields,
+            "description": description,
             "submitButtonLabel": "Enregistrer la demande",
             "successMessage": "Demande enregistrée. Prise en charge au prochain passage du poller (environ 5 minutes).",
         },
     }
 
 
-def action_placement(action_id, dashcard_id):
+def action_placement(action_id, dashcard_id, *, targeted=False):
     return {"id": dashcard_id, "card_id": None, "action_id": action_id,
-            "col": 0, "row": 0, "size_x": 24, "size_y": 2, "parameter_mappings": [],
+            "col": 12 if targeted else 0, "row": 0, "size_x": 12, "size_y": 2, "parameter_mappings": [],
             "visualization_settings": {
-                "actionDisplayType": "button", "button.label": "Lancer le scraping Allociné",
+                "actionDisplayType": "button", "button.label": "Scraper un visa CNC" if targeted else "Lancer le scraping Allociné",
                 "button.variant": "primary",
                 "virtual_card": {"name": None, "display": "action", "visualization_settings": {},
                                  "dataset_query": {}, "archived": False},
             }}
+
+
+def header_offset(dashboard):
+    """Réserver les introductions et le lien métier existants au-dessus des boutons."""
+    return max((card["row"] + card["size_y"] for card in dashboard.get("dashcards", [])
+                if not card.get("card_id") and not card.get("action_id") and (
+                    card.get("visualization_settings", {}).get("text", "").startswith("## Examiner le scraping Allociné")
+                    or "Guide métier : revue humaine Allociné" in
+                    card.get("visualization_settings", {}).get("text", ""))), default=0)
 
 
 def main():
@@ -247,6 +274,7 @@ def main():
 
     dashboard_id = state["dashboard_id"]
     dashboard = api("GET", f"dashboard/{dashboard_id}")
+    offset = header_offset(dashboard)
     existing = {card["card_id"]: card for card in dashboard.get("dashcards", []) if card.get("card_id")}
     layout = []
     for index, definition in enumerate(definitions):
@@ -269,6 +297,7 @@ def main():
             state["cards"][name] = card_id
             save_state()
         placement = {field: definition[field] for field in ("col", "row", "size_x", "size_y")}
+        placement["row"] += offset
         placement.update(id=existing.get(card_id, {}).get("id", -(index + 1)), card_id=card_id,
                          parameter_mappings=[{"parameter_id": p["id"], "card_id": card_id,
                                               "target": ["dimension" if p["id"] == "periode" else "variable",
@@ -277,20 +306,26 @@ def main():
                                              if p["id"] in body["dataset_query"]["native"]["template-tags"]])
         layout.append(placement)
     managed_ids = set(state["cards"].values())
+    managed_action_ids = set()
     if model_id:
-        body = action_body(database_id, model_id)
-        if state.get("action_id"):
-            api("PUT", f"action/{state['action_id']}", body)
-        else:
-            state["action_id"] = api("POST", "action", body)["id"]
-        state["action_model_id"] = model_id
-        save_state()
-        previous = next((c for c in dashboard.get("dashcards", [])
-                         if c.get("action_id") == state["action_id"]), {})
-        layout.append(action_placement(state["action_id"], previous.get("id", -(len(definitions) + 1))))
+        for action_index, (state_key, targeted) in enumerate((("action_id", False), ("visa_action_id", True))):
+            body = action_body(database_id, model_id, targeted=targeted)
+            if state.get(state_key):
+                api("PUT", f"action/{state[state_key]}", body)
+            else:
+                state[state_key] = api("POST", "action", body)["id"]
+            state["action_model_id"] = model_id
+            save_state()
+            managed_action_ids.add(state[state_key])
+            previous = next((c for c in dashboard.get("dashcards", [])
+                             if c.get("action_id") == state[state_key]), {})
+            placement = action_placement(state[state_key], previous.get("id", -(len(definitions) + 1 + action_index)),
+                                         targeted=targeted)
+            placement["row"] += offset
+            layout.append(placement)
     layout.extend(card for card in dashboard.get("dashcards", [])
                   if card.get("card_id") not in managed_ids
-                  and not (model_id and card.get("action_id") == state["action_id"]))
+                  and card.get("action_id") not in managed_action_ids)
     parameters = PARAMETERS + [p for p in dashboard.get("parameters", [])
                                if p["id"] not in {item["id"] for item in PARAMETERS}]
     api("PUT", f"dashboard/{dashboard_id}", {
@@ -299,7 +334,7 @@ def main():
     saved = api("GET", f"dashboard/{dashboard_id}")
     if not managed_ids.issubset({card.get("card_id") for card in saved.get("dashcards", [])}):
         raise SystemExit("Dashboard enregistré mais cartes incomplètes : relancer avec le même fichier d'état.")
-    if model_id and not any(c.get("action_id") == state["action_id"] for c in saved.get("dashcards", [])):
+    if not managed_action_ids.issubset({c.get("action_id") for c in saved.get("dashcards", [])}):
         raise SystemExit("Bouton absent après sauvegarde : relancer avec le même fichier d'état.")
     print(f"{base_url}/dashboard/{dashboard_id}")
 

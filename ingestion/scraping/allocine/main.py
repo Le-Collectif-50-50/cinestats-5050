@@ -101,7 +101,12 @@ def main() -> int:
         dest="source_ids",
         help="source_record_id exact (sync, read ou backfill-posters) ; option répétable",
     )
+    parser.add_argument("--force", action="store_true", help="Retraiter uniquement les --source-id explicites")
+    parser.add_argument("--require-success", action="store_true",
+                        help="Échouer sans résultat ou si un résultat ciblé n'est pas success")
     args = parser.parse_args()
+    if (args.force or args.require_success) and (args.command != "sync" or not args.source_ids):
+        parser.error("--force et --require-success exigent sync et --source-id")
     if args.command != "backfill-posters" and args.dry_run:
         parser.error("--dry-run est réservé à backfill-posters")
     if args.source_ids and args.command not in {"sync", "read", "backfill-posters"}:
@@ -122,6 +127,9 @@ def main() -> int:
         config["scrape_limit"] = args.limit
     if args.source_ids and args.command in {"sync", "read"}:
         config["source_ids"] = args.source_ids
+
+    if args.force:
+        config["completed_statuses"] = []
 
     if args.command == "backfill-posters":
         from ingestion.scraping.allocine.poster_backfill import backfill_posters
@@ -150,6 +158,8 @@ def main() -> int:
         return 0
 
     if args.command == "sync":
+        if args.require_success:
+            config["require_success"] = True
         inserted_count = source.sync_to_postgres(config)
         print(f"Inserted {inserted_count} rows into configured output table.")
         return 0

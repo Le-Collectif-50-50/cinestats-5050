@@ -10,7 +10,7 @@ Public : équipes métier Cinéstats 50/50.
 
 Résoudre une correspondance signalée dans Metabase. Vérifier le film, documenter la décision, puis suivre sa publication. Aucun accès technique n’est nécessaire pour le parcours courant.
 
-Les captures datent du 14 novembre 2026. Les chiffres peuvent évoluer. L’exemple « Steak » est réel. Les écrans ont été consultés uniquement. Aucune validation ni demande n’a été envoyée pour ce tutoriel. Les résultats après traitement décrivent les contrôles attendus.
+Les captures datent du 14 novembre 2026. Les vues du dashboard et du formulaire par lot précèdent l’ajout du deuxième bouton ; ce bouton est décrit dans les étapes ci-dessous. Les chiffres peuvent évoluer. L’exemple « Steak » est réel. Les écrans ont été consultés uniquement. Aucune validation ni demande n’a été envoyée pour ce tutoriel. Les résultats après traitement décrivent les contrôles attendus.
 
 ## Préparer ses accès
 
@@ -24,16 +24,18 @@ Un accès manque ? Contacter le référent data. Garder le visa et le titre.
 
 ## Retenir le parcours
 
-**Repérer → Rechercher → Décider → Renseigner le Sheet → Demander une ingestion → Relancer le scraping si nécessaire → Demander une ingestion → Contrôler.**
+**Repérer → Rechercher → Décider → Renseigner le Sheet → Scraper un visa CNC → Suivre la demande → Contrôler la publication.**
 
 | Action | Son effet |
 | --- | --- |
 | Modifier le Sheet | Enregistre la correction ou validation. |
 | Demander une ingestion | Récupère le Sheet et actualise les données publiées avec les collectes déjà disponibles. |
-| Lancer le scraping Allociné | Collecte à nouveau les fiches éligibles. |
+| Scraper un visa CNC | Récupère le Sheet, collecte uniquement le visa saisi, puis publie les données. |
+| Forcer le retraitement : Oui | Rejoue ce visa même s’il est déjà traité ; conserve l’historique et les contrôles de correspondance. |
+| Lancer le scraping Allociné | Récupère le Sheet, puis collecte un lot de fiches éligibles. Publication séparée nécessaire. |
 | Demander une ingestion après scraping | Publie les nouveaux résultats collectés. |
 
-**Cocher une case ne lance rien.** L’ingestion ne lance aucun scraping.
+**Cocher une case ne lance rien.** Après enregistrement du Sheet, envoyer une demande. Le bouton **Scraper un visa CNC** enchaîne synchronisation, collecte ciblée et publication. Le bouton **Demander une ingestion** ne lance aucun scraping.
 
 ## 1. Repérer le besoin dans Metabase
 
@@ -159,57 +161,66 @@ Exemple observé : **Macunaima XXI**, visa **164876**, ID proposé **324310**. L
 
 Rechercher la fiche et les crédits officiels. Confirmer la version exacte de l’œuvre. Si les preuves suffisent, renseigner l’ID puis justifier la validation. Sinon, laisser décoché et transmettre le dossier. Aucun choix n’est validé dans cet exemple.
 
-## 4. Faire prendre en compte le Sheet
+## 4. Lancer le parcours pour votre visa
 
-1. Ouvrir [Pipeline Overview](https://metabase.cinestats5050.fr/dashboard/2).
-2. Cliquer **Demander une ingestion**.
-3. Saisir votre nom ou adresse e-mail.
-4. Saisir un motif précis. Exemple : « Revue Steak — visa 115952 — validation du rapprochement Allociné 110872 ».
-5. Cliquer **Enregistrer la demande**.
-6. Suivre les détails de la demande.
-7. Attendre sa réussite avant le scraping.
+Après enregistrement du Sheet, choisir le bouton adapté.
 
-![Point d’entrée de l’ingestion](assets/revue-humaine-allocine/04-pipeline-overview.png)
+| Situation | Action |
+| --- | --- |
+| Validation d’un `visa_mismatch` ou `needs_review` | **Scraper un visa CNC**, avec **Non** pour le forçage en premier choix. |
+| Correction ou ajout d’ID Allociné | **Scraper un visa CNC**, avec **Non** en premier choix. |
+| Nouvelle collecte nécessaire malgré un traitement déjà terminé | **Scraper un visa CNC**, avec **Oui** après vérification de l’identité. |
+| Collecte déjà réussie ; données seulement non publiées | **Demander une ingestion** dans Pipeline Overview. |
+| Doute sur l’identité ou preuves insuffisantes | Garder le dossier ouvert ; demander un second avis. |
+| Erreur technique ou blocage persistant | Transmettre au référent data avec le visa et le message. |
+
+### Parcours recommandé : « Scraper un visa CNC »
+
+1. Ouvrir [Scraping Allociné — À examiner](https://metabase.cinestats5050.fr/dashboard/7).
+2. Cliquer le deuxième bouton **Scraper un visa CNC**.
+3. Renseigner votre nom ou adresse e-mail et un motif précis.
+4. Saisir le **Visa CNC** dans le formulaire. Exemple : `115952` pour « Steak ».
+5. Laisser **Forcer le retraitement** sur **Non**, sauf reprise volontaire d’un traitement terminé.
+6. Vérifier le visa et le motif, puis cliquer **Enregistrer la demande**.
+7. Suivre la table **Demandes de scraping Allociné**.
+
+**Le filtre visa du dashboard ne préremplit pas le formulaire.** Saisir le visa explicitement. Utiliser le visa CNC, jamais l’ID Allociné.
+
+Le parcours récupère d’abord les modifications du Sheet, collecte uniquement le visa demandé, puis publie les enrichissements. **Aucune ingestion séparée n’est nécessaire avant ou après ce bouton.** Attendre la fin de la demande avant de contrôler la Fiche Film.
+
+**Forcer le retraitement : Oui** conserve les tentatives précédentes. Cette option ne valide pas le rapprochement et ne désactive pas les contrôles d’identité. Elle peut donc encore produire `visa_mismatch`, `needs_review`, `not_found`, `error` ou `blocked`.
+
+Sans film éligible, la demande échoue : vérifier la présence du visa dans le Sheet et si le film a déjà été traité. Si une nouvelle collecte est réellement nécessaire, renvoyer une demande avec **Oui**. En cas de résultat non confirmé, lire le motif avant toute nouvelle demande ; la publication automatique n’est pas exécutée.
+
+### Autre parcours : traiter un lot
+
+Le bouton existant **Lancer le scraping Allociné** reste disponible. Il demande identité, motif et nombre maximum de films (10 par défaut). Il récupère d’abord les modifications du Sheet, puis traite des films éligibles ; même avec une limite de 1, il ne garantit pas votre film.
+
+Aucune ingestion préalable n’est nécessaire : le bouton attend lui-même la synchronisation du Sheet. Après le lot, demander une ingestion dans [Pipeline Overview](https://metabase.cinestats5050.fr/dashboard/2) pour publier les résultats. Si la synchronisation échoue, le scraping ne démarre pas.
+
+![Point d’entrée de l’ingestion pour le parcours par lot](assets/revue-humaine-allocine/04-pipeline-overview.png)
 
 ![Formulaire de demande d’ingestion](assets/revue-humaine-allocine/04b-formulaire-ingestion.png)
 
-Le traitement commence après prise en charge. Le passage intervient environ toutes les cinq minutes. L’attente peut durer davantage. Éviter les envois répétés.
+![Formulaire historique du bouton par lot](assets/revue-humaine-allocine/05-formulaire-scraping.png)
 
-Ouvrir ensuite [Suivi par visa CNC](https://metabase.cinestats5050.fr/dashboard/11?visa=115952). Vérifier que l’ID synchronisé correspond au Sheet. Si la validation n’est pas visible, demander sa confirmation au référent data avant de poursuivre.
+*Cette capture montre le formulaire par lot. Le deuxième bouton demande un visa et le choix de forçage à la place du volume.*
 
-## 5. Relancer le scraping si nécessaire
+## 5. Suivre la demande
 
-| Situation | Suite |
-| --- | --- |
-| Validation d’un `visa_mismatch` ou `needs_review` | Nouvelle collecte nécessaire pour obtenir un résultat accepté. |
-| Correction ou ajout d’ID Allociné | Nouvelle collecte nécessaire si cette cible n’a pas encore été traitée. |
-| Collecte déjà réussie et données seulement non publiées | Passer à l’ingestion de publication. |
-| Doute non résolu | Garder le cas ouvert. Ne pas forcer une validation. |
-| `not_found` persistant, erreur ou blocage | Demander une reprise au référent data. |
+Le poller prend en charge les demandes environ toutes les cinq minutes. Un traitement en attente ou un worker indisponible peut allonger ce délai. Éviter les envois répétés.
 
-### Lancement depuis Metabase
-
-1. Revenir sur [Scraping Allociné — À examiner](https://metabase.cinestats5050.fr/dashboard/7).
-2. Cliquer **Lancer le scraping Allociné**.
-3. Renseigner identité et motif.
-4. Conserver un petit volume convenu. Le formulaire propose 10 films.
-5. Cliquer **Enregistrer la demande**.
-6. Suivre la table des demandes.
-
-![Formulaire de lancement du scraping](assets/revue-humaine-allocine/05-formulaire-scraping.png)
-
-**Attention : le filtre visa ne cible pas ce lancement.** Le nombre limite un lot de films éligibles. Même avec « 1 », « Steak » n’est pas garanti. Pour traiter précisément votre film, transmettre au référent data : visa, titre, ID, commentaire et lien du Sheet. Demander une reprise ciblée. Aucun terminal n’est nécessaire côté métier.
-
-Une seule demande Allociné peut rester active. Si l’envoi est refusé, consulter la demande existante.
+Une seule demande Allociné peut rester active, quel que soit le bouton. Si l’envoi est refusé, consulter la demande existante. La table indique le visa demandé et le choix de forçage pour le parcours ciblé.
 
 | État | Lecture métier |
 | --- | --- |
 | En attente | Demande enregistrée, pas encore prise en charge. |
-| Transmise / en cours | Traitement pris en charge. |
-| Terminée | Traitement terminé techniquement. Vérifier votre film séparément. |
-| Échec | Contacter le référent avec l’identifiant de demande et le message. |
+| Transmise / en cours | Demande transmise à Prefect ; elle peut encore attendre le worker. |
+| Terminée — par visa | Collecte confirmée puis publication réussie. Vérifier les champs attendus dans la Fiche Film. |
+| Terminée — par lot | Fin technique normale ; certains films peuvent avoir échoué et le lot peut être vide. Publication séparée nécessaire. |
+| Échec | Consulter le message et les détails du film ; transmettre au référent avec l’identifiant de demande si nécessaire. |
 
-« Terminée » ne garantit aucun succès individuel. Le lot peut même être vide. Un lancement effectué directement par le référent peut être absent de cette table.
+Un lancement effectué directement dans Prefect peut être absent de cette table. Une demande par visa échoue si la synchronisation, la collecte confirmée ou la publication échoue. Les tentatives non confirmées restent visibles dans les tableaux et le suivi par visa.
 
 ## 6. Publier et vérifier le résultat
 
@@ -217,8 +228,8 @@ Une seule demande Allociné peut rester active. Si l’envoi est refusé, consul
 2. Filtrer à nouveau votre visa.
 3. Vérifier la disparition de l’anomalie.
 4. Consulter le suivi par visa. Vérifier un nouveau succès sur le bon ID.
-5. Demander une nouvelle ingestion dans **Pipeline Overview**.
-6. Attendre la réussite de cette demande.
+5. Après le bouton par visa, vérifier que la demande est **Terminée** : la publication est incluse.
+6. Après un lot uniquement, demander une ingestion dans **Pipeline Overview** et attendre sa réussite.
 7. Ouvrir [Qualité des données — dbt](https://metabase.cinestats5050.fr/dashboard/3). Examiner les alertes du traitement concerné.
 8. Ouvrir [Fiche Film](https://metabase.cinestats5050.fr/dashboard/9?visa=115952). Vérifier les informations attendues.
 
@@ -230,10 +241,10 @@ Pour un écart accepté, les deux visas restent conservés. La disparition de l�
 - [ ] Bon ID présent dans le Sheet.
 - [ ] Commentaire, auteur et date renseignés.
 - [ ] Validation cohérente avec la décision.
-- [ ] Modification récupérée par l’ingestion.
+- [ ] Modification du Sheet récupérée par le parcours choisi.
 - [ ] Nouveau succès sur le bon film, si collecte nécessaire.
 - [ ] Anomalie absente après actualisation.
-- [ ] Ingestion de publication réussie.
+- [ ] Publication réussie : incluse dans la demande par visa, ou ingestion séparée après un lot.
 - [ ] Fiche Film contrôlée ; réserves documentées.
 
 Ces résultats sont attendus pour « Steak ». Aucun résultat après validation n’a été produit pour illustrer ce guide.
@@ -244,7 +255,7 @@ Ces résultats sont attendus pour « Steak ». Aucun résultat après validation
 | --- | --- |
 | Preuves contradictoires | Visa, titre, liens et points de désaccord. |
 | Correction absente après ingestion | Lien du Sheet, visa, heure de modification, demande concernée. |
-| Film encore en revue après scraping | Visa, ID, dernière tentative et motif. Vérifier d’abord que le lot l’a traité. |
+| Film encore en revue après scraping | Visa, ID, dernière tentative et motif. Vérifier le visa demandé ou, pour un lot, que le film a été traité. |
 | Demande longtemps en attente | Identifiant et heure de demande. |
 | Échec ou erreur de collecte | Identifiant de demande, message et visa. |
 | Film absent ou incorrect après publication | Visa, champs attendus, preuves et demande d’ingestion. |
@@ -257,7 +268,7 @@ Le [guide métier est publié dans Metabase Operations](https://metabase.cinesta
 
 Un lien figure sur cinq dashboards : Pipeline Overview, Scraping Allociné — À examiner, Qualité des données — dbt, Suivi des données par visa CNC et Fiche Film.
 
-Le présent fichier est la source versionnée. Le document Metabase reprend les étapes métier et les neuf captures. Les tableaux y sont présentés en listes. Après modification du guide, republier avec le script de maintenance ci-dessous. Les captures utilisent les URL du dépôt public, figées sur un commit publié de `main` ; conserver ces fichiers accessibles.
+Le présent fichier est la source versionnée. Le document Metabase reprend les étapes métier et les captures existantes ; le nouveau formulaire ciblé est décrit en texte. Les tableaux y sont présentés en listes. Après modification du guide, republier avec le script de maintenance ci-dessous. Les captures utilisent les URL du dépôt public, figées sur un commit publié de `main` ; conserver ces fichiers accessibles.
 
 ## Références de maintenance
 
@@ -272,10 +283,12 @@ python3 infra/data/metabase-review-tutorial.py --env-file ingestion/.env --apply
 
 La clé API reste dans l’environnement ou le fichier local hors Git. Le script actualise le document existant par son nom et sa collection. Il ajoute ou met à jour les liens, sans lancer d’ingestion ni de scraping. Publier les captures sur `main`, puis vérifier leur affichage dans Metabase. Le script utilise le commit local `origin/main` pour leurs liens : actualiser cette référence avant republication. `--image-ref <commit-publié>` permet de choisir explicitement leur version.
 
-Captures authentiques des interfaces. Aucun écran de réussite simulé. Refaire les captures après changement du formulaire ou des colonnes.
+Captures authentiques des interfaces. Aucun écran de réussite simulé. Les captures historiques des tableaux et du formulaire par lot restent des repères ; se fier aux étapes actuelles pour le bouton par visa.
 
 ## Historique du document
 
 | # | Date | Auteur | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-11-14 | Joel Teixeira | Guide métier illustré : recherche, décision, Sheet, ingestion, collecte et contrôle de publication. Exemple réel Steak et cas needs_review. Publication native dans Operations et liens sur cinq dashboards. |
+| 2 | 2026-11-14 | Joel Teixeira | Parcours par visa dans Metabase, forçage explicite, synchronisation et publication automatiques ; distinction avec le bouton par lot. |
+| 3 | 2026-11-14 | Joel Teixeira | Synchronisation Airbyte incluse avant le scraping par lot ; publication séparée conservée. |

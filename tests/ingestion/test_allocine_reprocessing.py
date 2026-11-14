@@ -172,3 +172,40 @@ def test_postgres_manual_retry_stops_after_success(database, status, column_type
     with engine.begin() as conn:
         assert conn.execute(text('SELECT count(*) FROM allocine_data')).scalar_one() == 3
         assert tuple(conn.execute(text("SELECT visa_number, allocine_visa_number FROM allocine_data WHERE scrape_status='success'")).one()) == ("111392", "999999")
+
+
+def test_force_cli_requires_explicit_sync_target():
+    for argv in (["sync", "--force"], ["read", "--source-id", "144246", "--force"],
+                 ["sync", "--require-success"]):
+        with patch.object(main, "_load_dotenv"), patch("sys.argv", ["scraper"] + argv):
+            with pytest.raises(SystemExit):
+                main.main()
+
+
+def test_force_cli_only_overrides_config_in_memory():
+    original = {"completed_statuses": ["success"]}
+    with patch.object(main, "_load_dotenv"), patch.object(main, "_load_json", return_value=original.copy()), \
+            patch.object(connector, "AllocineAirbyteSource") as source, \
+            patch("sys.argv", ["scraper", "sync", "--source-id", "144246", "--force", "--require-success"]):
+        assert main.main() == 0
+        config = source.return_value.sync_to_postgres.call_args.args[0]
+        assert config == {"source_ids": ["144246"], "completed_statuses": [], "require_success": True}
+        assert ConnectorConfig.from_dict({**config, "database_url": "postgresql://unused"}).completed_statuses == []
+        assert original == {"completed_statuses": ["success"]}
+
+
+@pytest.mark.parametrize("status", [None, "success", "error", "blocked", "visa_mismatch", "needs_review", "not_found"])
+def test_targeted_failure_is_persisted_but_never_reported_as_success(monkeypatch, status):
+    source = AllocineAirbyteSource()
+    async def read(config):
+        return [] if status is None else [{"scrape_status": status}]
+    insert = MagicMock()
+    monkeypatch.setattr(source, "_read_async", read)
+    monkeypatch.setattr(source, "_insert_records", insert)
+    config = {"database_url": "postgresql://unused", "source_ids": ["144246"], "require_success": True}
+    if status == "success":
+        assert source.sync_to_postgres(config) == 1
+    else:
+        with pytest.raises(ValueError):
+            source.sync_to_postgres(config)
+    assert insert.call_count == (0 if status is None else 1)

@@ -22,7 +22,7 @@ INTRO = {
     2: """## Piloter l’ingestion
 Le bouton enregistre une demande : synchronisation Airbyte, puis transformations et contrôles dbt. Le poller la prend en charge au prochain passage (environ 5 minutes).
 
-**Le scraping est lancé séparément.** Après un scraping, une ingestion permet de publier ses résultats dans les modèles finaux.
+**Le scraping se demande depuis le dashboard Allociné.** Le bouton par visa synchronise les sources, collecte ce film puis publie les résultats. Après un scraping par lot, demander une ingestion pour publier ses résultats.
 
 Ce suivi couvre uniquement les demandes d’ingestion enregistrées dans Metabase. Les lancements manuels Prefect ne figurent pas ici. Un statut `success` indique une exécution terminée ; consulter la qualité dbt pour les avertissements.""",
     3: """## Lire les contrôles dbt
@@ -38,7 +38,11 @@ Les compteurs et détails montrent la dernière tentative par identifiant source
 
 Le graphique compte **des tentatives, pas des films distincts**, par heure de Paris, tous statuts inclus. Le filtre **Période du scraping** ne concerne que ce graphique ; les compteurs restent sur tout l’historique. Visa et titre filtrent les films, jamais le formulaire ni les demandes.
 
-Le bouton traite les films éligibles, dans la limite demandée. Les résultats apparaissent après écriture du lot. Une demande terminée ne garantit pas le succès de chaque film. Relancer l’ingestion pour publier les résultats.
+**Scraper un visa CNC** : saisir explicitement le visa, votre identité et le motif. **Forcer le retraitement** propose Non par défaut ; Oui rejoue ce visa même s’il est déjà traité. Le parcours synchronise les sources, collecte uniquement ce visa, puis publie les résultats. Un résultat non confirmé arrête le traitement ; le forçage ne remplace pas la vérification d’identité.
+
+**Lancer le scraping Allociné** : synchroniser les sources via Airbyte, puis traiter un lot de films éligibles, dans la limite demandée. Les filtres du dashboard ne ciblent pas ce lot. Une demande terminée ne garantit pas le succès de chaque film ; demander ensuite une ingestion pour publier les résultats.
+
+Les deux boutons partagent une seule demande Allociné active. Suivre la table des demandes et son message d’erreur éventuel.
 
 """ + LINKS,
     11: """## Suivre un visa CNC
