@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 
 
@@ -40,10 +41,22 @@ class LineageTests(unittest.TestCase):
     def test_graph_uses_declared_edges_and_excludes_tests(self):
         result = self.render()
         self.assertIn("1 sources, 2 modèles, 1 seeds, 1 snapshots ; 3 dépendances directes", result)
-        self.assertEqual(result.count(" --> "), 3)
+        self.assertEqual(result.count(" --> "), 6)
         self.assertNotIn("fnl.check", result)
         self.assertIn("/tree/abc/ingestion/dbt/models/final.sql", result)
         self.assertIn('(["raw.films"])', result)
+
+    def test_complete_graph_preserves_cross_schema_chain_and_isolated_seed(self):
+        result = self.render()
+        graph = result.split("```mermaid\n", 1)[1].split("```", 1)[0]
+        self.assertEqual(graph.count(" --> "), 3)
+        # Les identifiants sont retrouvés par libellé, sans dépendre du tri interne.
+        ids = {label: key for key, label in re.findall(r'(n\d+)\[?\(?\["([^"]+)"', graph)}
+        for parent, child in [("raw.films", "staging.stage"), ("staging.stage", "fnl.final"), ("fnl.final", "history.history")]:
+            self.assertIn(f"{ids[parent]} --> {ids[child]}", graph)
+        self.assertIn("raw.seed", ids)
+        self.assertEqual(len(ids), 5)
+        self.assertLess(result.index("## Lineage dbt complet"), result.index("<details>"))
 
     def test_order_is_deterministic(self):
         before = self.render()

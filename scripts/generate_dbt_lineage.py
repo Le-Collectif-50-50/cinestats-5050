@@ -48,6 +48,11 @@ def render(manifest, source_url, revision_date):
         return f"[{text(label(key))}]({url})"
 
     ids = {key: f"n{index}" for index, key in enumerate(nodes)}
+
+    def diagram_node(key, indent="  "):
+        opening, closing = ('(["', '"])') if nodes[key]["resource_type"] == "source" else ('["', '"]')
+        return f"{indent}{ids[key]}{opening}{text(label(key))}{closing}"
+
     counts = Counter(node["resource_type"] for node in nodes.values())
     lines = [
         "# Lineage dbt — ingestion RIC", "",
@@ -66,23 +71,42 @@ def render(manifest, source_url, revision_date):
         "Il ne prouve ni la présence des tables en base, ni le succès des traitements. "
         "Les tests, analyses, macros, modèles désactivés et traitements externes "
         "Airbyte/Prefect/scraping sont hors graphe.", "",
-        "## Diagrammes par schéma consommateur", "",
+        "## Lineage dbt complet", "",
+        "Cette vue rassemble toutes les relations actives du manifest, y compris celles "
+        "sans dépendance. Suivre les flèches de gauche à droite pour parcourir les chaînes "
+        "des sources brutes jusqu’aux modèles finaux et opérationnels. "
+        "Les cadres regroupent les relations par schéma ; les sources brutes sont arrondies.", "",
+        "```mermaid", "flowchart LR",
+    ]
+    layer_order = {name: index for index, name in enumerate(["raw", "staging", "intermediate", "fnl", "ops"])}
+    all_schemas = sorted(
+        {node["schema"] for node in nodes.values()},
+        key=lambda name: (layer_order.get(name, len(layer_order)), name),
+    )
+    for index, schema in enumerate(all_schemas):
+        lines.append(f'  subgraph s{index}["{text(schema)}"]')
+        lines.extend(diagram_node(key, "    ") for key, node in nodes.items() if node["schema"] == schema)
+        lines.append("  end")
+    lines.extend(f"  {ids[a]} --> {ids[b]}" for a, b in sorted(edges))
+    lines.extend([
+        "```", "",
+        "## Vues détaillées par schéma", "",
+        "<details>", "<summary>Afficher les diagrammes par schéma consommateur</summary>", "",
         "Chaque diagramme montre les relations du schéma et leurs parents directs. "
         "Une relation peut donc apparaître dans plusieurs diagrammes. "
         "Les sources brutes sont arrondies ; les transformations sont rectangulaires.", "",
-    ]
+    ])
     schemas = sorted({node["schema"] for node in nodes.values() if node["resource_type"] != "source"})
     for schema in schemas:
         children = {key for key, node in nodes.items() if node["schema"] == schema and node["resource_type"] != "source"}
         schema_edges = sorted((a, b) for a, b in edges if b in children)
         visible = children | {a for a, _ in schema_edges}
         lines.extend([f"### {text(schema)}", "", "```mermaid", "flowchart LR"])
-        for key in sorted(visible):
-            opening, closing = ('(["', '"])') if nodes[key]["resource_type"] == "source" else ('["', '"]')
-            lines.append(f"  {ids[key]}{opening}{text(label(key))}{closing}")
+        lines.extend(diagram_node(key) for key in sorted(visible))
         lines.extend(f"  {ids[a]} --> {ids[b]}" for a, b in schema_edges)
         lines.extend(["```", ""])
     lines.extend([
+        "</details>", "",
         "## Inventaire et dépendances directes", "",
         "Les liens ouvrent les définitions à la version du code analysée.", "",
         "| Relation | Type | Matérialisation | Parents directs |",

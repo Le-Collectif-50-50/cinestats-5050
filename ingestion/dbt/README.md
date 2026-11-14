@@ -25,7 +25,7 @@
 | 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
-| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication automatique du lineage dbt dans GitHub, sans connexion PostgreSQL. |
+| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication automatique du lineage dbt complet dans GitHub, avec vues détaillées par schéma, sans connexion PostgreSQL. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -64,8 +64,10 @@ docker compose -f ingestion/docker-compose.yml exec prefect-worker dbt build --p
 ## Consulter le lineage dans GitHub
 
 Le [document de lineage](https://github.com/Le-Collectif-50-50/cinestats-5050/blob/dbt-lineage/README.md)
-présente les dépendances entre sources et modèles, avec des diagrammes Mermaid
-par schéma et un inventaire lié au code analysé. GitHub affiche ces diagrammes
+présente d’abord un diagramme Mermaid complet : toutes les sources et tous les modèles
+actifs, regroupés par schéma, avec leurs dépendances de bout en bout dans dbt.
+Les vues par schéma restent disponibles dans une section repliable, suivies
+d’un inventaire lié au code analysé. GitHub affiche ces diagrammes
 directement dans le Markdown, sans extension ni service supplémentaire.
 Le lien devient disponible après le premier push concerné sur `main` ayant réussi.
 
