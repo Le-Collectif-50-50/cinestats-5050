@@ -96,7 +96,7 @@ def layout(dashboard):
                      42: (12, 0, 24, 7), 44: (19, 0, 24, 5)}
         for c in cards:
             if c["id"] in positions:
-                c.update(zip(("row", "col", "size_x", "size_y"), positions[c["id"]]))
+                c.update(zip(("row", "col", "size_x", "size_y"), positions[c["id"]], strict=True))
                 c["parameter_mappings"] = []
                 if c.get("card_id"):
                     c["visualization_settings"] = {}
