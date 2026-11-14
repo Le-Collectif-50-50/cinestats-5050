@@ -25,7 +25,7 @@
 | 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
-| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). |
+| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -283,6 +283,8 @@ La clé reste hors Git et hors ligne de commande. Le fichier d'état conserve le
 Après déploiement, relancer `dbt build --select +tag:phase2` avec les options de profil ci-dessus. Cela reconstruit les finales et la quarantaine, teste les données puis alimente le suivi. `dbt parse` vérifie la configuration mais ni les données ni l'exécution SQL.
 
 ## Examiner les correspondances du scraping dans Metabase
+
+Équipes métier : suivre le [tutoriel illustré de revue humaine Allociné](../../docs/runbooks/ingestion-tutoriel-revue-humaine-allocine.md), avec recherche des preuves, décision dans Google Sheets, demandes Metabase et contrôle de publication. Disponible directement [dans Metabase Operations](https://metabase.cinestats5050.fr/document/1).
 
 Le dashboard [Scraping Allociné — À examiner](https://metabase.cinestats5050.fr/dashboard/7) lit directement `raw.allocine_data`
 sur la connexion `cinestats-ops-db`. Il comporte un bouton **Lancer le scraping Allociné**,
