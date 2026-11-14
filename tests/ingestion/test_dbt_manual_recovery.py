@@ -174,6 +174,29 @@ class ManualRecoverySQLTests(unittest.TestCase):
             })
             self.assertEqual(result, [row])
 
+    def test_manual_film_genres_added_without_replacing_scraped_associations(self):
+        columns = dict(film_id="uuid", genre_id="uuid")
+        documentary = "9ae49857-f08a-c282-64e0-f228627d3e4c"
+        drama = "00000000-0000-0000-0000-000000000001"
+        other_film = "00000000-0000-0000-0000-000000000002"
+        manual = dict(film_id=FILM, genre_id=documentary)
+        existing = dict(film_id=FILM, genre_id=drama)
+        unrelated = dict(film_id=other_film, genre_id=drama)
+        cases = [
+            ([], [manual], [manual]),
+            ([existing, unrelated], [manual], [existing, unrelated, manual]),
+            ([manual, manual, existing], [manual, manual], [manual, existing]),
+            ([existing, unrelated], [], [existing, unrelated]),
+            ([], [], []),
+        ]
+        for scraped, corrections, expected in cases:
+            with self.subTest(scraped=scraped, corrections=corrections):
+                result = self.run_model("fnl/fnl_film_genre.sql", {
+                    "int_film_genres": fixture(columns, scraped),
+                    "int_fix_film_genres": fixture(columns, corrections),
+                })
+                self.assertCountEqual(result, expected)
+
     def test_manual_person_added_and_overrides_existing(self):
         cols = dict(credit_holder_id="uuid", type="text", first_name="text",
                     last_name="text", legal_name="text", full_name="text")
