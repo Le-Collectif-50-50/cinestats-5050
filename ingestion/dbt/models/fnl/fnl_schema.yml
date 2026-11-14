@@ -140,16 +140,24 @@ models:
                 field: credit_holder_id
 
   - name: fnl_film_genre
-    description: "Table finale associant chaque film à son ou ses genres cinématographiques."
+    description: "Table finale associant chaque film à ses genres cinématographiques, incluant les ajouts manuels sans remplacer les associations scrapées."
     columns:
       - name: film_id
         description: "Identifiant du film concerné."
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('fnl_films')
+                field: film_id
       - name: genre_id
         description: "Identifiant du genre cinématographique associé au film."
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('fnl_genre')
+                field: genre_id
 
   - name: fnl_genre
     description: "Table finale référençant les genres cinématographiques, après application des corrections manuelles du gsheet."
