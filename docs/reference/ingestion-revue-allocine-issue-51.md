@@ -162,7 +162,7 @@ Les six avertissements et leurs volumes sont identiques à l'invocation antérie
 | Unicité des ID Mubi | 5 valeurs dupliquées |
 | Unicité des ID TMDB | 2 valeurs dupliquées |
 
-L'issue 51 reste ouverte pour les quatre visas contestés. Leur reprise exige de confirmer ou corriger la source CNC, puis de reprendre le parcours ciblé documenté dans le guide métier.
+La clôture administrative de l'issue 51 acte la revue des 25 dossiers et la publication des 21 cas confirmés. Les quatre visas contestés restent non résolus ; leur reprise exige de confirmer ou corriger la source CNC, puis de reprendre le parcours ciblé documenté dans le guide métier. La clôture ne constitue pas une validation de ces quatre identités.
 
 Réserve préexistante sur le référentiel : `raw.credit_holders` conserve les fiches « Isild / Besco » (`16f3b992-c8a8-6b19-6950-ca5ebbdded1f`) et « Ramzi / Sliman » (`6b4d3496-a085-c6cb-9f80-ee40a89902d3`). Les références d'identité portent les noms Isild Le Besco et Ramzi Ben Sliman. Le crédit Charly est corrigé par son association ; le nom Ramzi Sliman reste une réserve du dossier ouvert 155994. Les fiches personne et leurs autres éventuelles associations ne sont pas fusionnées par cette revue.
 
