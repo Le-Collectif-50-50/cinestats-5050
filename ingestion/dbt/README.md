@@ -25,6 +25,8 @@
 | 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
+| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. |
+
 Projet dbt Core exécuté depuis `prefect-worker`.
 
 ## Rôle
@@ -107,6 +109,28 @@ et repli CNC. Comme les autres tests SQL de ce module, il nécessite
 ## Classification des genres
 
 Le `CASE` de `int_film_genres` classe `Judiciaire` dans `Aventure/Policier/Thriller` et accepte `Epouvante-horreur` avec ou sans accent initial pour `Fantastique/Horreur/SF`. `Péplum` rejoint `Biopic/Guerre/Histoire`. `Divers`, `Erotique` et `Évènement Sportif` conservent chacun une catégorie explicite. Ce mapping couvre les 29 genres distincts observés dans `staging.stg_allocine_films` le 11 novembre 2026. Les nouveaux genres sans correspondance restent nuls et font échouer les tests de présence des tables finales : ajouter leur classement explicitement, sans catégorie de repli « Autre ».
+
+## Correctif temporaire des noms (#41)
+
+Dans les sept catégories de personnes de `int_credit_holders_role`, `last_name`
+conserve désormais tous les mots après le premier, au lieu du seul deuxième mot :
+`Eliane de Latour` donne `de Latour`. Les espaces multiples, insécables et fines
+insécables sont normalisés dans ce champ ; un mononyme donne une chaîne vide.
+`first_name`, `full_name`, les UUID et les associations restent inchangés.
+Ce découpage demeure approximatif : `Jean Claude Van Damme` donne
+`first_name = Jean` et `last_name = Claude Van Damme`.
+
+Les corrections GSheet restent prioritaires, y compris une ancienne correction
+tronquée : ce correctif ne répare pas ces valeurs. Les sociétés et les tables
+historiques `ric_*` du backend ne sont pas concernées. La migration vers un champ
+`full_name` de référence reste à décider ; l’issue #41 reste ouverte.
+
+Après déploiement, reconstruire `int_credit_holders_role` et ses dépendants via
+le build de phase 2 habituel. Aucun nouveau scraping n’est requis. Pour revenir
+en arrière, rétablir le SQL précédent puis reconstruire les mêmes modèles.
+Le test SQL `test_last_name_preserves_remaining_words_in_all_credit_categories`
+couvre les sept catégories, les particules, espaces, mononymes et la stabilité
+des identifiants avec les prérequis PostgreSQL décrits ci-dessous.
 
 ## Qualité des identifiants
 
