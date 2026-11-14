@@ -25,7 +25,7 @@
 | 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
-| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication automatique du lineage dbt complet dans GitHub, avec vues détaillées par schéma, sans connexion PostgreSQL. |
+| 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. Publication automatique du lineage dbt complet dans GitHub, avec vues détaillées par schéma, sans connexion PostgreSQL. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -165,6 +165,35 @@ et repli CNC. Comme les autres tests SQL de ce module, il nécessite
 ## Classification des genres
 
 Le `CASE` de `int_film_genres` classe `Judiciaire` dans `Aventure/Policier/Thriller` et accepte `Epouvante-horreur` avec ou sans accent initial pour `Fantastique/Horreur/SF`. `Péplum` rejoint `Biopic/Guerre/Histoire`. `Divers`, `Erotique` et `Évènement Sportif` conservent chacun une catégorie explicite. Ce mapping couvre les 29 genres distincts observés dans `staging.stg_allocine_films` le 11 novembre 2026. Les nouveaux genres sans correspondance restent nuls et font échouer les tests de présence des tables finales : ajouter leur classement explicitement, sans catégorie de repli « Autre ».
+
+### Associations film-genre manuelles (#57)
+
+`fnl_film_genre` réunit `int_film_genres` et `int_fix_film_genres` avec une
+association unique par `(film_id, genre_id)`. Une correction ajoute un genre,
+y compris si le scraping n’en fournit aucun. Elle ne remplace ni ne supprime
+les autres genres du film. Un doublon présent dans les deux sources reste une
+seule association finale.
+
+Dans l’onglet GSheet `film_genres`, renseigner `FILM ID`, `GENRE ID`,
+`UPDATED DATE` et `UPDATED BY`. Utiliser les UUID existants de `fnl_films`
+et `fnl_genre`, puis synchroniser Airbyte et exécuter la phase 2 dbt. Aucun
+nouveau scraping n’est nécessaire. Les règles d’admission du staging restent
+inchangées, notamment son exclusion actuelle des lignes signées Hugo Laurens.
+Les tests bloquants vérifient les deux références, l’unicité des associations
+et la conservation des corrections admises. Une référence invalide n’est pas
+filtrée silencieusement ; le test signale l’erreur.
+
+Le test PostgreSQL
+`test_manual_film_genres_added_without_replacing_scraped_associations` couvre
+l’ajout sans scraping, l’ajout d’un second genre, les doublons, l’absence de
+correction et les sources vides. Il utilise les mêmes prérequis read-only que
+les autres tests de `tests/ingestion/test_dbt_manual_recovery.py`.
+
+Après déploiement, reconstruire le modèle et ses dépendances avec
+`dbt build --profile ric --project-dir /app/ingestion/dbt --select +fnl_film_genre`.
+Le build de phase 2 habituel inclut aussi cette sélection. Pour revenir en
+arrière, restaurer le SQL précédent puis reconstruire le modèle : les ajouts
+manuels resteront dans la source, mais ne seront plus publiés.
 
 ## Correctif temporaire des noms (#41)
 
@@ -310,6 +339,8 @@ La clé reste hors Git et hors ligne de commande. Le fichier d'état conserve le
 Après déploiement, relancer `dbt build --select +tag:phase2` avec les options de profil ci-dessus. Cela reconstruit les finales et la quarantaine, teste les données puis alimente le suivi. `dbt parse` vérifie la configuration mais ni les données ni l'exécution SQL.
 
 ## Examiner les correspondances du scraping dans Metabase
+
+Équipes métier : suivre le [tutoriel illustré de revue humaine Allociné](../../docs/runbooks/ingestion-tutoriel-revue-humaine-allocine.md), avec recherche des preuves, décision dans Google Sheets, demandes Metabase et contrôle de publication. Disponible directement [dans Metabase Operations](https://metabase.cinestats5050.fr/document/1).
 
 Le dashboard [Scraping Allociné — À examiner](https://metabase.cinestats5050.fr/dashboard/7) lit directement `raw.allocine_data`
 sur la connexion `cinestats-ops-db`. Il comporte un bouton **Lancer le scraping Allociné**,

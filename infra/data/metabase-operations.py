@@ -88,6 +88,11 @@ def text_card(identifier, text, row=0, height=7):
 def layout(dashboard):
     did = dashboard["id"]
     cards = deepcopy(dashboard["dashcards"])
+    # Préserver le raccourci métier publié indépendamment du layout des indicateurs.
+    tutorial_cards = [c for c in cards if not c.get("card_id") and
+                      "Guide métier : revue humaine Allociné" in
+                      c.get("visualization_settings", {}).get("text", "")]
+    cards = [c for c in cards if c not in tutorial_cards]
     if did == 2:
         # Metabase archive les questions propres au dashboard lors de leur retrait.
         cards = [c for c in cards if c.get("card_id") not in {39, 40, 41, 46}
@@ -119,6 +124,12 @@ def layout(dashboard):
         for c in cards:
             c["row"] += offset
         cards.append(text_card(previous["id"] if previous else -1000, INTRO[did]))
+    if tutorial_cards:
+        for card in cards:
+            card["row"] += 2
+        guide = tutorial_cards[0]
+        guide.update(row=0, col=0, size_x=24, size_y=2)
+        cards.append(guide)
     return cards
 
 
