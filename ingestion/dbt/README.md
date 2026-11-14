@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-13
+**Dernière révision:** 2026-11-14
 
 **Status:** actif
 
@@ -21,6 +21,8 @@
 | 7 | 2026-11-12 | Joel Teixeira | Alignement des corrections sur le schéma Airbyte : clés composées des crédits et genres, retrait du champ Allociné des rôles et filtre GENRE_ID. Dashboard Metabase de revue du scraping Allociné, des écarts de visa et des recherches sans résultat (`not_found`). |
 | 8 | 2026-11-13 | Joel Teixeira | Intégration des ajouts manuels de personnes et crédits, dernier succès Allociné par visa, contrôles de références et conversion du crédit d’impôt. |
 | 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. Bouton Allociné dans Metabase, suivi des demandes et statuts par heure avec filtre de plage de dates. Documentation de la reprise des correspondances validées dans id_matching. Fiches métier Film et Credit Holder dans Metabase, recherche, navigation croisée et vue finale des affiches. |
+
+| 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -78,6 +80,28 @@ Pour vérifier le périmètre sans écrire en base, remplacer `dbt build` par `d
 5. `ops.v_allocine_pipeline_status`: vue dashboard Metabase pour le suivi Allociné.
 
 Le staging Allociné conserve le dernier succès par visa source (repli sur `source_record_id` si le visa est absent), selon `extracted_at`, puis `run_id` et `record_hash`. Une tentative ultérieure en erreur ne remplace pas ce succès. Les visas absents ou encore dupliqués font échouer le test dédié. Le rapprochement des métadonnées Allociné utilise le visa et l’identifiant Allociné ; la table finale joint ces métadonnées par `film_id`. Des visas distincts partageant un identifiant Allociné restent signalés dans les contrôles de matching. Cette règle ne valide pas l’identité d’un ancien résultat de scraping.
+
+## Priorité du titre final
+
+`fnl_films.movie_name` utilise le titre non vide de `int_id_matching.cnc_name`
+(onglet `id_matching`, colonne `TITRE`) en priorité, puis le titre Allociné non vide,
+puis le titre CNC de `raw.films`. Les espaces de bord sont retirés des deux premiers
+choix ; une chaîne vide ou composée uniquement d'espaces déclenche le repli.
+Cette priorité s'applique à tous les films : les titres du matching constituent
+le choix éditorial, même lorsqu'un titre Allociné existe.
+
+Pour le visa `144246`, le titre du matching « Dans les yeux de Thomas Pesquet »
+doit ainsi remplacer « 16 levers de soleil » dans le modèle final. Cette correction
+de titre ne valide ni le format de l'œuvre ni ses dates, genres ou crédits (#46).
+Après déploiement du modèle, reconstruire `fnl_films` dans le cadre du run dbt
+habituel pour publier le résultat. Aucun nouveau scraping n'est nécessaire lorsque
+seul le titre change. Les identifiants et les associations ne sont pas modifiés.
+
+Le test `test_film_title_matching_priority_and_fallbacks` dans
+`tests/ingestion/test_dbt_manual_recovery.py` exécute le modèle complet sur six cas
+PostgreSQL : correction prioritaire, titre Allociné absent, matching nul ou vide,
+et repli CNC. Comme les autres tests SQL de ce module, il nécessite
+`DBT_TEST_SSH` et `DBT_TEST_DATABASE` et s'exécute en transaction read-only.
 
 ## Classification des genres
 

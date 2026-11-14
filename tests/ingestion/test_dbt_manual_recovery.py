@@ -51,6 +51,36 @@ class ManualRecoverySQLTests(unittest.TestCase):
         )
         return json.loads(proc.stdout)
 
+    def test_film_title_matching_priority_and_fallbacks(self):
+        cases = [
+            (" Dans les yeux de Thomas Pesquet ", "Titre Allociné", "CNC", "Dans les yeux de Thomas Pesquet"),
+            ("Correction", None, "CNC", "Correction"),
+            (None, " Allociné ", "CNC", "Allociné"),
+            ("   ", "Allociné", "CNC", "Allociné"),
+            ("", "  ", "CNC", "CNC"),
+            (None, None, "CNC", "CNC"),
+        ]
+        columns = dict(film_id="uuid", cnc_visa="integer", cnc_name="text",
+                       cnc_agreement_year="integer", budget="numeric", budget_category="text",
+                       broadcasters="text", has_parity_bonus="boolean", has_eof="boolean",
+                       has_sofica="boolean", has_tax_credit="boolean",
+                       has_regional_funding="boolean", filmography_rank="text", has_asr="boolean")
+        for matching, allocine, cnc, expected in cases:
+            with self.subTest(matching=matching, allocine=allocine):
+                result = self.run_model("fnl/fnl_films.sql", {
+                    "int_cnc_films": fixture(columns, [dict(film_id=FILM, cnc_visa=144246, cnc_name=cnc)]),
+                    "int_id_matching": fixture(dict(cnc_visa="integer", cnc_name="text"),
+                                               [dict(cnc_visa=144246, cnc_name=matching)]),
+                    "int_allocine_films": fixture(dict(film_id="uuid", allocine_name="text",
+                                                        release_date="date", duration_mn="integer"),
+                                                 [dict(film_id=FILM, allocine_name=allocine)]),
+                    "int_film_country_budget_allocation": fixture(dict(film_id="uuid", country_name="text", budget_allocation="numeric"), []),
+                })
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0]["movie_name"], expected)
+                self.assertEqual(result[0]["film_id"], FILM)
+                self.assertEqual(result[0]["cnc_visa"], 144246)
+
     def test_updated_timestamp_formats_and_type(self):
         dates = ["13/11/2026", "13/11/2026 15:42", "13/11/2026 15:42:08",
                  " 1/2/2026 09:05:02 ", "2026-11-13 15:42:08", "", None]

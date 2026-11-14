@@ -13,7 +13,11 @@ WITH french_financed AS (
 SELECT
     films.film_id,
     films.cnc_visa,
-    COALESCE(allocine.allocine_name, films.cnc_name) AS movie_name,
+    COALESCE(
+        NULLIF(TRIM(matching.cnc_name), ''),
+        NULLIF(TRIM(allocine.allocine_name), ''),
+        films.cnc_name
+    ) AS movie_name,
     films.cnc_agreement_year,
     allocine.release_date,
     allocine.duration_mn,
