@@ -23,6 +23,7 @@
 | 9 | 2026-11-13 | Joel Teixeira | Prise en charge de la date et de l’heure dans UPDATED_DATE pour toutes les sources GSheet concernées, rétrocompatibilité et tri des corrections. Bouton Allociné dans Metabase, suivi des demandes et statuts par heure avec filtre de plage de dates. Documentation de la reprise des correspondances validées dans id_matching. Fiches métier Film et Credit Holder dans Metabase, recherche, navigation croisée et vue finale des affiches. |
 
 | 10 | 2026-11-14 | Joel Teixeira | Priorité du titre corrigé dans id_matching sur le titre Allociné, avec repli sur le titre CNC et tests des valeurs vides. |
+| 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -447,3 +448,44 @@ Déployer le code avant de modifier le format des GSheets, puis reconstruire les
 stagings et leurs dépendances via le pipeline complet. Le parsing dbt et les
 tests SQL vérifient les anciennes dates, les heures/minutes/secondes, les dates
 invalides et la priorité des corrections indépendamment de leur ordre d’entrée.
+
+## Suivi des données par visa CNC dans Metabase
+
+Le dashboard **Suivi des données par visa CNC**, dans **Cinestats 50/50 - Operations**,
+utilise la connexion `cinestats-ops-db`. Son filtre obligatoire **Visa CNC** vaut
+`144246` par défaut. Chaque carte reçoit ce filtre ; changer le visa actualise
+l'ensemble du suivi.
+
+Les sections exposent la ligne `raw.films` synchronisée, toutes les lignes de
+`raw.id_matching` correspondantes, le dernier essai Allociné tous statuts, le
+dernier succès, les modèles staging et intermédiaires, les corrections manuelles,
+les films et affiches finaux, les crédits avec leurs personnes et rôles, les genres,
+les financements, les enrichissements Mubi transformés et la quarantaine liée aux
+identifiants Allociné courants ou historiques. Les détails champ/valeur exposent
+chaque colonne disponible, y compris les métadonnées. Les 30 essais les plus récents
+complètent la lecture de l'état courant.
+
+**Sémantique de « latest » :** les tables Airbyte sont leur snapshot courant ; elles
+ne prouvent pas le contenu actuel du GSheet ni le fichier CNC originel. Les tables
+dbt reflètent leur dernière reconstruction. Le dernier essai et le dernier succès
+sont classés par `extracted_at DESC NULLS LAST`, puis `run_id` et `record_hash`
+décroissants, comme le staging pour les succès. Les doublons de matching restent
+visibles. Les champs `NULL` et les associations absentes ne sont pas remplacés par
+le legacy. La concordance des identifiants ne prouve pas l'identité de l'œuvre.
+
+Pour #46, contrôler la fiche confirmée, le format long/court, la date, les genres
+et la réalisation. Le dashboard ne clôture pas le ticket automatiquement.
+
+Vérifier les requêtes sur 144246 puis publier ou actualiser le dashboard :
+
+```bash
+python3 infra/data/metabase-visa-lineage.py --env-file ingestion/.env --check
+python3 infra/data/metabase-visa-lineage.py --env-file ingestion/.env
+```
+
+La clé `METABASE_API_KEY` reste dans l'environnement ou le fichier `.env` explicite.
+Le script vérifie toutes les requêtes avant publication. Il retrouve dashboard et
+questions par nom dans Operations et conserve les cartes manuelles. Les noms doivent
+rester uniques. Seules les descriptions, questions et dispositions Metabase sont
+modifiées ; la consultation ne déclenche aucune ingestion. Les permissions existantes
+d'Operations s'appliquent, sans partage public.
