@@ -66,7 +66,7 @@ jobs:
           if-no-files-found: error
       - name: Indiquer où lire le résultat
         env:
-          LINEAGE_URL: ${{ github.server_url }}/${{ github.repository }}/blob/dbt-lineage/README.md
+          LINEAGE_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/dbt-lineage.md
         run: |
           echo 'Document de ce run : artefact **dbt-lineage** (README.md).' >> "$GITHUB_STEP_SUMMARY"
           echo "Version publiée après un push sur main : [Lineage dbt]($LINEAGE_URL)." >> "$GITHUB_STEP_SUMMARY"
@@ -77,27 +77,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write
+      contents: read
     steps:
+      - name: Créer un token limité au dépôt pour la publication
+        uses: actions/create-github-app-token@v3
+        id: lineage-token
+        with:
+          app-id: ${{ vars.DBT_LINEAGE_APP_ID }}
+          private-key: ${{ secrets.DBT_LINEAGE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.lineage-token.outputs.token }}
       - uses: actions/download-artifact@v4
         with:
           name: dbt-lineage
           path: ${{ runner.temp }}/lineage
-      - name: Publier uniquement le document sur dbt-lineage
+      - name: Publier uniquement le document dans main
         run: |
-          git fetch origin
-          if git show-ref --verify --quiet refs/remotes/origin/dbt-lineage; then
-            git switch -C dbt-lineage origin/dbt-lineage
-          else
-            git switch --orphan dbt-lineage
+          git fetch origin main
+          # Ne pas publier un graphe périmé si les sources ont changé entre-temps.
+          if ! git diff --quiet HEAD origin/main -- ingestion/ scripts/generate_dbt_lineage.py tests/ingestion/test_dbt_lineage.py .github/workflows/dbt-lineage.yml; then
+            echo 'Sources modifiées sur main : publication laissée au run suivant.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
-          cp "$RUNNER_TEMP/lineage/README.md" README.md
-          git add README.md
+          git switch -C main origin/main
+          mkdir -p docs
+          cp "$RUNNER_TEMP/lineage/README.md" docs/dbt-lineage.md
+          git add docs/dbt-lineage.md
           if git diff --cached --quiet; then
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'docs: actualiser le lineage dbt'
-          git push origin HEAD:refs/heads/dbt-lineage
+          git commit -m 'docs: actualiser le lineage dbt [skip ci]'
+          git push origin HEAD:refs/heads/main
