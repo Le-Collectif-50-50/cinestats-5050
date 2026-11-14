@@ -23,12 +23,14 @@ DESCRIPTION = (
     "requalifiés automatiquement. Les filtres visa CNC et titre portent sur les films, "
     "pas sur le formulaire ni sur le suivi des demandes. "
     "Le graphique regroupe les tentatives par heure de Paris. Le filtre Période du scraping "
-    "s'applique uniquement au graphique ; sans dates, tout l'historique est affiché."
+    "s'applique uniquement au graphique : sept derniers jours par défaut ; "
+    "sans filtre, tout l'historique est affiché."
 )
 PARAMETERS = [
     {"id": "visa", "name": "Visa CNC", "slug": "visa", "type": "string/=", "sectionId": "string"},
     {"id": "titre", "name": "Titre contient", "slug": "titre", "type": "string/=", "sectionId": "string"},
-    {"id": "periode", "name": "Période du scraping", "slug": "periode", "type": "date/range", "sectionId": "date"},
+    {"id": "periode", "name": "Période du scraping", "slug": "periode", "type": "date/relative",
+     "sectionId": "date", "default": "past7days"},
 ]
 
 
@@ -55,7 +57,7 @@ def dashboard_cards():
         description="Toutes les tentatives stockées, y compris success, not_found, needs_review, "
                     "visa_mismatch, error et blocked. Résultats disponibles après écriture du lot ; "
                     "regroupement par heure de Paris (14:37 → 14:00), toutes exécutions confondues. "
-                    "Période sélectionnable ; sans dates, tout l'historique. "
+                    "Période relative, sept derniers jours par défaut sur le dashboard ; sans filtre, tout l'historique. "
                     "Heures vides et dates nulles exclues.",
     ))
     cards.append(dict(
@@ -103,7 +105,7 @@ def dataset_query(database_id, query, extracted_at_field_id=None):
         if extracted_at_field_id is None:
             raise ValueError("Le filtre période nécessite le champ Metabase raw.allocine_data.extracted_at.")
         tags["periode"].update(type="dimension", dimension=["field", extracted_at_field_id, None],
-                               **{"widget-type": "date/range"})
+                               **{"widget-type": "date/relative"})
     return {"database": database_id, "type": "native",
             "native": {"query": query, "template-tags": tags}}
 
