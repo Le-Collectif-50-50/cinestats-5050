@@ -257,7 +257,7 @@ Le [guide métier est publié dans Metabase Operations](https://metabase.cinesta
 
 Un lien figure sur cinq dashboards : Pipeline Overview, Scraping Allociné — À examiner, Qualité des données — dbt, Suivi des données par visa CNC et Fiche Film.
 
-Le présent fichier est la source versionnée. Le document Metabase reprend les étapes métier et les neuf captures. Les tableaux y sont présentés en listes. Après modification du guide, republier avec le script de maintenance ci-dessous. Les captures utilisent les URL du dépôt public sur `main` ; conserver ces fichiers accessibles.
+Le présent fichier est la source versionnée. Le document Metabase reprend les étapes métier et les neuf captures. Les tableaux y sont présentés en listes. Après modification du guide, republier avec le script de maintenance ci-dessous. Les captures utilisent les URL du dépôt public, figées sur un commit publié de `main` ; conserver ces fichiers accessibles.
 
 ## Références de maintenance
 
@@ -270,7 +270,7 @@ python3 infra/data/metabase-review-tutorial.py --env-file ingestion/.env
 python3 infra/data/metabase-review-tutorial.py --env-file ingestion/.env --apply
 ```
 
-La clé API reste dans l’environnement ou le fichier local hors Git. Le script actualise le document existant par son nom et sa collection. Il ajoute ou met à jour les liens, sans lancer d’ingestion ni de scraping. Publier les captures sur `main`, puis vérifier leur affichage dans Metabase.
+La clé API reste dans l’environnement ou le fichier local hors Git. Le script actualise le document existant par son nom et sa collection. Il ajoute ou met à jour les liens, sans lancer d’ingestion ni de scraping. Publier les captures sur `main`, puis vérifier leur affichage dans Metabase. Le script utilise le commit local `origin/main` pour leurs liens : actualiser cette référence avant republication. `--image-ref <commit-publié>` permet de choisir explicitement leur version.
 
 Captures authentiques des interfaces. Aucun écran de réussite simulé. Refaire les captures après changement du formulaire ou des colonnes.
 

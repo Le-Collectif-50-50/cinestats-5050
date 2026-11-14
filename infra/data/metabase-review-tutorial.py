@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'docs/runbooks/ingestion-tutoriel-revue-humaine-allocine.md'
 BASE = 'https://metabase.cinestats5050.fr'
 REPO = 'https://github.com/Le-Collectif-50-50/cinestats-5050/blob/main/'
-RAW = 'https://raw.githubusercontent.com/Le-Collectif-50-50/cinestats-5050/main/'
+RAW = 'https://raw.githubusercontent.com/Le-Collectif-50-50/cinestats-5050/'
 NAME = 'Guide métier — Revoir une correspondance Allociné'
 DASHBOARDS = {2: 'Pipeline Overview', 3: 'Qualité des données — dbt',
               7: 'Scraping Allociné — À examiner', 11: 'Suivi des données par visa CNC',
@@ -60,7 +61,7 @@ def paragraph(value):
     return {'type': 'paragraph', 'content': inline(value)}
 
 
-def document():
+def document(image_ref):
     """Convertir le Markdown en blocs natifs ; tableaux présentés en listes."""
     source = SOURCE.read_text().split('## Où retrouver ce tutoriel')[0]
     lines = source.splitlines()
@@ -76,7 +77,7 @@ def document():
         if image:
             path = (SOURCE.parent / image[2]).relative_to(ROOT).as_posix()
             blocks.append({'type': 'image', 'attrs': {
-                'src': RAW + path, 'alt': image[1], 'title': image[1]}})
+                'src': RAW + image_ref + '/' + path, 'alt': image[1], 'title': image[1]}})
         elif heading:
             blocks.append({'type': 'heading', 'attrs': {'level': len(heading[1])},
                            'content': inline(heading[2])})
@@ -115,6 +116,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--env-file', type=Path)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--image-ref', help='Commit Git publié portant les captures.')
     args = parser.parse_args()
     if args.env_file:
         from dotenv import load_dotenv
@@ -141,7 +143,9 @@ def main():
     dashboards = {did: api('GET', f'dashboard/{did}') for did in DASHBOARDS}
     for did, dash in dashboards.items():
         assert dash['name'] == DASHBOARDS[did], f'Dashboard {did} inattendu.'
-    content = document()
+    image_ref = args.image_ref or subprocess.check_output(
+        ['git', 'rev-parse', 'origin/main'], cwd=ROOT, text=True).strip()
+    content = document(image_ref)
     print(f'Guide : {len(content["content"])} blocs, '
           f'{sum(n["type"] == "image" for n in content["content"])} captures.')
     if not args.apply:
