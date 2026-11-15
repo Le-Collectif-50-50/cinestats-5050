@@ -2,7 +2,7 @@
 
 **Owner:** Nicolas Revel
 
-**Dernière révision:** 2026-11-13
+**Dernière révision:** 2026-11-16
 
 **Status:** active
 
@@ -14,6 +14,7 @@
 | 2 | 2026-10-09 | Joel Teixeira | Précision du déploiement depuis main et conservation des fichiers générés et des credentials lors des mises à jour. |
 | 3 | 2026-10-11 | Joel Teixeira | Restauration de SELECT pour scraper_user et persistance de la lecture après recréation des tables Airbyte. Configuration requise pour Airbyte activé par défaut et migration du fichier .env existant. |
 | 4 | 2026-11-13 | Joel Teixeira | Dépendance libatomic1 persistante dans l'image Prefect et contrôle du démarrage du pilote Playwright au build. Déploiement Allociné manuel et retrait des indications de scraping Mubi planifié. Quatre déploiements au démarrage, ingestion sans scraping et limites manuelles des scrapers. Diagnostic des timeouts casting Allociné (issue 50), isolation du navigateur et procédure de reprise. |
+| 5 | 2026-11-16 | Joel Teixeira | Reprise automatique de Prefect après reboot de sécurité, attente de l'API et procédure de contrôle après redémarrage (issue 71). |
 
 Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 
@@ -97,6 +98,60 @@ Au démarrage, `ingestion/prefect/start_worker.sh` publie :
 - `traiter-les-demandes-ingestion` : poller toutes les 5 minutes par défaut, qui peut déclencher l’ingestion complète selon les demandes en base.
 
 Aucun scraping Mubi n’est planifié par ce script. Pour publier les changements, attendre la fin des runs actifs, puis recréer le worker. Le [guide ingestion](../../ingestion/README.md#publier-et-lancer-le-scraping-seul) donne les commandes de contrôle et de lancement Allociné. Utiliser `sudo docker` sur le VPS.
+
+### Reprise après le reboot de sécurité de 04:30
+
+`infra/vps/00-base.sh` configure les redémarrages requis par les mises à jour
+automatiques à **04:30, heure Europe/Paris**, sur le VPS data. Ce mécanisme de
+sécurité reste actif ; il ne redémarre pas le VPS chaque jour sans nécessité.
+
+Les trois services ingestion utilisent `restart: unless-stopped` dans le Compose
+de base. La surcharge VPS hérite des politiques Prefect : aucune duplication
+n'est nécessaire dans `infra/data/docker-compose.override.yml`. La configuration
+APT et son générateur ne nécessitent pas de correction.
+
+Lors du démarrage de Docker, les conditions `depends_on` de Compose ne sont pas
+réévaluées. Le worker attend donc une réponse HTTP réussie de
+`${PREFECT_API_URL}/health` avant de republier ses déploiements : au maximum
+60 essais, timeout de 5 secondes par requête et pause de 5 secondes entre échecs.
+Si l'API reste indisponible, le worker sort en erreur et Docker peut le relancer.
+Le contrôle de santé est public ; l'authentification est vérifiée ensuite par
+les commandes Prefect.
+
+Après livraison du code, attendre la fin des runs actifs et vérifier l'absence
+de demandes `pending`/`processing` dans `ops.ingestion_run_requests`. Recréer
+les deux conteneurs pour appliquer leurs nouvelles politiques, sans supprimer
+le volume SQLite ni modifier les secrets :
+
+```bash
+cd ~/cinestats-data/ingestion
+sudo docker compose up -d --no-deps --force-recreate prefect-server
+# Attendre l'état healthy du serveur avant la commande suivante.
+sudo docker compose up -d --no-deps --force-recreate prefect-worker
+sudo docker inspect ingestion-prefect-server-1 ingestion-prefect-worker-1 \
+  --format '{{.Name}} restart={{.HostConfig.RestartPolicy.Name}} état={{.State.Status}}'
+sudo docker compose ps
+```
+
+Vérifier `restart=unless-stopped`, serveur sain et worker connecté à
+`ingestion-pool`. Contrôler les quatre déploiements : seul le poller a un
+calendrier actif. Ne pas utiliser `docker compose down` comme test de reprise :
+cette commande supprime les conteneurs. Un arrêt explicite avec `docker stop`
+les laisse aussi arrêtés après reboot avec `unless-stopped`.
+
+Pour valider un reboot contrôlé, vérifier également l'absence de sync Airbyte
+et de scraping en cours, puis redémarrer le VPS hors des runs actifs. Après
+reconnexion SSH, contrôler sans lancer de commande `compose up` :
+
+- nouveau boot système, Docker et conteneurs démarrés automatiquement ;
+- API saine et worker connecté à `ingestion-pool` ;
+- quatre déploiements et calendrier du poller conservés ;
+- premier run **planifié** du poller terminé en `Completed` après le boot ;
+- Airbyte et Authentik revenus à leur état sain.
+
+Cette reprise restaure les services et les prochains runs planifiés. Elle ne
+reprend pas un flow interrompu en cours d'exécution. Les demandes en cours
+doivent être examinées avant toute relance métier ; ne pas les rejouer en bloc.
 
 ### Dépannage du pilote Playwright
 

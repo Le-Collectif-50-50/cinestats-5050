@@ -1,6 +1,7 @@
 services:
   prefect-server:
     image: ric-prefect:${PREFECT_VERSION:-3.8.7}
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: ingestion/prefect/Dockerfile
@@ -34,6 +35,7 @@ services:
 
   prefect-worker:
     image: ric-prefect:${PREFECT_VERSION:-3.8.7}
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: ingestion/prefect/Dockerfile

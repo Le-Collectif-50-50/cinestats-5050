@@ -4,6 +4,28 @@ set -euo pipefail
 POOL_NAME="ingestion-pool"
 FLOWS_FILE="/app/ingestion/prefect/flows.py"
 
+# Docker redémarre les conteneurs sans appliquer les depends_on de Compose.
+# Attendre l'API avant toute création ou suppression de déploiement.
+if [[ -n "${PREFECT_API_URL:-}" ]]; then
+	python - <<'PY'
+import os
+import time
+import urllib.error
+import urllib.request
+
+health_url = os.environ["PREFECT_API_URL"].rstrip("/") + "/health"
+for attempt in range(1, 61):
+    try:
+        with urllib.request.urlopen(health_url, timeout=5):
+            break
+    except (urllib.error.URLError, TimeoutError, ConnectionError):
+        if attempt == 60:
+            raise SystemExit("API Prefect indisponible après 60 tentatives.") from None
+        print("Attente de l'API Prefect avant initialisation du worker...", flush=True)
+        time.sleep(5)
+PY
+fi
+
 delete_deployment_if_exists() {
 	local deployment_name="$1"
 	prefect deployment delete "$deployment_name" >/tmp/prefect-deployment-delete.log 2>&1 || true
