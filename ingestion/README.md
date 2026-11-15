@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-14
+**Dernière révision:** 2026-11-15
 
 **Status:** actif
 
@@ -26,6 +26,7 @@
 
 | 12 | 2026-11-14 | Joel Teixeira | Deuxième bouton Metabase par visa, forçage explicite et parcours Prefect Airbyte → scraping ciblé → dbt. |
 | 13 | 2026-11-14 | Joel Teixeira | Référence de la revue #53 : qualification des visas sans ID Allociné, correspondances confirmées et contrôles de publication. |
+| 14 | 2026-11-15 | Joel Teixeira | Reprise automatique des conteneurs Prefect après redémarrage Docker et attente de disponibilité de l’API avant initialisation du worker (issue 71). |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -311,6 +312,30 @@ terminés uniquement pour ce visa, sans supprimer leur historique ni désactiver
 les contrôles de correspondance. Sans film éligible ou avec un statut différent
 de `success`, le parcours ciblé échoue et ne lance pas dbt. Les tentatives
 non confirmées restent consultables dans Metabase.
+
+### Reprise après redémarrage Docker ou du VPS
+
+Les services `prefect-server` et `prefect-worker` utilisent `restart: unless-stopped`,
+comme Browserless. Docker les relance après un redémarrage, sauf s’ils ont été
+arrêtés explicitement. Les conteneurs existants doivent être recréés pour appliquer
+cette politique ; attendre la fin des runs actifs avant cette opération.
+
+Au redémarrage du démon, Docker n’applique pas les dépendances `depends_on`
+de Compose. Le script `prefect/start_worker.sh` attend donc une réponse HTTP
+réussie de `${PREFECT_API_URL}/health` avant toute modification des déploiements.
+Il effectue au plus 60 tentatives, avec un timeout de 5 secondes par requête et
+une pause de 5 secondes entre les échecs. Si l’API reste indisponible, le script
+échoue ; la politique Docker permet une nouvelle tentative de démarrage.
+Ce contrôle de santé ne valide pas les identifiants : les commandes Prefect
+suivantes utilisent l’authentification configurée et échouent si elle est invalide.
+
+Chaque reprise exécute la publication des quatre déploiements décrite ci-dessous.
+Elle ne reprend pas automatiquement un flow interrompu en cours d’exécution.
+Après déploiement, vérifier les politiques avec `docker inspect`, puis contrôler
+la santé du serveur, la connexion du worker à `ingestion-pool` et le prochain run
+du poller. La validation après reboot doit être planifiée hors des runs actifs.
+Les redémarrages système de sécurité restent gérés par l’infrastructure.
+
 
 ### Publier et lancer les scrapers
 
