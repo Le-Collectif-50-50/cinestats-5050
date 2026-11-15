@@ -7,24 +7,16 @@ SELECT
     "TITRE" AS cnc_name,
     "GENRE" AS genre,
     CAST("ANNEE_D_AGREMENT" AS INTEGER) AS cnc_agreement_year,
-    CASE
-        -- Si l'année est >= 2013, on multiplie par 1 000 000 (peu importe le format)
-        WHEN CAST("ANNEE_D_AGREMENT" AS INTEGER) >= 2013 THEN
-            CAST(
-                REPLACE(
-                    TRANSLATE("DEVIS", ' ' || CHR(160) || CHR(8239), ''),
-                    ',', '.'
-                ) AS FLOAT
-            ) * 1000000
-        -- Sinon, on ne multiplie pas
-        ELSE
-            CAST(
-                REPLACE(
-                    TRANSLATE("DEVIS", ' ' || CHR(160) || CHR(8239), ''),
-                    ',', '.'
-                ) AS FLOAT
-            )
-    END AS budget,
+    -- Contrat source : DEVIS contient des euros exacts pour toutes les années.
+    CAST(
+        NULLIF(
+            REPLACE(
+                TRANSLATE("DEVIS", ' ' || CHR(160) || CHR(8239), ''),
+                ',', '.'
+            ),
+            ''
+        ) AS NUMERIC
+    ) AS budget,
     -- ARRAYS
     STRING_TO_ARRAY(REPLACE("REALISATEUR", ' ', ''), ' / ') AS director,
     CAST(REPLACE("RANG", ' ', '') AS TEXT) AS director_rank,

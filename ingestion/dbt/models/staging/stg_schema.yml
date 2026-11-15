@@ -19,7 +19,7 @@ models:
       - name: cnc_agreement_year
         description: "Année d’agrément CNC du film."
       - name: budget
-        description: "Budget estimé du film, normalisé et exprimé en euros."
+        description: "Budget exact en euros (NUMERIC), issu de DEVIS sans changement d’échelle selon l’année ; la source doit afficher les euros sans arrondi."
       - name: director
         description: "Liste des réalisateurs du film."
       - name: director_rank
