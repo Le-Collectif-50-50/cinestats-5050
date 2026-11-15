@@ -242,8 +242,108 @@ class ManualRecoverySQLTests(unittest.TestCase):
         latest = dict(old, allocine_title="Gabin", extracted_at="2026-11-12")
         error = dict(old, extracted_at="2026-11-13", scrape_status="error")
         other = dict(old, visa_number="152723", source_record_id="152723")
-        result = self.run_model("staging/stg_allocine_films.sql", {"source_allocine_data": fixture(cols, [old, latest, error, other])})
+        rejection_cols = dict(source_record_id="text", visa_number="text", allocine_id="text")
+        inputs = {
+            "source_allocine_data": fixture(cols, [old, latest, error, other]),
+            "allocine_association_rejections": fixture(rejection_cols, []),
+        }
+        result = self.run_model("staging/stg_allocine_films.sql", inputs)
         self.assertEqual({r["cnc_visa"]: r["allocine_name"] for r in result}, {152722: "Gabin", 152723: "old"})
+
+        # Le rejet couvre tous les succès de l'association et les recollectes.
+        # Le même ID d'un autre visa reste exploitable.
+        review = dict(old, extracted_at="2026-11-14", scrape_status="needs_review",
+                      allocine_id="999999")
+        inputs["source_allocine_data"] = fixture(cols, [old, latest, error, other, review])
+        inputs["allocine_association_rejections"] = fixture(rejection_cols, [
+            dict(source_record_id="152722", visa_number="152722", allocine_id="298873")
+        ])
+        result = self.run_model("staging/stg_allocine_films.sql", inputs)
+        self.assertEqual([(r["cnc_visa"], r["allocine_name"]) for r in result], [(152723, "old")])
+
+        # Une nouvelle cible confirmée peut remplacer l'association rejetée.
+        replacement = dict(review, scrape_status="success", allocine_title="Correct")
+        inputs["source_allocine_data"] = fixture(cols, [old, latest, other, review, replacement])
+        result = self.run_model("staging/stg_allocine_films.sql", inputs)
+        self.assertEqual({r["cnc_visa"]: r["allocine_id"] for r in result},
+                         {152722: "999999", 152723: "298873"})
+
+
+    def test_rejected_archive_uses_latest_success_and_company_namespace(self):
+        import hashlib
+        import uuid
+
+        cols = dict(visa_number="text", source_record_id="text", allocine_id="text",
+                    run_id="text", record_hash="text", extracted_at="timestamp",
+                    scrape_status="text")
+        cols.update({name: "jsonb" for name in ["direction", "casting", "screenwriters",
+                     "production", "technical_team", "distribution", "soundtrack", "companies"]})
+        old = dict(visa_number="120846", source_record_id="120846", allocine_id="109311",
+                   run_id="old", record_hash="a", extracted_at="2026-11-12",
+                   scrape_status="success", direction=["Old director"])
+        latest = dict(old, run_id="latest", extracted_at="2026-11-13",
+                      direction=["Clive Gordon"],
+                      companies=[dict(name="Company", role="Production")])
+        failure = dict(latest, run_id="error", extracted_at="2026-11-14", scrape_status="error")
+        result = self.run_model("ops/allocine_rejected_credits.sql", {
+            "allocine_rejected_results": fixture(cols, [old, latest, failure])
+        })
+        self.assertEqual(len(result), 2)
+        self.assertEqual({r["run_id"] for r in result}, {"latest"})
+        company = next(r for r in result if r["type"] == "Company")
+        expected = str(uuid.UUID(hashlib.md5(b"company:Company").hexdigest()))
+        self.assertEqual(company["credit_holder_id"], expected)
+        self.assertEqual({r["source_visa"] for r in result}, {"120846"})
+
+    def test_exact_euro_budgets_and_categories_across_agreement_years(self):
+        cols = {name: "text" for name in ["VISA", "TITRE", "GENRE", "ANNEE_D_AGREMENT", "DEVIS", "REALISATEUR", "RANG", "PRODUCTEURS", "PAYANT", "CLAIR", "NATIONALITE", "EOF", "BONUS_PARITE_", "ASR", "SOFICA", "CREDIT_D_IMPOT", "AIDE_REGIONALE", "UPDATED_DATE", "UPDATED_BY", "_airbyte_raw_id"]}
+        cols.update(_airbyte_generation_id="integer", _airbyte_extracted_at="timestamp", _airbyte_meta="jsonb")
+        cases = [
+            (2012, "3 785 000", "3785000", "2 à 5M€"),
+            (2013, "3\u00a0785\u00a0000", "3785000", "2 à 5M€"),
+            (2024, "3\u202f785\u202f000,12", "3785000.12", "2 à 5M€"),
+            (None, "3785000.12", "3785000.12", "2 à 5M€"),
+            (2017, "4996371", "4996371", "2 à 5M€"),
+            (2018, "4995717", "4995717", "2 à 5M€"),
+            (2023, "4998106", "4998106", "2 à 5M€"),
+            (2024, "1999999,99", "1999999.99", "Moins de 2M€"),
+            (2024, "2000000", "2000000", "2 à 5M€"),
+            (2024, "5000000", "5000000", "5 à 10M€"),
+            (2024, "10000000", "10000000", "10 à 20M€"),
+            (2024, "20000000", "20000000", "Plus de 20M€"),
+            (2024, "", None, None),
+            (2024, " \u00a0\u202f", None, None),
+            (2024, None, None, None),
+            (2024, "0", "0", "Moins de 2M€"),
+        ]
+        rows = [dict(VISA=str(i + 1), ANNEE_D_AGREMENT=year, DEVIS=raw,
+                     UPDATED_DATE="15/11/2026", UPDATED_BY="Test")
+                for i, (year, raw, _, _) in enumerate(cases)]
+        staging = self.run_model("staging/stg_cnc_films.sql", {
+            "source_films": fixture(cols, rows),
+        }, sql_template=(
+            "SELECT cnc_visa, budget::text AS amount, pg_typeof(budget)::text AS kind "
+            "FROM (" + (MODELS / "staging/stg_cnc_films.sql").read_text() + ") AS films"
+        ))
+        self.assertEqual(len(staging), len(cases))
+        self.assertEqual([r["amount"] for r in sorted(staging, key=lambda r: r["cnc_visa"])],
+                         [expected for _, _, expected, _ in cases])
+        self.assertEqual({r["kind"] for r in staging}, {"numeric"})
+        # Exécuter les deux vrais modèles ensemble, y compris leurs seuils métier.
+        env = Environment()
+        env.globals["gsheet_updated_timestamp"] = env.from_string(
+            (MODELS.parent / "macros/gsheet_updated_timestamp.sql").read_text()
+        ).module.gsheet_updated_timestamp
+        stage_sql = env.from_string((MODELS / "staging/stg_cnc_films.sql").read_text()).render(
+            source=lambda schema, name: "source_films", config=lambda **kwargs: "")
+        categories = self.run_model("intermediate/int_cnc_films.sql", {
+            "source_films": fixture(cols, rows),
+            "stg_cnc_films": stage_sql,
+            "stg_id_matching": fixture(dict(film_id="uuid", cnc_visa="integer"), []),
+        })
+        self.assertEqual(len(categories), len(cases))
+        self.assertEqual([r["budget_category"] for r in sorted(categories, key=lambda r: r["cnc_visa"])],
+                         [category for _, _, _, category in cases])
 
     def test_tax_credit_encodings(self):
         cols = {name: "text" for name in ["VISA", "TITRE", "GENRE", "ANNEE_D_AGREMENT", "DEVIS", "REALISATEUR", "RANG", "PRODUCTEURS", "PAYANT", "CLAIR", "NATIONALITE", "EOF", "BONUS_PARITE_", "ASR", "SOFICA", "CREDIT_D_IMPOT", "AIDE_REGIONALE", "UPDATED_DATE", "UPDATED_BY", "_airbyte_raw_id"]}
