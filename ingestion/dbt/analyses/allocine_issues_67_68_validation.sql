@@ -53,3 +53,21 @@ LEFT JOIN fnl.fnl_role r USING(role_id)
 WHERE f.film_id IS NULL OR h.credit_holder_id IS NULL OR r.role_id IS NULL;
 
 COMMIT;
+
+-- Après les deux corrections #68, retrouver exactement la cohorte initiale #67.
+-- Annuler analytiquement l'ajout Paulo et rétablir le crédit Sofia redondant.
+-- L'empreinte attendue est celle mesurée avant intervention, sans écrire en base.
+WITH reconstructed_before AS (
+    SELECT * FROM fnl.fnl_film_credits
+    WHERE NOT (film_id='9621bf64-2a35-6f56-9854-6a5902246d4f'
+        AND role_id='bbd64e7b-0fa4-b6c8-6a65-fd8ae4e76363'
+        AND credit_holder_id='8ed2a8af-cb72-6381-639f-1cd6299e75e9')
+    UNION ALL
+    SELECT '66c24524-c943-f660-a6d2-deff9a67d477'::uuid,
+        'bbd64e7b-0fa4-b6c8-6a65-fd8ae4e76363'::uuid,
+        '6d9243e0-503f-d657-df7d-c7b471096891'::uuid
+)
+SELECT COUNT(*) AS reconstructed_credits,
+    MD5(STRING_AGG(TO_JSONB(c)::text,'|'
+        ORDER BY film_id,credit_holder_id,role_id)) AS reconstructed_fingerprint
+FROM reconstructed_before c;
