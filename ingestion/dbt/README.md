@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-14
+**Dernière révision:** 2026-11-15
 
 **Status:** actif
 
@@ -27,6 +27,7 @@
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
 | 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. Publication automatique du lineage dbt complet dans `docs/dbt-lineage.md` sur `main`, avec vues détaillées par schéma, sans connexion PostgreSQL, et identité de publication GitHub App dédiée. |
+| 13 | 2026-11-15 | Joel Teixeira | Contrat DEVIS en euros exacts, conversion NUMERIC et procédure de bascule coordonnée source/dbt (#43). |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -40,7 +41,7 @@ Projet dbt Core exécuté depuis `prefect-worker`.
 
 `stg_allocine_films.poster_url` expose l’URL distante nullable de l’affiche. Appliquer la [migration ingestion](../../infra/data/2026-10-15-allocine-poster-url.sql) avant de reconstruire ce modèle sur une base existante. Le [guide Allociné](../scraping/allocine/README.md#affiches--migration-et-reprise-explicite) décrit le backfill explicite et les droits requis. Aucun fichier image n’est stocké par dbt. Les projections aval restent inchangées.
 
-Le staging `stg_cnc_films` retire les espaces classiques, insécables (U+00A0) et fines insécables (U+202F) de `DEVIS`, puis remplace la virgule décimale par un point avant conversion numérique. La multiplication par un million pour les années d'agrément à partir de 2013 reste inchangée.
+Le staging `stg_cnc_films` retire les espaces classiques, insécables (U+00A0) et fines insécables (U+202F) de `DEVIS`, puis remplace la virgule décimale par un point avant conversion numérique. Le contrat d’entrée est désormais **DEVIS en euros exacts pour toutes les années** : conversion PostgreSQL `NUMERIC`, sans multiplication selon l’année ; les chaînes vides deviennent nulles, les valeurs non numériques provoquent une erreur. La source Airbyte doit afficher les euros sans arrondi. **Ne pas déployer ce changement seul sur une source encore exprimée en millions.** Suivre la [bascule coordonnée et les contrôles #43](../../docs/runbooks/ingestion-budget-euros.md).
 
 ## Exécution
 

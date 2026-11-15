@@ -245,6 +245,56 @@ class ManualRecoverySQLTests(unittest.TestCase):
         result = self.run_model("staging/stg_allocine_films.sql", {"source_allocine_data": fixture(cols, [old, latest, error, other])})
         self.assertEqual({r["cnc_visa"]: r["allocine_name"] for r in result}, {152722: "Gabin", 152723: "old"})
 
+    def test_exact_euro_budgets_and_categories_across_agreement_years(self):
+        cols = {name: "text" for name in ["VISA", "TITRE", "GENRE", "ANNEE_D_AGREMENT", "DEVIS", "REALISATEUR", "RANG", "PRODUCTEURS", "PAYANT", "CLAIR", "NATIONALITE", "EOF", "BONUS_PARITE_", "ASR", "SOFICA", "CREDIT_D_IMPOT", "AIDE_REGIONALE", "UPDATED_DATE", "UPDATED_BY", "_airbyte_raw_id"]}
+        cols.update(_airbyte_generation_id="integer", _airbyte_extracted_at="timestamp", _airbyte_meta="jsonb")
+        cases = [
+            (2012, "3 785 000", "3785000", "2 à 5M€"),
+            (2013, "3\u00a0785\u00a0000", "3785000", "2 à 5M€"),
+            (2024, "3\u202f785\u202f000,12", "3785000.12", "2 à 5M€"),
+            (None, "3785000.12", "3785000.12", "2 à 5M€"),
+            (2017, "4996371", "4996371", "2 à 5M€"),
+            (2018, "4995717", "4995717", "2 à 5M€"),
+            (2023, "4998106", "4998106", "2 à 5M€"),
+            (2024, "1999999,99", "1999999.99", "Moins de 2M€"),
+            (2024, "2000000", "2000000", "2 à 5M€"),
+            (2024, "5000000", "5000000", "5 à 10M€"),
+            (2024, "10000000", "10000000", "10 à 20M€"),
+            (2024, "20000000", "20000000", "Plus de 20M€"),
+            (2024, "", None, None),
+            (2024, " \u00a0\u202f", None, None),
+            (2024, None, None, None),
+            (2024, "0", "0", "Moins de 2M€"),
+        ]
+        rows = [dict(VISA=str(i + 1), ANNEE_D_AGREMENT=year, DEVIS=raw,
+                     UPDATED_DATE="15/11/2026", UPDATED_BY="Test")
+                for i, (year, raw, _, _) in enumerate(cases)]
+        staging = self.run_model("staging/stg_cnc_films.sql", {
+            "source_films": fixture(cols, rows),
+        }, sql_template=(
+            "SELECT cnc_visa, budget::text AS amount, pg_typeof(budget)::text AS kind "
+            "FROM (" + (MODELS / "staging/stg_cnc_films.sql").read_text() + ") AS films"
+        ))
+        self.assertEqual(len(staging), len(cases))
+        self.assertEqual([r["amount"] for r in sorted(staging, key=lambda r: r["cnc_visa"])],
+                         [expected for _, _, expected, _ in cases])
+        self.assertEqual({r["kind"] for r in staging}, {"numeric"})
+        # Exécuter les deux vrais modèles ensemble, y compris leurs seuils métier.
+        env = Environment()
+        env.globals["gsheet_updated_timestamp"] = env.from_string(
+            (MODELS.parent / "macros/gsheet_updated_timestamp.sql").read_text()
+        ).module.gsheet_updated_timestamp
+        stage_sql = env.from_string((MODELS / "staging/stg_cnc_films.sql").read_text()).render(
+            source=lambda schema, name: "source_films", config=lambda **kwargs: "")
+        categories = self.run_model("intermediate/int_cnc_films.sql", {
+            "source_films": fixture(cols, rows),
+            "stg_cnc_films": stage_sql,
+            "stg_id_matching": fixture(dict(film_id="uuid", cnc_visa="integer"), []),
+        })
+        self.assertEqual(len(categories), len(cases))
+        self.assertEqual([r["budget_category"] for r in sorted(categories, key=lambda r: r["cnc_visa"])],
+                         [category for _, _, _, category in cases])
+
     def test_tax_credit_encodings(self):
         cols = {name: "text" for name in ["VISA", "TITRE", "GENRE", "ANNEE_D_AGREMENT", "DEVIS", "REALISATEUR", "RANG", "PRODUCTEURS", "PAYANT", "CLAIR", "NATIONALITE", "EOF", "BONUS_PARITE_", "ASR", "SOFICA", "CREDIT_D_IMPOT", "AIDE_REGIONALE", "UPDATED_DATE", "UPDATED_BY", "_airbyte_raw_id"]}
         cols.update(_airbyte_generation_id="integer", _airbyte_extracted_at="timestamp", _airbyte_meta="jsonb")
