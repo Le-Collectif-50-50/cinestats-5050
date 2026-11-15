@@ -34,3 +34,18 @@ models:
 
 on-run-end:
   - "{{ persist_dbt_results(results) }}"
+
+seeds:
+  ric:
+    +schema: ops
+    +tags: [phase2]
+    +grants:
+      select: [metabase_ops_user]
+    allocine_association_rejections:
+      +column_types:
+        source_record_id: text
+        visa_number: text
+        allocine_id: text
+        evidence_run_id: text
+        evidence_record_hash: text
+        reviewed_at: date

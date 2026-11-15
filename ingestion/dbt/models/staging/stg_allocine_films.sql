@@ -2,14 +2,23 @@
   config(materialized = 'table')
 }}
 
--- Conserver le dernier succès par visa source, même si une tentative ultérieure échoue.
+-- Conserver le dernier succès éligible par visa, même après un échec technique.
+-- Invalider avant le classement évite le repli sur un ancien succès de la même association.
 WITH ranked AS (
     SELECT *, ROW_NUMBER() OVER (
         PARTITION BY COALESCE(NULLIF(visa_number::TEXT, ''), source_record_id::TEXT)
         ORDER BY extracted_at DESC NULLS LAST, run_id::TEXT DESC, record_hash DESC
     ) AS version_rank
-    FROM {{ source('raw', 'allocine_data') }}
+    FROM {{ source('raw', 'allocine_data') }} AS raw_result
     WHERE scrape_status = 'success'
+        -- Rejet de l'association source, y compris ses autres tentatives.
+        -- Le même ID reste éligible pour un autre visa source.
+        AND NOT EXISTS (
+            SELECT 1 FROM {{ ref('allocine_association_rejections') }} AS rejection
+            WHERE rejection.source_record_id::TEXT = raw_result.source_record_id::TEXT
+                AND rejection.visa_number::TEXT = raw_result.visa_number::TEXT
+                AND rejection.allocine_id::TEXT = raw_result.allocine_id::TEXT
+        )
 )
 SELECT
     CAST(visa_number AS INTEGER) AS cnc_visa,

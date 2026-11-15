@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-14
+**Dernière révision:** 2026-11-15
 
 **Status:** actif
 
@@ -27,6 +27,8 @@
 | 11 | 2026-11-14 | Joel Teixeira | Dashboard de provenance par visa CNC : source synchronisée, matching, dernier essai/succès, staging, transformations, corrections et modèles finaux. Réconciliation des dashboards Operations : séparation ingestion/scraping, introductions, navigation et filtre relatif Allociné. Rangement des questions Mubi isolées. Clarification des permissions indépendantes des sous-collections. |
 
 | 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. Publication automatique du lineage dbt complet dans `docs/dbt-lineage.md` sur `main`, avec vues détaillées par schéma, sans connexion PostgreSQL, et identité de publication GitHub App dédiée. |
+
+| 13 | 2026-11-15 | Joel Teixeira | Invalidation traçable des associations source Allociné rejetées (#67), avant sélection du dernier succès ; historique des résultats et crédits rejetés. |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -360,6 +362,33 @@ python3 infra/data/metabase-dbt-quality.py \
 La clé reste hors Git et hors ligne de commande. Le fichier d'état conserve les identifiants du dashboard et des questions pour les actualisations ; le réutiliser évite les créations multiples. Le script conserve les cartes ajoutées manuellement. Aucune publication publique ni modification des permissions Metabase n'est effectuée. L'accès API doit être fourni séparément ; la connexion SSH au serveur ne remplace pas une authentification Metabase.
 
 Après déploiement, relancer `dbt build --select +tag:phase2` avec les options de profil ci-dessus. Cela reconstruit les finales et la quarantaine, teste les données puis alimente le suivi. `dbt parse` vérifie la configuration mais ni les données ni l'exécution SQL.
+
+## Associations Allociné invalidées
+
+Le seed [allocine_association_rejections](seeds/allocine_association_rejections.csv)
+contient des **décisions métier**, pas une extraction de données. Chaque décision
+porte sur `(source_record_id, visa_number, allocine_id)`, avec motif, source,
+date, auteur et run/hash témoin. Elle invalide toutes les tentatives de cette
+association, y compris les futures recollectes. Un même ID reste autorisé pour
+un autre visa source ; une nouvelle cible exige une validation indépendante.
+
+`stg_allocine_films` retire ces associations **avant** de classer les succès.
+Un échec technique ne retire pas un succès éligible. Un ancien succès invalidé
+ne redevient pas éligible après un `needs_review` ou un changement de cible.
+Un nouveau succès sur une autre cible reste sélectionnable.
+
+La phase 2 construit le seed dans `ops`, ainsi que deux vues accessibles au
+compte Operations : `allocine_rejected_results` expose toutes les tentatives
+brutes rejetées avec leur décision ; `allocine_rejected_credits` expose les
+crédits du dernier succès rejeté de chaque visa. Aucun brut n'est supprimé.
+Ces crédits historiques ne figurent plus dans la quarantaine **active**
+`film_credits_unmatched`. Ne pas additionner les tentatives historiques pour
+mesurer des personnes ou l'impact statistique.
+
+Les régressions PostgreSQL couvrent conservation après erreur, rejet de plusieurs
+anciens succès après `needs_review`, cible remplacée et ID partagé par deux visas.
+Les tests dbt vérifient unicité des décisions et absence des associations rejetées
+dans le staging actif. [Revue et preuves #67–#68](../../docs/reference/ingestion-revue-issues-67-68.md).
 
 ## Examiner les correspondances du scraping dans Metabase
 
