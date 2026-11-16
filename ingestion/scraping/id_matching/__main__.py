@@ -21,11 +21,12 @@ def missing(value):
     return value is None or not str(value).strip()
 
 
-def references(rows, films, providers, visa=None):
+def references(rows, films, providers, visa=None, visas=None):
+    allowed = set(visas) if visas is not None else ({visa} if visa is not None else None)
     grouped = defaultdict(list)
     for row in rows:
         key = number(row.get("VISA"))
-        if key and (visa is None or key == visa):
+        if key and (allowed is None or key in allowed):
             grouped[key].append(row)
     directors = defaultdict(set)
     for row in films:
@@ -114,7 +115,14 @@ async def run(args, pending, engine):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", choices=("mubi", "tmdb", "all"), default="all")
-    parser.add_argument("--visa", type=number)
+    targets = parser.add_mutually_exclusive_group()
+    targets.add_argument("--visa", type=number)
+    targets.add_argument("--visas", nargs="+", type=number)
+    parser.add_argument(
+        "--skip-processed",
+        action="store_true",
+        help="Ignorer les conclusions déjà enregistrées pour la même référence",
+    )
     parser.add_argument(
         "--limit", type=int, default=10, help="Nombre maximal de visas (défaut 10)"
     )
@@ -129,14 +137,23 @@ def main(argv=None):
     )
     parser.add_argument("--headed", action="store_true")
     args = parser.parse_args(argv)
-    if args.limit < 1 or args.max_candidates < 1 or args.visa == "":
+    if (
+        args.limit < 1
+        or args.max_candidates < 1
+        or args.visa == ""
+        or (args.visas is not None and "" in args.visas)
+    ):
         parser.error("Visa, limite et nombre de candidats doivent être strictement positifs.")
     load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
     engine = create_engine(database_url())
     try:
         rows, films = load_references(engine)
         providers = ("mubi", "tmdb") if args.provider == "all" else (args.provider,)
-        pending = list(references(rows, films, providers, args.visa))
+        pending = list(references(rows, films, providers, args.visa, args.visas))
+        if args.skip_processed:
+            from .store import exclude_processed
+
+            pending = exclude_processed(engine, pending)
         print(
             json.dumps(
                 {

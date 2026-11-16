@@ -1,10 +1,37 @@
 """Journal des tentatives, séparant propositions confirmées et cas à examiner."""
 
 import json
+from dataclasses import asdict
 
 from sqlalchemy import text
 
 REVIEW_STATUSES = {"a_revoir", "ambigu", "non_trouve", "bloque", "erreur"}
+
+
+def exclude_processed(engine, pending):
+    """Rejouer une erreur technique, mais conserver les conclusions métier inchangées."""
+    with engine.connect() as connection:
+        results = connection.execute(
+            text("""
+            SELECT visa, provider, evidence -> 'reference' AS reference
+            FROM ops.id_matching_confirmed
+            UNION ALL
+            SELECT visa, provider, evidence -> 'reference' AS reference
+            FROM ops.id_matching_review
+            WHERE status IN ('a_revoir', 'ambigu', 'non_trouve')
+        """)
+        )
+        done = {}
+        for visa, provider, reference in results:
+            done.setdefault((visa, provider), []).append(reference)
+    remaining = []
+    for reference, providers in pending:
+        selected = [
+            p for p in providers if asdict(reference) not in done.get((reference.visa, p), [])
+        ]
+        if selected:
+            remaining.append((reference, selected))
+    return remaining
 
 
 def destination(result):

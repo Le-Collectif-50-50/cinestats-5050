@@ -1,5 +1,6 @@
 """Contrats des cinq déploiements, sans API, scraping ni écriture en base."""
 import importlib
+import asyncio
 import io
 import json
 import os
@@ -7,7 +8,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from ingestion.prefect import flows
 
@@ -135,6 +136,42 @@ class DeploymentTests(unittest.TestCase):
         with patch.object(flows, "_run", side_effect=subprocess.CalledProcessError(1, ["matching"])):
             with self.assertRaises(subprocess.CalledProcessError):
                 flows.run_missing_id_matching.fn()
+
+    def test_id_matching_backfill_keeps_explicit_batch_targets(self):
+        with patch.object(flows, "_run") as run:
+            flows.run_missing_id_matching.fn(visa_numbers=["149572", "88240"], skip_processed=True)
+        self.assertEqual(run.call_args.args[0][-4:], ["--visas", "149572", "88240", "--skip-processed"])
+        for kwargs in ({"visa_numbers": []}, {"visa_numbers": ["0"]},
+                       {"visa_numbers": ["149572", "149572"]},
+                       {"visa_number": "149572", "visa_numbers": ["88240"]},
+                       {"max_films": 1, "visa_numbers": ["149572", "88240"]}):
+            with self.subTest(kwargs=kwargs), patch.object(flows, "_run") as run:
+                with self.assertRaises(ValueError):
+                    flows.run_missing_id_matching.fn(**kwargs)
+                run.assert_not_called()
+
+    def test_id_matching_waits_for_predecessor_before_launch(self):
+        key = str(flows.UUID(int=1))
+        with patch.object(flows, "_wait_for_matching_predecessor", new_callable=AsyncMock) as wait, \
+                patch.object(flows, "_run") as run:
+            flows.run_missing_id_matching.fn(wait_for_flow_run_id=key)
+        wait.assert_awaited_once_with(key)
+        run.assert_called_once()
+
+    def test_predecessor_wait_stops_after_terminal_state(self):
+        client = AsyncMock()
+        pending, finished = Mock(), Mock()
+        pending.state.is_final.return_value = False
+        finished.state.is_final.return_value = True
+        client.read_flow_run.side_effect = [pending, finished]
+        context = AsyncMock()
+        context.__aenter__.return_value = client
+        with patch.object(flows, "get_client", return_value=context), \
+                patch.object(flows, "get_run_logger"), \
+                patch.object(flows.asyncio, "sleep", new_callable=AsyncMock) as sleep:
+            asyncio.run(flows._wait_for_matching_predecessor(str(flows.UUID(int=1))))
+        self.assertEqual(client.read_flow_run.await_count, 2)
+        sleep.assert_awaited_once_with(30)
 
 
 if __name__ == "__main__":
