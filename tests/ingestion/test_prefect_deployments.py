@@ -1,4 +1,4 @@
-"""Contrats des quatre déploiements, sans API, scraping ni écriture en base."""
+"""Contrats des cinq déploiements, sans API, scraping ni écriture en base."""
 import importlib
 import io
 import json
@@ -74,7 +74,7 @@ class DeploymentTests(unittest.TestCase):
                         patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
                     cli.main()
 
-    def test_startup_registers_exactly_four_deployments_without_scraping(self):
+    def test_startup_registers_exactly_five_deployments_without_scraping(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake = root / "prefect"
@@ -94,6 +94,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(set(names), {
             "lancer-ingestion-complete", "lancer-scrapping-allocine",
             "lancer-scrapping-mubi", "traiter-les-demandes-ingestion",
+            "rechercher-identifiants-manquants",
         })
         for name, args in names.items():
             self.assertEqual("--interval" in args, name == "traiter-les-demandes-ingestion")
@@ -103,6 +104,37 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn(flows.LEGACY_MAIN_DEPLOYMENT_NAME, deleted)
         self.assertIn("Recuperer les donnees Allocine/lancer-scrapping-allocine", deleted)
         self.assertIn("Recuperer les donnees Mubi (CNC)/lancer-scrapping-mubi", deleted)
+        self.assertIn("Rechercher les identifiants MUBI et TMDB/rechercher-identifiants-manquants", deleted)
+        self.assertEqual(names["rechercher-identifiants-manquants"][names["rechercher-identifiants-manquants"].index("--concurrency-limit") + 1], "1")
+
+    def test_id_matching_is_separate_and_passes_target_parameters(self):
+        with patch.object(flows, "_run") as run, \
+                patch.object(flows, "_run_airbyte_sync_step") as airbyte, \
+                patch.object(flows, "_run_dbt_phase_2_step") as dbt:
+            flows.run_missing_id_matching.fn(provider="tmdb", max_films=3,
+                                            visa_number="149572", max_candidates=20, dry_run=True)
+        self.assertEqual(run.call_args.args[0], [
+            "python3", "-u", "-m", "ingestion.scraping.id_matching", "--provider", "tmdb",
+            "--limit", "3", "--max-candidates", "20", "--visa", "149572", "--dry-run",
+        ])
+        airbyte.assert_not_called()
+        dbt.assert_not_called()
+        parameters = flows.run_missing_id_matching.parameters.properties
+        self.assertEqual(parameters["max_films"]["exclusiveMinimum"], 0)
+        self.assertEqual(parameters["max_candidates"]["exclusiveMinimum"], 0)
+
+    def test_id_matching_rejects_invalid_parameters_before_subprocess(self):
+        for kwargs in ({"max_films": 0}, {"provider": "imdb"}, {"visa_number": "0"},
+                       {"max_candidates": True}, {"max_candidates": -1}, {"dry_run": "false"}):
+            with self.subTest(kwargs=kwargs), patch.object(flows, "_run") as run:
+                with self.assertRaises(ValueError):
+                    flows.run_missing_id_matching.fn(**kwargs)
+                run.assert_not_called()
+
+    def test_id_matching_propagates_failure_to_prefect(self):
+        with patch.object(flows, "_run", side_effect=subprocess.CalledProcessError(1, ["matching"])):
+            with self.assertRaises(subprocess.CalledProcessError):
+                flows.run_missing_id_matching.fn()
 
 
 if __name__ == "__main__":

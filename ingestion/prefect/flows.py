@@ -8,7 +8,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import psycopg
@@ -782,6 +782,37 @@ def _run_mubi_scraping_step(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
 )
 def run_mubi_scraping(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
     _run_mubi_scraping_step(config_path=config_path)
+
+
+@flow(
+    name="Rechercher les identifiants MUBI et TMDB",
+    description="Recherche manuelle des IDs manquants ; propositions et preuves dans ops.",
+)
+def run_missing_id_matching(
+    provider: Literal["all", "mubi", "tmdb"] = "all",
+    max_films: FilmLimit = 10,
+    visa_number: str | None = None,
+    max_candidates: FilmLimit = 10,
+    dry_run: bool = False,
+) -> None:
+    _validate_film_limit(max_films)
+    if provider not in {"all", "mubi", "tmdb"}:
+        raise ValueError("provider doit valoir all, mubi ou tmdb")
+    if isinstance(max_candidates, bool) or not isinstance(max_candidates, int) or max_candidates < 1:
+        raise ValueError("max_candidates doit être un entier strictement positif")
+    if not isinstance(dry_run, bool):
+        raise ValueError("dry_run doit être un booléen")
+    _validate_allocine_target(visa_number, False)
+    command = [
+        "python3", "-u", "-m", "ingestion.scraping.id_matching",
+        "--provider", provider, "--limit", str(max_films),
+        "--max-candidates", str(max_candidates),
+    ]
+    if visa_number is not None:
+        command.extend(["--visa", visa_number])
+    if dry_run:
+        command.append("--dry-run")
+    _run(command, step_name="Rechercher les identifiants MUBI et TMDB", cwd=REPO_ROOT)
 
 
 def _run_mubi_cnc_scraping_step(
