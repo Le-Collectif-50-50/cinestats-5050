@@ -46,14 +46,14 @@ delete_deployment_if_exists "Traiter les demandes d'ingestion/traiter-les-demand
 delete_deployment_if_exists "Traiter les demandes d'ingestion/traiter-les-demandes-ingestion"
 delete_deployment_if_exists "Requeue les demandes d'ingestion stale/requeue-les-demandes-d-ingestion-stale"
 
-# Supprimer les anciens noms et tout calendrier conservé sur les quatre runs manuels.
-# Les cinq déploiements gérés sont recréés avec leurs paramètres par défaut.
+# Réinitialiser les quatre déploiements historiques et leurs anciens calendriers.
+# Le matching est mis à jour en place : supprimer son déploiement détruirait
+# les runs Scheduled du rattrapage déjà enregistrés côté serveur.
 delete_deployment_if_exists "Lancer l'ingestion complete/lancer-ingestion-donnees"
 delete_deployment_if_exists "Lancer l'ingestion complete/lancer-ingestion-complete"
 delete_deployment_if_exists "Recuperer les donnees Allocine/lancer-scraping-allocine"
 delete_deployment_if_exists "Recuperer les donnees Allocine/lancer-scrapping-allocine"
 delete_deployment_if_exists "Recuperer les donnees Mubi (CNC)/lancer-scrapping-mubi"
-delete_deployment_if_exists "Rechercher les identifiants MUBI et TMDB/rechercher-identifiants-manquants"
 
 prefect --no-prompt deploy "${FLOWS_FILE}:main_ingestion_flow" \
 	--name "lancer-ingestion-complete" \

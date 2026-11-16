@@ -105,7 +105,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn(flows.LEGACY_MAIN_DEPLOYMENT_NAME, deleted)
         self.assertIn("Recuperer les donnees Allocine/lancer-scrapping-allocine", deleted)
         self.assertIn("Recuperer les donnees Mubi (CNC)/lancer-scrapping-mubi", deleted)
-        self.assertIn("Rechercher les identifiants MUBI et TMDB/rechercher-identifiants-manquants", deleted)
+        self.assertNotIn("Rechercher les identifiants MUBI et TMDB/rechercher-identifiants-manquants", deleted)
         self.assertEqual(names["rechercher-identifiants-manquants"][names["rechercher-identifiants-manquants"].index("--concurrency-limit") + 1], "1")
 
     def test_id_matching_is_separate_and_passes_target_parameters(self):

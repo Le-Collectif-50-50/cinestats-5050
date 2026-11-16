@@ -360,8 +360,8 @@ cd ingestion
 docker compose up -d --no-deps --force-recreate prefect-worker
 ```
 
-Le démarrage supprime les anciens noms ainsi que les cinq déploiements gérés,
-puis les recrée avec leurs paramètres par défaut. Cela retire notamment les
+Le démarrage réinitialise les quatre déploiements historiques avec leurs paramètres
+par défaut et met à jour le matching en place pour conserver ses runs planifiés. Cela retire notamment les
 anciens calendriers de scraping. Vérifier les cinq noms dans Prefect avant
 de lancer un run. L’ancien nom `lancer-ingestion-donnees` devient
 `lancer-ingestion-complete` ; le poller traduit automatiquement l’ancienne valeur

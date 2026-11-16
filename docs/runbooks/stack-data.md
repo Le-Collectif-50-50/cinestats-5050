@@ -225,8 +225,8 @@ Sans noms de connexions ou credentials valides, la phase Airbyte échoue avant d
 
 ### Migration des déploiements ingestion et scraping
 
-Le worker recrée ses cinq déploiements gérés à chaque démarrage et supprime les
-anciens noms. Attendre la fin des runs avant sa recréation. Seul le poller garde
+Le worker recrée les quatre déploiements historiques et supprime les anciens noms.
+Le matching est mis à jour en place pour conserver les runs ponctuels planifiés. Attendre la fin des runs avant sa recréation. Seul le poller garde
 un calendrier ; les deux scrapers restent manuels et acceptent `max_films`, entier
 strictement positif (10 par défaut). Le poller traduit automatiquement l’ancienne
 valeur `Lancer l'ingestion complete/lancer-ingestion-donnees` du `.env` vers

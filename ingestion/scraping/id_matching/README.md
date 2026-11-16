@@ -166,6 +166,8 @@ déploiement. Un lot trop long retarde les suivants ; les dates sont des dates
 de démarrage prévues, pas une garantie de fin.
 
 La campagne est finie : aucun calendrier récurrent n'est ajouté au déploiement.
+Au redémarrage du worker, le déploiement de matching est mis à jour en place.
+Il n'est pas supprimé : les runs ponctuels déjà planifiés restent enregistrés.
 Chaque run porte le tag de campagne et `id-matching-backfill`. Relancer la même
 campagne conserve ses visas déjà planifiés, y compris ceux de runs annulés, et ne
 crée que les lots supplémentaires nécessaires. Le nom de chaque run indique
@@ -194,6 +196,19 @@ enveloppe de planification est de 5 à 15 minutes par lot de dix films et de
 deux fournisseurs peut atteindre environ une heure si chaque recherche atteint
 le délai maximal de 180 secondes. Les blocages et la charge du VPS peuvent
 allonger le calendrier.
+
+La campagne `matching-rattrapage-2026-11-16` a été enregistrée dans Prefect :
+119 runs ponctuels couvrant 1 181 visas distincts et 1 667 recherches restantes.
+Les créneaux vont du 16 novembre à 02:30 au 17 novembre à 08:00, heure de Paris,
+à raison d'un lot toutes les 15 minutes. Chaque run attend la fin du scraping
+MUBI `a24da41b-711c-4a39-a491-88a37b3f2a62` avant d'ouvrir un navigateur.
+Ces dates sont des démarrages prévus ; l'attente ou des lots longs peuvent les
+décaler. La campagne est stockée sur le serveur et ne dépend pas du Mac.
+
+Le pilote avec écriture a conservé quatre conclusions `non_trouve` et une
+conclusion `a_revoir`. Aucun ID canonique n'a été modifié. Les recherches
+Allociné restent hors de cette campagne ; les cas historiques sont documentés
+dans la [revue issue 53](../../../docs/reference/ingestion-revue-matching-issue-53.md).
 
 ## Critères et limites
 
