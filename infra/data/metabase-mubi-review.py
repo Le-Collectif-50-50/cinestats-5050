@@ -20,7 +20,10 @@ DESCRIPTION = (
 )
 RAW_TABLE = "mubi_film_awards"
 STATE_FILE = ROOT / "ingestion/scraping/mubi_cnc/local-runs/metabase-review-state.json"
-PARAMETERS = publisher.PARAMETERS + [
+PARAMETERS = [
+    {**p, **({"default": "past7days~"} if p["id"] == "periode" else {})}
+    for p in publisher.PARAMETERS
+] + [
     {"id": "mubi", "name": "ID Mubi", "slug": "mubi", "type": "string/=", "sectionId": "string"},
 ]
 BASE = """WITH films AS (
@@ -54,9 +57,14 @@ def dashboard_cards():
 SELECT date_trunc('hour', extracted_at AT TIME ZONE 'Europe/Paris') AS heure,
  scrape_status AS statut, count(*) AS tentatives FROM attempts
 GROUP BY 1, 2 ORDER BY 1, 2""",
-        description="Une tentative par run, ID Mubi et horodatage ; les lignes de palmarès ne multiplient pas les tentatives. Période : sept derniers jours par défaut ; hors filtres visa, titre et ID Mubi.",
+        description="Une tentative par run, ID Mubi et horodatage ; les lignes de palmarès ne multiplient pas les tentatives. Période par défaut : sept jours précédents et aujourd’hui ; hors filtres visa, titre et ID Mubi.",
         visualization_settings={"graph.dimensions": ["heure", "statut"], "graph.metrics": ["tentatives"], "stackable.stack_type": "stacked"}))
     requests = (ROOT / "ingestion/dbt/analyses/metabase/scraping_requests.sql").read_text().replace("request_type = 'allocine'", "request_type = 'mubi'")
+    # L’état et les erreurs restent visibles avant les champs longs du formulaire.
+    requests = """SELECT etat_demande, demande_le, films_maximum, visa_cnc, erreur,
+        demandeur, motif, terminee_le, execution_prefect, demande_id, retraitement_force
+        FROM (""" + requests.rstrip().rstrip(";") + """ ) demandes
+        ORDER BY demande_le DESC, demande_id DESC"""
     cards.append(dict(name="Demandes Mubi", query=requests, display="table", col=0, row=17, size_x=24, size_y=7,
         description="50 dernières demandes, hors filtres. Terminée : collecte sans erreur technique puis dbt réussi. Aucun film éligible peut produire une publication sans nouvelle collecte. Les annulations/crashes sont réconciliés par le poller."))
     cards.append(dict(name="État des films CNC", query=BASE + """SELECT cnc_visa AS visa, title AS titre, mubi_id,

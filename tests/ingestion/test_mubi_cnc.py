@@ -250,3 +250,8 @@ def test_edition_empty_success_and_selector_drift(monkeypatch, body, expected):
     records = asyncio.run(source._scrape_festival_editions(config(max_pages_per_edition=1), [("cannes", "2024")]))
     assert records[0]["scrape_status"] == expected
     source._checkpoint.assert_called_once()
+
+
+def test_dashboard_default_includes_current_day_without_changing_allocine():
+    assert next(p for p in dashboard.PARAMETERS if p["id"] == "periode")["default"] == "past7days~"
+    assert next(p for p in dashboard.publisher.PARAMETERS if p["id"] == "periode")["default"] == "past7days"

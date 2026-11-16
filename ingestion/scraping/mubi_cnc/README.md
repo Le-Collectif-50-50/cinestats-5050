@@ -161,6 +161,8 @@ les trois mêmes pages, dans une session par variante (ouverture et fermeture
 comprises). Données extraites identiques : palmarès Mubi 136442, Cannes 2024 page 1
 (36 films), page 100 (vide). Réduction observée : **33,4 %**. Ce petit échantillon
 ne mesure ni un catalogue entier, ni les retries/blocages, ni Airbyte/dbt.
+Un second essai instrumenté donne 51,69 s → 37,94 s (−26,6 %), avec les mêmes
+données parsées ; le détail des phases figure dans le rapport de validation.
 
 ## Piloter depuis Metabase
 
@@ -199,7 +201,7 @@ mise à jour idempotente. Les clés API restent hors Git.
   les coordonner explicitement et ne pas les superposer à une publication.
 - Les filtres visa, titre et ID portent sur la couverture et l’état des films.
   La période porte uniquement sur le graphique des tentatives, en heure de Paris
-  (sept derniers jours par défaut). Demandes et pages restent hors de ces filtres.
+  (sept jours précédents et aujourd’hui par défaut). Demandes et pages restent hors de ces filtres.
 - Couverture : visas pour les IDs absents, ID Mubi distincts pour les films
   traités/en attente/en erreur. Le graphique compte une tentative par run, ID et
   horodatage. Les pages de festivals restent des pages, jamais des films ou prix.
@@ -221,5 +223,6 @@ Il vérifie reprise des éditions, ID partagé et verrou inter-sources sans modi
 les tables métier. Vérifier aussi les actions, filtres et permissions Metabase
 après publication, puis un petit run réel et les modèles dbt sans cache.
 
-Les [résultats de validation et étapes de livraison](../../../docs/reference/ingestion-validation-mubi-issue-83.md)
-distinguent les essais réalisés du déploiement de production restant à effectuer.
+Le [dashboard Mubi de production](https://metabase.cinestats5050.fr/dashboard/12)
+propose les deux actions. Les [résultats de validation et détails de livraison](../../../docs/reference/ingestion-validation-mubi-issue-83.md)
+consignent les runs terminés, mesures, contrôles et limites de cette mise en service.
