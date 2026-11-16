@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-15
+**Dernière révision:** 2026-11-16
 
 **Status:** actif
 
@@ -29,6 +29,8 @@
 | 12 | 2026-11-14 | Joel Teixeira | Correctif temporaire de last_name : conservation des mots après le premier dans les crédits Allociné, limites et tests. Publication des associations film-genre manuelles, contrôles de conservation, d’unicité et de références (#57). Ajout du tutoriel métier illustré de revue humaine Allociné, publié dans Metabase Operations avec liens sur cinq dashboards. Publication automatique du lineage dbt complet dans `docs/dbt-lineage.md` sur `main`, avec vues détaillées par schéma, sans connexion PostgreSQL, et identité de publication GitHub App dédiée. |
 | 13 | 2026-11-15 | Joel Teixeira | Invalidation traçable des associations source Allociné rejetées (#67), avant sélection du dernier succès ; historique des résultats et crédits rejetés. |
 | 14 | 2026-11-15 | Joel Teixeira | Contrat DEVIS en euros exacts, conversion NUMERIC et procédure de bascule coordonnée source/dbt (#43). |
+
+| 15 | 2026-11-16 | Joel Teixeira | Vue ops de couverture Mubi et dashboard de suivi CNC (#83). |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -745,3 +747,17 @@ rester uniques. Seules les descriptions, questions et dispositions Metabase sont
 modifiées ; la consultation ne déclenche aucune ingestion. L'accès dépend des
 permissions de la collection Operations, sans partage public créé par ce script.
 Les droits de sa sous-collection Trigger se contrôlent séparément.
+
+## Suivre Mubi CNC
+
+`ops.v_mubi_pipeline_status` expose une ligne du référentiel par visa, avec ID Mubi,
+état d’éligibilité, dernier essai et dernier succès. Les vues de suivi n’attribuent
+aucun prix aux parties d’un programme partagé. Le dashboard déduplique les compteurs
+de films par ID Mubi ; les lignes sans ID restent comptées par visa.
+Le graphique déduplique les tentatives par run/ID/horodatage.
+
+Le [guide Mubi CNC](../scraping/mubi_cnc/README.md#piloter-depuis-metabase) décrit
+la publication idempotente, les filtres, les deux boutons et le verrou global.
+Le flow reconstruit `+tag:phase2` après une collecte sans erreur technique.
+Les données Mubi restent dans les modèles staging/intermediate existants ;
+aucune nouvelle intégration dans les tables finales métier n’est présumée.

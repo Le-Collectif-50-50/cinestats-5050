@@ -127,6 +127,7 @@ class AsyncBrowserSession:
         navigation_timeout_seconds=30.0,
         navigation_wait_until="networkidle",
         lightweight=False,
+        ready_selector=None,
     ):
         self.ws_endpoint = ws_endpoint
         self.user_agent = user_agent or DEFAULT_USER_AGENT
@@ -138,6 +139,7 @@ class AsyncBrowserSession:
         self.navigation_timeout_seconds = navigation_timeout_seconds
         self.navigation_wait_until = navigation_wait_until
         self.lightweight = lightweight
+        self.ready_selector = ready_selector
         self.playwright = None
         self.browser = None
         self.context = None
@@ -387,6 +389,11 @@ class AsyncBrowserSession:
                     if self.verbose:
                         print(f"  [browser] Warning: Failed to wait for networkidle: {e}")
             
+            if self.ready_selector:
+                await self.page.wait_for_selector(
+                    self.ready_selector, state="attached",
+                    timeout=self.navigation_timeout_seconds * 1000,
+                )
             await self._debug_pause(f"Page loaded: {url}")
 
             # Accepte le consentement cookies Mubi si présent
