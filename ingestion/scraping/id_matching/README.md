@@ -168,7 +168,10 @@ de démarrage prévues, pas une garantie de fin.
 La campagne est finie : aucun calendrier récurrent n'est ajouté au déploiement.
 Chaque run porte le tag de campagne et `id-matching-backfill`. Relancer la même
 campagne conserve ses visas déjà planifiés, y compris ceux de runs annulés, et ne
-crée que les lots supplémentaires nécessaires. Une clé d'idempotence protège la
+crée que les lots supplémentaires nécessaires. Le nom de chaque run indique
+une estimation en minutes ; son contexte `matching_estimate` conserve le nombre
+de recherches et l'hypothèse de 24 secondes par recherche issue du pilote.
+Cette extrapolation est indicative. Une clé d'idempotence protège la
 création de chaque lot. Pour rejouer un lot annulé ou en erreur, utiliser son run
 Prefect ou une campagne distincte, après examen de la cause.
 

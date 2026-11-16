@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -85,11 +86,18 @@ async def schedule(
             "last_start": plan[-1][0].isoformat() if plan else None,
             "applied": apply,
         }
+        searches_by_visa = {reference.visa: len(providers) for reference, providers in pending}
+        report["provider_searches"] = sum(
+            searches_by_visa[v] for _, visas in plan for v in visas
+        )
+        report["pilot_extrapolation_hours"] = round(report["provider_searches"] * 24 / 3600, 1)
         if apply:
             if start <= datetime.now(timezone.utc):
                 raise ValueError("La première exécution doit être planifiée dans le futur")
             for i, (when, visas) in enumerate(plan, len(existing) + 1):
                 fingerprint = hashlib.sha256("|".join(visas).encode()).hexdigest()
+                searches = sum(searches_by_visa[v] for v in visas)
+                minutes = math.ceil(searches * 24 / 60)
                 await client.create_flow_run_from_deployment(
                     deployment.id,
                     parameters={
@@ -102,7 +110,14 @@ async def schedule(
                         "wait_for_flow_run_id": wait_for_flow_run_id,
                     },
                     state=Scheduled(scheduled_time=when),
-                    name=f"{campaign}-lot-{i:03d}",
+                    name=f"{campaign}-lot-{i:03d}-env-{minutes}min",
+                    context={
+                        "matching_estimate": {
+                            "provider_searches": searches,
+                            "estimated_minutes": minutes,
+                            "seconds_per_search": 24,
+                        }
+                    },
                     tags=[campaign, "id-matching-backfill"],
                     idempotency_key=f"{campaign}:{fingerprint}",
                 )

@@ -102,6 +102,8 @@ def test_schedule_preserves_existing_targets_and_uses_explicit_visas(client):
     assert call["state"].state_details.scheduled_time == start + timedelta(minutes=15)
     assert "test-campaign" in call["tags"]
     assert call["idempotency_key"].startswith("test-campaign:")
+    assert call["context"]["matching_estimate"]["provider_searches"] == 4
+    assert call["context"]["matching_estimate"]["estimated_minutes"] == 2
 
 
 def test_schedule_rejects_concurrency_above_one(client):
