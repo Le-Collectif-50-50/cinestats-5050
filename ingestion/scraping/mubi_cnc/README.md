@@ -20,7 +20,7 @@
 
 Job de scraping Mubi **piloté par l'entrée** (input-driven), en alternative au job de découverte `ingestion/scraping/mubi/`.
 
-Objectif : ne scraper **que les films pour lesquels le CNC a donné son accord**, au lieu de crawler l'intégralité des festivals Mubi (plusieurs centaines de festivals × dizaines d'années × pages) puis de filtrer en aval. Le volume scrapé est ainsi borné à la liste de référence CNC.
+Objectif : partir des films du référentiel CNC et limiter l'exploration aux éditions de festivals liées à leurs palmarès. La phase A ne collecte que ces films ; la phase B conserve tous les films des sélections concernées, y compris ceux absents du référentiel CNC. Son volume peut donc dépasser le nombre de films CNC demandés.
 
 ## Différence avec le job `mubi/`
 
@@ -35,7 +35,7 @@ Les deux jobs écrivent dans les **mêmes tables** avec les **mêmes colonnes** 
 
 ## Ce que fait la source
 
-Deux phases séquentielles à chaque exécution.
+Deux phases séquentielles dans le parcours Prefect. Le CLI permet aussi d'exécuter un seul lot d'une phase.
 
 **Phase A — Palmarès par film CNC**
 
@@ -49,7 +49,7 @@ Scrape uniquement les éditions `(festival_slug, year)` collectées en Phase A (
 
 Le contenu localisé de Mubi (mot de distinction `Lauréat`/`Winner`, intitulé du prix, nom du festival) **dépend de la locale de l'URL**. Pour rester cohérent avec les lignes déjà écrites par le job `mubi/` dans les mêmes tables, ce job force la locale **`/fr/`** : `distinction`, `award` et `festival` sont donc en français.
 
-En revanche, le scrape des éditions en Phase B est piloté par `industry_event.slug` (ex. `cannes`, `oscars`), qui est **invariant par langue** — jamais par le nom affiché. Le fait de figer la locale garantit aussi un `record_hash` stable entre exécutions (un même palmarès produit toujours le même hash), ce qui rend la déduplication fiable.
+Le scrape des éditions en Phase B est piloté par `industry_event.slug` (ex. `cannes`, `oscars`), qui est **invariant par langue**, jamais par le nom affiché. Figer la locale assure la cohérence des libellés. Le `record_hash` inclut aussi le run et l'horodatage : il ne reste pas stable entre deux tentatives.
 
 ## Déduplication
 
