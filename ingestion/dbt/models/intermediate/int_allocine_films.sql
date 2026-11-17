@@ -7,4 +7,5 @@ SELECT
     films.duration_mn
 FROM {{ ref('stg_allocine_films') }} AS films
 LEFT JOIN {{ ref('stg_id_matching') }} AS matching
-    ON films.allocine_id = matching.allocine_id
+    ON films.cnc_visa = matching.cnc_visa
+    AND films.allocine_id = matching.allocine_id

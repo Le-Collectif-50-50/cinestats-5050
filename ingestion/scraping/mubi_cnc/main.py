@@ -72,7 +72,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Mubi CNC-driven custom source")
     parser.add_argument("command", choices=["spec", "check", "discover", "sync"])
     parser.add_argument("--config", dest="config_path")
+    parser.add_argument("--limit", type=int, help="Nombre maximum de films CNC (sync)")
     args = parser.parse_args()
+    if args.limit is not None and (args.command != "sync" or args.limit < 1):
+        parser.error("--limit exige sync et un entier strictement positif")
 
     source = MubiCncAirbyteSource()
 
@@ -81,6 +84,8 @@ def main() -> int:
         return 0
 
     config = _load_json(args.config_path) or {}
+    if args.limit is not None:
+        config["scrape_limit"] = args.limit
 
     if args.command == "check":
         ok, message = source.check(config)

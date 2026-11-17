@@ -96,6 +96,8 @@ async def process_candidates(engine, config, candidates, scraper, browser_factor
                 headless=config.headless,
                 debug_pause_between_actions=config.debug_pause_between_actions,
                 verbose=config.verbose,
+                navigation_timeout_seconds=config.navigation_timeout_seconds,
+                navigation_wait_until="domcontentloaded",
             ) as session:
                 html = await session.fetch_html(source_url)
                 return scraper.extract_film_details(html).get("poster_url") or None

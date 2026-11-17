@@ -2,7 +2,7 @@
 
 **Owner:** Nicolas Revel
 
-**Dernière révision:** 2026-11-01
+**Dernière révision:** 2026-11-17
 
 **Status:** brouillon
 
@@ -12,10 +12,11 @@
 | --- | --- | --- | --- |
 | 1 | 2026-10-31 | Nicolas Revel | Proposition initiale : la stack data actuelle alimente aussi la base de l'environnement preview, pour vérifier les changements dans l'app `preview.cinestats5050.fr` avant de les publier en production. À valider par Joel Teixeira avant implémentation. |
 | 2 | 2026-11-01 | Nicolas Revel | Prérequis retenu : le backend lit les tables `fnl_*` au lieu des tables `ric_*` couvertes par la pipeline. Ajout de la stratégie d'identifiant film (URL publiques), du lien avec les tables restées en `ric_*` et des droits de `app_ro`. |
+| 3 | 2026-11-17 | Nicolas Revel | Alignement sur `main` : ingestion sans scraping (`lancer-ingestion-complete`), scrapers manuels Allociné et Mubi CNC, types de demandes Metabase (`ingestion`, `allocine`, par visa). Renvoi au [guide de finalisation dbt](../reference/ingestion-mapping-frontend-api-legacy-dbt.md) pour la bascule du backend ; ajout des films sans visa. |
 
 ## 1. Objectif
 
-Avant chaque mise à jour de données en production, lancer la même pipeline (`airbyte sync → dbt phase 1 → scraping → dbt phase 2`) sur la **base de l'environnement preview**. On vérifie ensuite le résultat **dans l'app preview**, puis on relance sur la production.
+Avant chaque mise à jour de données en production, lancer les mêmes runs (ingestion `airbyte sync → dbt phase 1 → dbt phase 2`, et si besoin les scrapers Allociné ou Mubi CNC) sur la **base de l'environnement preview**. On vérifie ensuite le résultat **dans l'app preview**, puis on relance sur la production.
 
 Le besoin : voir l'effet d'une correction du Google Sheet `Modification data` ou d'un changement de modèle dbt sur les pages réelles du site, et pas seulement dans des tables.
 
@@ -32,7 +33,8 @@ Principe : **une seule stack data** (le VPS `data` actuel), **deux bases cibles*
 | Base preview | Postgres conteneurisé (service `db`) sur la machine preview, **sans port publié**, rempli par Alembic et le seed (`RUN_SEED`). Pas de schémas `raw`/`staging`/`intermediate`/`fnl`/`ops`, pas de rôles d'ingestion, pas de TLS. | [docker-compose.preview.yaml](../../docker-compose.preview.yaml), [DEPLOYMENT.md](../DEPLOYMENT.md#preview) |
 | Réseau | WireGuard en étoile centré sur `db` : `app` et `data` ne voient que `db`. La machine preview n'en fait pas partie. | [infra/vps/10-wireguard.sh](../../infra/vps/10-wireguard.sh) |
 | Choix de la base dans les outils | dbt : une seule cible `default`. Scraper Allociné : placeholders `${POSTGRES_HOST}`… dans un fichier de config passé en paramètre (`config_path`). Airbyte : une destination par connexion, choisie par nom. | [profiles.yml](../../ingestion/dbt/profiles/profiles.yml), [config.json](../../ingestion/scraping/allocine/config.json), [flows.py](../../ingestion/prefect/flows.py) |
-| Déclenchement Metabase | L'action SQL écrit dans `ops.ingestion_run_requests` (base de prod) ; le poller lance `lancer-ingestion-donnees`. | [metabase-trigger-ingestion.sql](../../infra/data/metabase-trigger-ingestion.sql) |
+| Déploiements Prefect | `lancer-ingestion-complete` (Airbyte puis dbt, sans scraping, sans limite de concurrence) ; `lancer-scrapping-allocine` et `lancer-scrapping-mubi`, manuels, limités à un run. | [start_worker.sh](../../ingestion/prefect/start_worker.sh) |
+| Déclenchement Metabase | Trois actions SQL écrivent dans `ops.ingestion_run_requests` (base de prod) : ingestion, scraping Allociné limité, scraping Allociné par visa (`request_type`, `max_films`, `visa_number`, `force_rescrape`). Le poller lance le déploiement correspondant. | [ops-ingestion-table.sql](../../infra/data/ops-ingestion-table.sql), [metabase-trigger-ingestion.sql](../../infra/data/metabase-trigger-ingestion.sql), [metabase-trigger-allocine.sql](../../infra/data/metabase-trigger-allocine.sql), [metabase-trigger-allocine-visa.sql](../../infra/data/metabase-trigger-allocine-visa.sql) |
 
 **Conséquence principale :** brancher la pipeline sur la base preview ne change pas l'app preview tant que le backend lit `ric_*`. Faire lire `fnl` au backend (§4.1) est un **prérequis**. C'est la phase 4 « Backend / Exposition » déjà prévue par la [spécification Airbyte/dbt](ingestion-specification-airbyte-dbt-mises-a-jour-donnees.md#114-phase-4---backend--exposition). La preview sert alors de répétition, comme pour les migrations Alembic : le nouveau backend est déployé en preview sur des données `fnl` produites par la pipeline, puis en production.
 
@@ -62,16 +64,18 @@ Le backend lit les tables `fnl_*` pour tout ce que la pipeline produit, et garde
 | Films, crédits, personnes, rôles, genres, budgets et pays | `fnl.fnl_films`, `fnl_film_credits`, `fnl_credit_holders`, `fnl_role`, `fnl_genre`, `fnl_film_genre`, `fnl_film_country_budget_allocation` |
 | Affiches, bandes-annonces, prédictions ML, festivals, récompenses | `ric_*` inchangées, tant qu'il n'existe pas de modèle `fnl` équivalent |
 
+Les étapes détaillées de cette bascule (identifiants, règles métier, tests, droits, retour arrière) sont décrites dans le [guide de finalisation dbt](../reference/ingestion-mapping-frontend-api-legacy-dbt.md#5-préparer-la-bascule-des-consommateurs) ; cette section ne garde que ce qui conditionne la preview.
+
 Points à traiter :
 
 1. **Modèles et repositories.** De nouveaux modèles SQLAlchemy en lecture seule sur le schéma `fnl` (`__table_args__ = {"schema": "fnl"}`), sans migration Alembic : dbt possède ces tables. Les repositories concernés (`film`, `film_credit`, `credit_holder`, `role`, `genre`, `country`, `film_country_budget_allocation`) changent de modèle, et les entités exposées par l'API gardent leur forme, pour que le frontend ne change pas.
-2. **Correspondance des colonnes.** Les noms et certains types diffèrent : `original_name` / `movie_name`, `visa_number` / `cnc_visa`, `duration_minutes` / `duration_mn`, `parity_bonus` / `has_parity_bonus`, `cnc_agrement_year` / `cnc_agreement_year`, `genre_categories` / `genre_category`, `asr` (texte) / `has_asr` (booléen), `cnc_rank` (entier) / `filmography_rank` (texte). Le mapping se fait dans les repositories, ou dans une vue dbt d'exposition (par exemple `fnl.api_films`) qui renomme déjà les colonnes. Le choix se fait au lot 4, avec Joel Teixeira.
+2. **Correspondance des colonnes.** Les noms et certains types diffèrent : `original_name` / `movie_name`, `visa_number` / `cnc_visa`, `duration_minutes` / `duration_mn`, `parity_bonus` / `has_parity_bonus`, `cnc_agrement_year` / `cnc_agreement_year`, `genre_categories` / `genre_category`, `asr` (texte) / `has_asr` (booléen), `cnc_rank` (entier) / `filmography_rank` (texte). Les codes de rôle diffèrent aussi : l'API filtre sur `actor`/`director`, dbt produit `Acteur`/`Réalisateur`. Le mapping se fait dans les repositories, ou dans une vue dbt d'exposition (par exemple `fnl.api_films`) qui renomme déjà les colonnes. Le choix se fait au lot 4, avec Joel Teixeira.
 3. **Identifiant film et URL publiques.** Les pages sont `/films/<ric_films.id>`, alors que `fnl_films.film_id` est un UUID dérivé du visa. Options :
    - garder un identifiant entier stable : une table de correspondance `visa → id` publiée par dbt et initialisée depuis `ric_films`, qui conserve les URL existantes ;
    - ou passer aux URL en UUID (ou en slug) et rediriger les anciennes URL `/films/<entier>` grâce à la même correspondance.
 
    La première option est la plus sûre : aucune URL partagée ni aucun lien indexé ne casse.
-4. **Lien avec les tables restées en `ric_*`.** Les affiches, bandes-annonces et nominations référencent `ric_films.id`. Le backend les rattache aux films `fnl` par la correspondance du point 3, ou par le visa (`ric_films.visa_number = fnl_films.cnc_visa`). Les films présents dans `fnl` mais absents de `ric_films` n'ont alors ni affiche ni bande-annonce : l'API doit le tolérer.
+4. **Lien avec les tables restées en `ric_*`.** Les affiches, bandes-annonces et nominations référencent `ric_films.id`. Le backend les rattache aux films `fnl` par la correspondance du point 3, ou par le visa (`ric_films.visa_number = fnl_films.cnc_visa`). Le visa ne suffit pas seul : le guide de finalisation dbt relève 770 films sans visa CNC en production, qu'il faut rattacher autrement (par exemple par l'ID Allociné). Les films présents dans `fnl` mais absents de `ric_films` n'ont alors ni affiche ni bande-annonce : l'API doit le tolérer.
 5. **Droits.** `app_ro` doit lire `fnl` : `GRANT USAGE ON SCHEMA fnl TO app_ro;`, `GRANT SELECT ON ALL TABLES IN SCHEMA fnl TO app_ro;` et `ALTER DEFAULT PRIVILEGES FOR ROLE dbt_user IN SCHEMA fnl GRANT SELECT ON TABLES TO app_ro;` dans [roles.sql](../../infra/vps/sql/roles.sql). dbt recrée les tables à chaque run, d'où les droits par défaut.
 6. **Disponibilité pendant un run.** dbt remplace chaque table `fnl` en fin de construction. Une requête API peut lire un état intermédiaire entre deux tables du même run : risque faible, mais à vérifier en preview.
 7. **Bascule pilotée par une variable.** `preview` et `production` sont toutes deux promues depuis `main` ([DEPLOYMENT.md](../DEPLOYMENT.md#stratégie-de-branches)). Un backend qui lit `fnl` sans condition partirait en production à la prochaine promotion d'un autre correctif, même si `fnl` n'y est pas encore prêt. Proposition : une variable d'environment GitHub `DATA_SOURCE` (`ric` ou `fnl`, `ric` par défaut), lue par les repositories. On la passe à `fnl` en preview au lot 4, puis en production au lot 6.
@@ -113,17 +117,17 @@ Les seeds restent utiles en preview pour les tables gardées en `ric_*` (affiche
 
 ### 4.4 Choisir la base cible au lancement
 
-Un paramètre unique, `target: Literal["production", "preview"] = "production"`, ajouté à `main_ingestion_flow` et au CLI, détermine les quatre réglages :
+Un paramètre unique, `target: Literal["production", "preview"] = "production"`, ajouté à `main_ingestion_flow`, `run_allocine_scraping`, `run_mubi_cnc_scraping` et au CLI, détermine les réglages :
 
 | Outil | Production | Preview |
 | --- | --- | --- |
 | dbt | `--target default` | `--target preview` : nouvelle sortie dans `profiles.yml`, lue depuis `PREVIEW_POSTGRES_HOST`, `PREVIEW_POSTGRES_PORT`, `PREVIEW_POSTGRES_DB`, `PREVIEW_DBT_USER_POSTGRES_PASSWORD`, `PREVIEW_POSTGRES_SSLMODE` |
-| Scraper Allociné | `scraping/allocine/config.json` | `scraping/allocine/config.preview.json`, mêmes clés avec les variables `PREVIEW_*` |
+| Scrapers Allociné et Mubi CNC | fichiers de config actuels (`config_path`) | variantes `*.preview.json`, mêmes clés avec les variables `PREVIEW_*` |
 | Airbyte | `INGESTION_REQUEST_AIRBYTE_CONNECTION_NAMES` | `PREVIEW_AIRBYTE_CONNECTION_NAMES` : connexions vers une destination `dst_pg_raw_preview`, créées par le [bootstrap Airbyte](../../ingestion/airbyte/README.md) avec des manifests paramétrés par cible |
 
 Les variables `PREVIEW_*` s'ajoutent au `.env` du VPS `data` ([infra/data/.env.example](../../infra/data/.env.example)) sans valeur dans git. La file `ops.ingestion_run_requests` et Prefect restent en production : seules les données changent de base.
 
-Ajouter `--concurrency-limit 1` au deployment `lancer-ingestion-donnees` dans [start_worker.sh](../../ingestion/prefect/start_worker.sh). Aujourd'hui, seul le poller est limité, et il n'attend pas la fin du run qu'il déclenche : un run preview et un run production pourraient s'exécuter en même temps.
+Ajouter `--concurrency-limit 1` au deployment `lancer-ingestion-complete` dans [start_worker.sh](../../ingestion/prefect/start_worker.sh). Aujourd'hui, seuls le poller et les scrapers sont limités, et le poller n'attend pas la fin du run qu'il déclenche : une ingestion preview et une ingestion production pourraient s'exécuter en même temps.
 
 ### 4.5 Metabase
 
@@ -135,10 +139,13 @@ Ajouter `--concurrency-limit 1` au deployment `lancer-ingestion-donnees` dans [s
      CHECK (target IN ('production', 'preview'));
    ```
 
-2. Deux actions dans Metabase :
-   - « Mettre à jour la preview » : `target = 'preview'`, `dedupe_key = CONCAT('metabase:preview:', CURRENT_DATE::TEXT)` ;
+   La colonne vaut pour tous les `request_type` (ingestion et scraping Allociné).
+2. Pour l'ingestion, deux actions dans Metabase :
+   - « Mettre à jour la preview » : `target = 'preview'`, avec une clé de déduplication propre à la preview (par exemple préfixée `metabase:preview:`) ;
    - « Publier en production » : l'action actuelle, avec `target = 'production'` explicite.
-3. Le poller lit `target` dans la ligne claimée et le passe au flow (`_build_request_parameters`).
+
+   Pour les deux actions Allociné, ajouter un paramètre `target` plutôt que de les dupliquer.
+3. Le poller lit `target` dans la ligne claimée et le passe au déploiement déclenché.
 
 ## 5. Parcours opérateur
 
@@ -157,7 +164,7 @@ Une PR par lot. Les lots 1 à 3 ne changent rien en production.
 | --- | --- | --- |
 | 1 | Tunnel `data` ↔ `preview` et port Postgres publié sur l'adresse du tunnel uniquement. | Depuis `data` : `pg_isready` vers la base preview. Depuis l'extérieur : port Postgres de la machine preview fermé (`nc -vz`). |
 | 2 | Rôles et schémas d'ingestion dans la base preview, copie initiale de `raw.allocine_data`. | Connexion de chaque rôle depuis `data` ; `has_schema_privilege` sur les schémas attendus. |
-| 3 | Paramètre `target` : sortie dbt `preview`, config scraper, connexions Airbyte preview, limite de concurrence. Run manuel Prefect avec `target=preview`. | Tables `fnl_*` remplies dans la base preview ; aucune écriture en production (horodatage et volumétrie de `fnl` en prod inchangés). |
+| 3 | Paramètre `target` : sortie dbt `preview`, configs des scrapers, connexions Airbyte preview, limite de concurrence de l'ingestion. Run manuel Prefect avec `target=preview`. | Tables `fnl_*` remplies dans la base preview ; aucune écriture en production (horodatage et volumétrie de `fnl` en prod inchangés). |
 | 4 | Backend sur `fnl` (§4.1) : modèles, repositories, correspondance d'identifiants, variable `DATA_SOURCE`. Activé en preview uniquement (`DATA_SOURCE=fnl`), `ric` en production. | URL `/films/<id>` existantes toujours valides ; affiches et bandes-annonces toujours liées ; tests API de non-régression contre la base preview ; pages vérifiées sur `preview.cinestats5050.fr`. |
 | 5 | Colonne `target`, poller, deux actions Metabase. | Demande `preview` traitée en `success`, base de prod inchangée. |
 | 6 | Bascule en production : droits `app_ro` sur `fnl`, run d'ingestion production, puis `DATA_SOURCE=fnl` dans l'environment `production` et redéploiement. | `fnl` en production à jour avant la bascule ; tests API sur la prod ; retour arrière par `DATA_SOURCE=ric`, car `ric_*` reste intact. |

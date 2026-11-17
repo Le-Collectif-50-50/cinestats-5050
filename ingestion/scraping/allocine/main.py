@@ -94,18 +94,25 @@ def main() -> int:
     parser.add_argument("--catalog", dest="catalog_path")
     parser.add_argument("--state", dest="state_path")
     parser.add_argument("--dry-run", action="store_true", help="Backfill : sélection seule")
-    parser.add_argument("--limit", type=int, help="Backfill : nombre maximum de films")
+    parser.add_argument("--limit", type=int, help="Nombre maximum de films (sync, read ou backfill-posters)")
     parser.add_argument(
         "--source-id",
         action="append",
         dest="source_ids",
-        help="Backfill : source_record_id exact ; option répétable",
+        help="source_record_id exact (sync, read ou backfill-posters) ; option répétable",
     )
+    parser.add_argument("--force", action="store_true", help="Retraiter uniquement les --source-id explicites")
+    parser.add_argument("--require-success", action="store_true",
+                        help="Échouer sans résultat ou si un résultat ciblé n'est pas success")
     args = parser.parse_args()
-    if args.command != "backfill-posters" and (
-        args.dry_run or args.limit is not None or args.source_ids
-    ):
-        parser.error("--dry-run, --limit et --source-id sont réservés à backfill-posters")
+    if (args.force or args.require_success) and (args.command != "sync" or not args.source_ids):
+        parser.error("--force et --require-success exigent sync et --source-id")
+    if args.command != "backfill-posters" and args.dry_run:
+        parser.error("--dry-run est réservé à backfill-posters")
+    if args.source_ids and args.command not in {"sync", "read", "backfill-posters"}:
+        parser.error("--source-id est réservé à sync, read et backfill-posters")
+    if args.limit is not None and args.command not in {"sync", "read", "backfill-posters"}:
+        parser.error("--limit est réservé à sync, read et backfill-posters")
     if args.limit is not None and args.limit < 1:
         parser.error("--limit doit être positif")
 
@@ -116,6 +123,13 @@ def main() -> int:
         return 0
 
     config = _load_json(args.config_path) or {}
+    if args.limit is not None and args.command in {"sync", "read"}:
+        config["scrape_limit"] = args.limit
+    if args.source_ids and args.command in {"sync", "read"}:
+        config["source_ids"] = args.source_ids
+
+    if args.force:
+        config["completed_statuses"] = []
 
     if args.command == "backfill-posters":
         from ingestion.scraping.allocine.poster_backfill import backfill_posters
@@ -144,6 +158,8 @@ def main() -> int:
         return 0
 
     if args.command == "sync":
+        if args.require_success:
+            config["require_success"] = True
         inserted_count = source.sync_to_postgres(config)
         print(f"Inserted {inserted_count} rows into configured output table.")
         return 0

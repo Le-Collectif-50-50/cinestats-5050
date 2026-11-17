@@ -1,6 +1,6 @@
 # Consignes Claude
 
-**Resonsable** Data Team DataForGood
+**Resonsable** Joel Teixeira
 **Dernière révision:** 2026-10-10
 **Status:** active
 

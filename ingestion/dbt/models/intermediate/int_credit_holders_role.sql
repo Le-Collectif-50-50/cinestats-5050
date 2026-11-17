@@ -1,4 +1,6 @@
 WITH
+-- Correctif temporaire #41 : premier mot conservé comme prénom ; reste du nom sans troncature.
+-- Ce découpage reste approximatif et ne modifie pas full_name ni les UUID.
 -- 1. Données pour les individus (direction, casting, screenwriters, production, technical_team, distribution)
 individuals AS (
     -- Direction (type = "individual", role = "director")
@@ -7,7 +9,7 @@ individuals AS (
         'Individual' AS type,
         TRIM(UNNEST(direction), '" ') AS full_name,
         SPLIT_PART(TRIM(UNNEST(direction), '" '), ' ', 1) AS first_name,
-        SPLIT_PART(TRIM(UNNEST(direction), '" '), ' ', 2) AS last_name,
+        REGEXP_REPLACE(TRIM(REGEXP_REPLACE(TRIM(UNNEST(direction), '" '), '[[:space:]  ]+', ' ', 'g')), '^[^ ]+ *', '') AS last_name,
         NULL::TEXT AS legal_name,
         'Réalisateur' AS role
     FROM {{ ref('stg_allocine_films') }}
@@ -21,7 +23,7 @@ individuals AS (
         'Individual' AS type,
         TRIM(UNNEST(casting), '" ') AS full_name,
         SPLIT_PART(TRIM(UNNEST(casting), '" '), ' ', 1) AS first_name,
-        SPLIT_PART(TRIM(UNNEST(casting), '" '), ' ', 2) AS last_name,
+        REGEXP_REPLACE(TRIM(REGEXP_REPLACE(TRIM(UNNEST(casting), '" '), '[[:space:]  ]+', ' ', 'g')), '^[^ ]+ *', '') AS last_name,
         NULL::TEXT AS legal_name,
         'Acteur' AS role
     FROM {{ ref('stg_allocine_films') }}
@@ -35,7 +37,7 @@ individuals AS (
         'Individual' AS type,
         TRIM(elem->>'name') AS full_name,
         SPLIT_PART(TRIM(elem->>'name'), ' ', 1) AS first_name,
-        SPLIT_PART(TRIM(elem->>'name'), ' ', 2) AS last_name,
+        REGEXP_REPLACE(TRIM(REGEXP_REPLACE(TRIM(elem->>'name'), '[[:space:]  ]+', ' ', 'g')), '^[^ ]+ *', '') AS last_name,
         NULL::TEXT AS legal_name,
         COALESCE(NULLIF(TRIM(elem->>'role'), ''), 'screenwriter') AS role
     FROM {{ ref('stg_allocine_films') }},
@@ -50,7 +52,7 @@ individuals AS (
         'Individual' AS type,
         TRIM(elem->>'name') AS full_name,
         SPLIT_PART(TRIM(elem->>'name'), ' ', 1) AS first_name,
-        SPLIT_PART(TRIM(elem->>'name'), ' ', 2) AS last_name,
+        REGEXP_REPLACE(TRIM(REGEXP_REPLACE(TRIM(elem->>'name'), '[[:space:]  ]+', ' ', 'g')), '^[^ ]+ *', '') AS last_name,
         NULL::TEXT AS legal_name,
         COALESCE(NULLIF(TRIM(elem->>'role'), ''), 'production') AS role
     FROM {{ ref('stg_allocine_films') }},
@@ -65,7 +67,7 @@ individuals AS (
         'Individual' AS type,
         TRIM(elem->>'name') AS full_name,
         SPLIT_PART(TRIM(elem->>'name'), ' ', 1) AS first_name,
-        SPLIT_PART(TRIM(elem->>'name'), ' ', 2) AS last_name,
+        REGEXP_REPLACE(TRIM(REGEXP_REPLACE(TRIM(elem->>'name'), '[[:space:]  ]+', ' ', 'g')), '^[^ ]+ *', '') AS last_name,
         NULL::TEXT AS legal_name,
         COALESCE(NULLIF(TRIM(elem->>'role'), ''), 'technical') AS role
     FROM {{ ref('stg_allocine_films') }},
@@ -80,7 +82,7 @@ individuals AS (
         'Individual' AS type,
         TRIM(elem->>'name') AS full_name,
         SPLIT_PART(TRIM(elem->>'name'), ' ', 1) AS first_name,
-        SPLIT_PART(TRIM(elem->>'name'), ' ', 2) AS last_name,
+        REGEXP_REPLACE(TRIM(REGEXP_REPLACE(TRIM(elem->>'name'), '[[:space:]  ]+', ' ', 'g')), '^[^ ]+ *', '') AS last_name,
         NULL::TEXT AS legal_name,
         COALESCE(NULLIF(TRIM(elem->>'role'), ''), 'distribution') AS role
     FROM {{ ref('stg_allocine_films') }},
@@ -95,7 +97,7 @@ individuals AS (
         'Individual' AS type,
         TRIM(elem->>'name') AS full_name,
         SPLIT_PART(TRIM(elem->>'name'), ' ', 1) AS first_name,
-        SPLIT_PART(TRIM(elem->>'name'), ' ', 2) AS last_name,
+        REGEXP_REPLACE(TRIM(REGEXP_REPLACE(TRIM(elem->>'name'), '[[:space:]  ]+', ' ', 'g')), '^[^ ]+ *', '') AS last_name,
         NULL::TEXT AS legal_name,
         COALESCE(NULLIF(TRIM(elem->>'role'), ''), 'Compositeur') AS role
     FROM {{ ref('stg_allocine_films') }},

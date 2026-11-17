@@ -1,6 +1,6 @@
 # Déploiement
 
-**Resonsable** Data Team DataForGood
+**Resonsable** Nicolas Revel
 **Dernière révision:** 2026-10-09
 **Status:** active
 

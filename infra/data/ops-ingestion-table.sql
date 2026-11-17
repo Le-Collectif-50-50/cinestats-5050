@@ -24,11 +24,44 @@ CREATE TABLE IF NOT EXISTS ops.ingestion_run_requests (
 ALTER TABLE ops.ingestion_run_requests
   ADD COLUMN IF NOT EXISTS request_reason TEXT;
 
+ALTER TABLE ops.ingestion_run_requests
+  ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'ingestion'
+    CHECK (request_type IN ('ingestion', 'allocine')),
+  ADD COLUMN IF NOT EXISTS max_films INTEGER;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'ops.ingestion_run_requests'::regclass
+                   AND conname = 'allocine_request_parameters') THEN
+    ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT allocine_request_parameters
+      CHECK (request_type <> 'allocine' OR (
+        max_films IS NOT NULL AND max_films > 0
+        AND length(btrim(requested_by_metabase_user)) > 0
+        AND request_reason IS NOT NULL AND length(btrim(request_reason)) > 0));
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_ingestion_run_requests_status_requested_at
   ON ops.ingestion_run_requests (request_status, requested_at ASC);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ingestion_run_requests_dedupe_key_active
   ON ops.ingestion_run_requests (dedupe_key)
   WHERE request_status IN ('pending', 'processing');
+
+
+ALTER TABLE ops.ingestion_run_requests
+  ADD COLUMN IF NOT EXISTS visa_number TEXT,
+  ADD COLUMN IF NOT EXISTS force_rescrape BOOLEAN NOT NULL DEFAULT false;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'ops.ingestion_run_requests'::regclass
+                   AND conname = 'allocine_target_parameters') THEN
+    ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT allocine_target_parameters
+      CHECK ((visa_number IS NULL AND NOT force_rescrape) OR (
+        request_type = 'allocine' AND visa_number IS NOT NULL
+        AND visa_number ~ '^[0-9]+$' AND visa_number ~ '[1-9]' AND max_films = 1));
+  END IF;
+END $$;
 
 RESET ROLE;

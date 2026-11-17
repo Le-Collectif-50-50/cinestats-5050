@@ -2,11 +2,13 @@ import asyncio
 import builtins
 import hashlib
 import json
+import math
 import os
 import random
 import re
 import time
 import uuid
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
@@ -26,7 +28,10 @@ DEFAULT_INPUT_TABLE = "id_matching"
 DEFAULT_OUTPUT_SCHEMA = "raw"
 DEFAULT_OUTPUT_TABLE = STREAM_NAME
 DEFAULT_COMPLETED_STATUSES = ["success", "not_found", "visa_mismatch"]
-DEFAULT_RECORD_TIMEOUT_SECONDS = 180.0
+DEFAULT_RECORD_TIMEOUT_SECONDS = 240.0
+DEFAULT_NAVIGATION_TIMEOUT_SECONDS = 60.0
+SESSION_OPEN_TIMEOUT_SECONDS = 45.0
+MAX_SEARCH_CANDIDATES = 5
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -114,6 +119,12 @@ CONNECTION_SPECIFICATION = {
             "title": "Optional existing Allocine URL column",
             "default": "allocine_url",
         },
+        "input_manual_validation_column": {
+            "type": ["string", "null"],
+            "title": "Validation manuelle de la correspondance Allociné",
+            "default": "VALIDATION_MANUELLE",
+            "description": "Colonne optionnelle de cases à cocher ; absente ou null, la validation reste désactivée.",
+        },
         "completed_statuses": {
             "type": "array",
             "title": "Statuses considered already processed",
@@ -126,12 +137,24 @@ CONNECTION_SPECIFICATION = {
             "minimum": 1,
             "description": "Optional debug limit applied after filtering already processed records.",
         },
+        "source_ids": {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+            "description": "Optional exact source_record_ids to consider; normal retry rules still apply.",
+        },
         "record_timeout_seconds": {
             "type": "number",
             "title": "Per-record scrape timeout",
             "default": DEFAULT_RECORD_TIMEOUT_SECONDS,
             "minimum": 0,
             "description": "Timeout in seconds for scraping one record. Set to 0 to disable the timeout.",
+        },
+        "navigation_timeout_seconds": {
+            "type": "number",
+            "title": "Délai maximal de navigation par page",
+            "default": DEFAULT_NAVIGATION_TIMEOUT_SECONDS,
+            "exclusiveMinimum": 0,
+            "description": "Délai en secondes pour atteindre DOMContentLoaded, par page.",
         },
         "playwright_ws_endpoint": {
             "type": "string",
@@ -238,6 +261,7 @@ class ConnectorConfig:
     completed_statuses: list[str]
     scrape_limit: int | None
     record_timeout_seconds: float
+    navigation_timeout_seconds: float
     playwright_ws_endpoint: str | None
     headless: bool
     debug_pause_between_actions: bool
@@ -245,12 +269,15 @@ class ConnectorConfig:
     inter_film_delay_min_seconds: float
     inter_film_delay_max_seconds: float
     verbose: bool
+    source_ids: list[str] | None = None
+    input_manual_validation_column: str | None = "VALIDATION_MANUELLE"
 
     @classmethod
     def from_dict(cls, raw_config: dict[str, Any]) -> "ConnectorConfig":
         database_url = raw_config.get("database_url") or _build_database_url(raw_config)
         completed_statuses = (
-            raw_config.get("completed_statuses") or DEFAULT_COMPLETED_STATUSES
+            raw_config["completed_statuses"]
+            if raw_config.get("completed_statuses") is not None else DEFAULT_COMPLETED_STATUSES
         )
 
         values = {
@@ -271,13 +298,21 @@ class ConnectorConfig:
             "input_allocine_url_column": raw_config.get(
                 "input_allocine_url_column", "allocine_url"
             ),
+            "input_manual_validation_column": raw_config.get(
+                "input_manual_validation_column", "VALIDATION_MANUELLE"
+            ),
             "completed_statuses": [
                 str(status).lower() for status in completed_statuses
             ],
             "scrape_limit": _normalize_positive_int(raw_config.get("scrape_limit")),
+            "source_ids": raw_config.get("source_ids"),
             "record_timeout_seconds": _normalize_non_negative_float(
                 raw_config.get("record_timeout_seconds", DEFAULT_RECORD_TIMEOUT_SECONDS),
                 field_name="record_timeout_seconds",
+            ),
+            "navigation_timeout_seconds": _normalize_non_negative_float(
+                raw_config.get("navigation_timeout_seconds", DEFAULT_NAVIGATION_TIMEOUT_SECONDS),
+                field_name="navigation_timeout_seconds",
             ),
             "playwright_ws_endpoint": raw_config.get("playwright_ws_endpoint")
             or os.getenv("PLAYWRIGHT_WS_ENDPOINT"),
@@ -296,6 +331,9 @@ class ConnectorConfig:
             ),
             "verbose": bool(raw_config.get("verbose", False)),
         }
+
+        if not math.isfinite(values["navigation_timeout_seconds"]) or values["navigation_timeout_seconds"] <= 0:
+            raise ValueError("navigation_timeout_seconds must be finite and greater than 0")
 
         if (
             values["inter_film_delay_max_seconds"]
@@ -365,6 +403,18 @@ def _normalize_int(value: Any) -> int | None:
         return None
 
 
+def _is_manually_validated(source_row: dict[str, Any]) -> bool:
+    # Airbyte peut transmettre les cases Sheets comme booléens ou comme texte.
+    # Ne jamais utiliser bool("FALSE"), qui autoriserait une case décochée.
+    allocine_id = _normalize_int(source_row.get("allocine_id"))
+    return (
+        allocine_id is not None
+        and allocine_id > 0
+        and str(source_row.get("manual_validation", "")).strip().casefold()
+        in {"true", "vrai", "1"}
+    )
+
+
 def _normalize_positive_int(value: Any) -> int | None:
     normalized_value = _normalize_int(value)
     if normalized_value is None:
@@ -394,6 +444,40 @@ def _normalize_record_id(source_row: dict[str, Any]) -> str | None:
     if title:
         return f"{title}:{year}"
     return None
+
+
+def _director_names(value: Any) -> set[tuple[str, ...]]:
+    """Compare full names, ignoring accents, punctuation and token order."""
+    values = value if isinstance(value, list) else [value]
+    names = set()
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        for person in re.split(r"\s*(?:;|/|&|\bet\b)\s*", item, flags=re.I):
+            normalized = unicodedata.normalize("NFKD", person.casefold())
+            normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+            tokens = tuple(sorted(re.findall(r"[^\W\d_]+", normalized)))
+            if len(tokens) < 2:
+                return set()
+            names.add(tokens)
+    return names
+
+
+def _identity_status(source_visa, candidate_visa, source_directors, candidate_directors):
+    expected = _normalize_visa_for_compare(source_visa)
+    found = _normalize_visa_for_compare(candidate_visa)
+    if expected and found:
+        if expected == found:
+            return "success", None
+        return "visa_mismatch", f"Allocine visa {found} differs from source visa {expected}."
+    expected_names = _director_names(source_directors)
+    found_names = _director_names(candidate_directors)
+    if expected_names and expected_names == found_names:
+        return "success", None
+    return "needs_review", (
+        f"Director verification failed or unavailable: CNC={source_directors!r}; "
+        f"Allocine={candidate_directors!r}; no matching visa."
+    )
 
 
 def _normalize_visa_for_compare(value: Any) -> str | None:
@@ -464,8 +548,12 @@ class AllocineAirbyteSource:
         config = ConnectorConfig.from_dict(raw_config)
         records = asyncio.run(self._read_async(config))
         if not records:
+            if raw_config.get("require_success"):
+                raise ValueError("Aucun film éligible pour ce visa : vérifier id_matching ou activer le forçage")
             return 0
         self._insert_records(config, records)
+        if raw_config.get("require_success") and any(record.get("scrape_status") != "success" for record in records):
+            raise ValueError("Scraping ciblé non confirmé : consulter le statut et le motif dans Metabase")
         return len(records)
 
     async def _read_async(self, config: ConnectorConfig) -> list[dict[str, Any]]:
@@ -476,7 +564,7 @@ class AllocineAirbyteSource:
         scraper, browser_factory = self._load_scraping_dependencies()
         run_id = str(uuid.uuid4())
         total_rows = len(source_rows)
-        summary_statuses = ["success", "not_found", "blocked", "error", "visa_mismatch"]
+        summary_statuses = ["success", "not_found", "blocked", "error", "visa_mismatch", "needs_review"]
         status_counts = {status: 0 for status in summary_statuses}
 
         print(f"Allocine scraping started: {total_rows} pending rows to process.")
@@ -524,7 +612,7 @@ class AllocineAirbyteSource:
         start_delay_s: float = 0.0,
         session_index: int = 0,
     ) -> list[dict[str, Any]]:
-        """Process a list of rows in a single browser session, with inter-film delays."""
+        """Traite chaque film dans une session neuve, avec deux essais au maximum."""
         records = []
         if start_delay_s:
             if config.verbose:
@@ -542,8 +630,22 @@ class AllocineAirbyteSource:
                 headless=config.headless,
                 debug_pause_between_actions=config.debug_pause_between_actions,
                 verbose=config.verbose,
+                navigation_timeout_seconds=config.navigation_timeout_seconds,
+                navigation_wait_until="domcontentloaded",
+                lightweight=True,
             )
-            session = await session_cm.__aenter__()
+            try:
+                session = await asyncio.wait_for(
+                    session_cm.__aenter__(), timeout=SESSION_OPEN_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError as exc:
+                await _close_session()
+                raise RuntimeError(
+                    f"Browser session opening timed out after {SESSION_OPEN_TIMEOUT_SECONDS:g}s"
+                ) from exc
+            except BaseException:
+                await _close_session()
+                raise
             if config.verbose:
                 print(f"[session {session_index}] Browser ready. Processing {len(chunk)} records.")
 
@@ -557,7 +659,6 @@ class AllocineAirbyteSource:
                 session_cm = None
                 session = None
 
-        await _open_session()
         try:
             browser_instability_markers = (
                 "browser connection lost",
@@ -583,11 +684,16 @@ class AllocineAirbyteSource:
                 print(
                     f"[session {session_index}] Record {index + 1}/{len(chunk)} started: {label!r}"
                 )
+                timeout_seconds = config.record_timeout_seconds
+                if not _normalize_int(source_row.get("allocine_id")):
+                    timeout_seconds *= MAX_SEARCH_CANDIDATES + 1
                 attempt = 1
                 max_attempts = 2
                 while True:
                     started_at = time.monotonic()
                     try:
+                        if session is None:
+                            await _open_session()
                         scrape_task = self._scrape_one_record(
                             run_id=run_id,
                             session=session,
@@ -598,7 +704,7 @@ class AllocineAirbyteSource:
                         if config.record_timeout_seconds > 0:
                             record = await asyncio.wait_for(
                                 scrape_task,
-                                timeout=config.record_timeout_seconds,
+                                timeout=timeout_seconds,
                             )
                         else:
                             record = await scrape_task
@@ -606,13 +712,20 @@ class AllocineAirbyteSource:
                         record = self._build_timeout_error_record(
                             run_id=run_id,
                             source_row=source_row,
-                            timeout_seconds=config.record_timeout_seconds,
+                            timeout_seconds=timeout_seconds,
                         )
+                    except Exception as exc:
+                        record = self._build_timeout_error_record(
+                            run_id=run_id, source_row=source_row,
+                            timeout_seconds=timeout_seconds,
+                        )
+                        record["error_message"] = f"Browser session failed: {exc}"
+                        record["record_hash"] = _hash_record(record)
 
                     status = record.get("scrape_status", "?")
                     duration_seconds = time.monotonic() - started_at
                     print(
-                        f"[session {session_index}] Record {index + 1}/{len(chunk)} done: {label!r} -> {status} ({duration_seconds:.1f}s)"
+                        f"[session {session_index}] Record {index + 1}/{len(chunk)} attempt {attempt}/{max_attempts}: {label!r} -> {status} ({duration_seconds:.1f}s)"
                     )
                     if status == "success":
                         break
@@ -633,6 +746,7 @@ class AllocineAirbyteSource:
                         status == "error"
                         and (
                             "timed out" in normalized_reason
+                            or "browser session failed" in normalized_reason
                             or any(marker in normalized_reason for marker in browser_instability_markers)
                         )
                     )
@@ -643,18 +757,13 @@ class AllocineAirbyteSource:
                                 f"[session {session_index}] Browser became unstable; restarting session and retrying record {index + 1}/{len(chunk)} (attempt {attempt}/{max_attempts})."
                             )
                         await _close_session()
-                        await _open_session()
                         continue
 
-                    if browser_unstable and index < len(chunk) - 1:
-                        if config.verbose:
-                            print(
-                                f"[session {session_index}] Browser became unstable; restarting session for remaining records."
-                            )
-                        await _close_session()
-                        await _open_session()
                     break
                 records.append(record)
+                # Browserless limite la durée d'une connexion ; ne pas la
+                # partager entre tous les films d'un lot.
+                await _close_session()
         finally:
             await _close_session()
             if config.verbose:
@@ -834,17 +943,43 @@ class AllocineAirbyteSource:
                 f"{_quote_identifier(config.input_allocine_url_column)} as allocine_url"
             )
 
-        query = text(
-            f"select {', '.join(select_columns)} "
-            f"from {_relation(config.input_schema, config.input_table)}"
+        # Une colonne pas encore synchronisée ne doit pas casser les anciens
+        # imports. La clé JSON absente donne NULL et n'accorde aucune validation.
+        select_columns.append(
+            "to_jsonb(source_input) ->> :manual_validation_column as manual_validation"
         )
+
+        query_sql = (
+            f"select {', '.join(select_columns)} "
+            f"from {_relation(config.input_schema, config.input_table)} as source_input"
+        )
+        query_params = {"manual_validation_column": config.input_manual_validation_column}
+        if config.source_ids is not None:
+            query_sql += f" where {_quote_identifier(config.input_id_column)}::text in :source_ids"
+            query_params["source_ids"] = config.source_ids
+        query = text(query_sql)
+        if config.source_ids is not None:
+            query = query.bindparams(bindparam("source_ids", expanding=True))
 
         try:
             with engine.begin() as connection:
                 self._assert_input_table_exists(connection, config)
                 self._ensure_output_table_exists(connection, config)
-                rows = [dict(row._mapping) for row in connection.execute(query)]
-                processed_ids = self._fetch_processed_ids(connection, config)
+                rows = [dict(row._mapping) for row in connection.execute(query, query_params)]
+                completed_records = self._fetch_completed_records(connection, config)
+                # CNC reference supplies the director absent from id_matching.
+                directors = {}
+                if self._table_exists(connection, config.input_schema, "films"):
+                    reference_rows = connection.execute(text(
+                        f'SELECT "VISA"::text, "REALISATEUR" FROM '
+                        f'{_relation(config.input_schema, "films")}'
+                    ))
+                    for visa, director in reference_rows:
+                        directors.setdefault(str(visa), set()).add(director)
+                for row in rows:
+                    names = directors.get(str(row.get("visa_number")), set())
+                    row["cnc_director"] = next(iter(names)) if len(names) == 1 else None
+
         finally:
             engine.dispose()
 
@@ -852,8 +987,21 @@ class AllocineAirbyteSource:
         for row in rows:
             normalized_id = _normalize_record_id(row)
             row["source_record_id"] = normalized_id
-            if normalized_id and normalized_id in processed_ids:
-                continue
+            completed = completed_records.get(normalized_id)
+            if completed is not None:
+                allocine_id = _normalize_int(row.get("allocine_id"))
+                manually_retryable = (
+                    _is_manually_validated(row)
+                    and completed.get("scrape_status", "").lower()
+                    in {"visa_mismatch", "needs_review"}
+                )
+                # Un traitement terminé ne couvre que la cible actuelle. Une
+                # recherche peut trouver un ID alors que l'entrée reste vide.
+                if allocine_id:
+                    if allocine_id == _normalize_int(completed["allocine_id"]) and not manually_retryable:
+                        continue
+                elif completed["match_strategy"] == "search":
+                    continue
             pending_rows.append(row)
 
         # Shuffle pending rows so concurrent runs are less likely to pick the same records.
@@ -863,23 +1011,28 @@ class AllocineAirbyteSource:
             return pending_rows[: config.scrape_limit]
         return pending_rows
 
-    def _fetch_processed_ids(self, connection, config: ConnectorConfig) -> set[str]:
+    def _fetch_completed_records(self, connection, config: ConnectorConfig) -> dict[str, dict]:
+        if not config.completed_statuses:
+            # Reprise explicite en mémoire : aucun statut n'exclut un film.
+            # Évite aussi un IN vide non typé (NULL INTEGER) côté PostgreSQL.
+            return {}
         if not self._table_exists(
             connection, config.output_schema, config.output_table
         ):
-            return set()
+            return {}
 
         query = text(
-            f"select distinct source_record_id "
+            f"select distinct on (source_record_id) source_record_id, allocine_id, match_strategy, scrape_status "
             f"from {_relation(config.output_schema, config.output_table)} "
-            "where lower(coalesce(scrape_status, '')) in :completed_statuses"
+            "where lower(coalesce(scrape_status, '')) in :completed_statuses "
+            "order by source_record_id, extracted_at desc nulls last, run_id::text desc, record_hash desc"
         ).bindparams(bindparam("completed_statuses", expanding=True))
         return {
-            str(value)
-            for value in connection.execute(
+            str(row.source_record_id): dict(row._mapping)
+            for row in connection.execute(
                 query, {"completed_statuses": config.completed_statuses}
-            ).scalars()
-            if value not in (None, "")
+            )
+            if row.source_record_id not in (None, "")
         }
 
     def _assert_input_table_exists(self, connection, config: ConnectorConfig) -> None:
@@ -1046,10 +1199,10 @@ class AllocineAirbyteSource:
                 if verbose:
                     print(f"  [search] {search_term!r} -> {search_url}")
                 search_html = await session.fetch_html(search_url)
-                search_result = scraper.extract_searched_first_film(search_html)
+                candidates = scraper.extract_searched_films(search_html)
                 base_record["search_url"] = search_url
 
-                if not search_result:
+                if not candidates:
                     if verbose:
                         print(f"  [search] No result found for {search_term!r}")
                     base_record["scrape_status"] = "not_found"
@@ -1057,14 +1210,44 @@ class AllocineAirbyteSource:
                     base_record["record_hash"] = _hash_record(base_record)
                     return base_record
 
-                allocine_id = search_result["id"]
-                allocine_url = f"{scraper.BASE_URL}{search_result['link']}"
-                if verbose:
-                    print(f"  [search] Found: allocine_id={allocine_id}, title={search_result['title']!r}")
-                base_record["allocine_id"] = allocine_id
-                base_record["allocine_title"] = search_result["title"]
-                base_record["allocine_url"] = allocine_url
-                base_record["source_url"] = allocine_url
+                matches = []
+                diagnostics = []
+                incomplete = len(candidates) > MAX_SEARCH_CANDIDATES
+                for candidate in candidates[:MAX_SEARCH_CANDIDATES]:
+                    # Une validation porte sur l'ID saisi, jamais sur les
+                    # candidats découverts lorsqu'aucun ID n'était fourni.
+                    candidate_row = dict(source_row, allocine_id=candidate["id"],
+                                         allocine_url=None, manual_validation=False)
+                    result = await self._scrape_one_record(
+                        run_id, session, scraper, candidate_row, verbose=verbose
+                    )
+                    result.update(match_strategy="search", search_url=search_url,
+                                  allocine_title=candidate["title"])
+                    diagnostics.append(f"{candidate['id']}: {result['scrape_status']} ({result['error_message']})")
+                    if verbose:
+                        print(f"  [candidate] {diagnostics[-1]}")
+                    if result["scrape_status"] in {"error", "blocked"}:
+                        # Une panne technique ne doit pas devenir needs_review
+                        # ni laisser les autres candidats utiliser une page cassée.
+                        base_record.update(
+                            scrape_status=result["scrape_status"],
+                            source_url=search_url,
+                            error_message="Candidate lookup failed. " + "; ".join(diagnostics),
+                        )
+                        base_record["record_hash"] = _hash_record(base_record)
+                        return base_record
+                    if result["scrape_status"] == "success":
+                        matches.append(result)
+                if len(matches) == 1 and not incomplete:
+                    result = matches[0]
+                    result["record_hash"] = _hash_record(result)
+                    return result
+                base_record.update(
+                    scrape_status="needs_review", source_url=search_url,
+                    error_message="No unique verified candidate. " + "; ".join(diagnostics),
+                )
+                base_record["record_hash"] = _hash_record(base_record)
+                return base_record
 
             details_url = scraper.FILM_URL.format(allocine_film_id=allocine_id)
             casting_url = scraper.FILM_CASTING_URL.format(allocine_film_id=allocine_id)
@@ -1076,6 +1259,8 @@ class AllocineAirbyteSource:
             casting_html = await session.fetch_html(casting_url)
             details = scraper.extract_film_details(details_html)
             casting = scraper.extract_film_casting(casting_html)
+            if not casting.get("Direction"):
+                casting["Direction"] = details.get("directors", [])
 
             allocine_visa_number = details.get("allocine_visa_number")
             release_date_raw = details.get("release_date")
@@ -1106,15 +1291,15 @@ class AllocineAirbyteSource:
                 }
             )
 
-            row_visa = _normalize_visa_for_compare(visa_number)
-            allocine_visa = _normalize_visa_for_compare(allocine_visa_number)
-            if row_visa and allocine_visa and row_visa != allocine_visa:
-                base_record["scrape_status"] = "visa_mismatch"
-                base_record["error_message"] = (
-                    f"Allocine visa {allocine_visa_number} differs from source visa {visa_number}."
-                )
-            else:
-                base_record["scrape_status"] = "success"
+            status, reason = _identity_status(
+                visa_number, allocine_visa_number,
+                source_row.get("cnc_director"), casting.get("Direction"),
+            )
+            if status in {"visa_mismatch", "needs_review"} and _is_manually_validated(source_row):
+                status, reason = "success", None
+                base_record["match_strategy"] = "manual_validation"
+            base_record["scrape_status"] = status
+            base_record["error_message"] = reason
 
         except WebsiteBlockedError as exc:
             base_record["scrape_status"] = "blocked"

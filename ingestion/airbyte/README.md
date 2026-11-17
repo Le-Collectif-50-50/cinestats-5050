@@ -2,11 +2,11 @@
 
 ## Metadata du document
 
-**Responsable:** Joel Teixeira
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-05-26
+**Dernière révision:** 2026-11-15
 
-**Statut:** actif
+**Status:** actif
 
 ### Historique du document
 
@@ -14,6 +14,7 @@
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2   | 2026-05-26 | Joel Teixeira | Alignement avec les manifests `src_gsheet_*` actuels et l'usage partagé avec Prefect |
+| 3 | 2026-11-15 | Joel Teixeira | Contrat DEVIS en euros exacts et lien vers la bascule coordonnée source/dbt (#43). |
 
 Ce dossier contient les manifests versionnés et les utilitaires Python pour créer, mettre à jour et piloter les ressources Airbyte via API.
 
@@ -28,6 +29,12 @@ Ce dossier contient les manifests versionnés et les utilitaires Python pour cr�
 7. `bootstrap.py` injecte automatiquement le fichier JSON local dans `credentials.service_account_info`;
 8. `bootstrap.py` crée ou met à jour la source Google Sheets, la destination Postgres et la connexion source -> destination;
 9. `client.py` mutualise l'authentification API, la résolution du workspace, la découverte des connexions et le déclenchement des jobs de sync, réutilisés par `bootstrap.py` et `prefect/flows.py`.
+
+## Contrat des budgets CNC
+
+La source `src_gsheet_films` doit fournir `DEVIS` en **euros exacts**, quelle que soit l’année d’agrément. Le connecteur actuel lit les valeurs affichées : conserver les valeurs numériques du GSheet et afficher la colonne en euros sans échelle en millions ni arrondi de précision. Un reformatage de présentation peut donc modifier les données synchronisées.
+
+La modification du format source et le retrait de la conversion historique dbt doivent être coordonnés. Voir la [procédure de bascule et de retour arrière #43](../../docs/runbooks/ingestion-budget-euros.md). Ne pas modifier globalement le mode de lecture du connecteur : les autres colonnes, dont les dates, conservent leur contrat.
 
 ## Structure
 

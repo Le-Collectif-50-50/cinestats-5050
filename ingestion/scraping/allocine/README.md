@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-10-15
+**Dernière révision:** 2026-11-14
 
 **Status:** actif
 
@@ -18,7 +18,10 @@
 | 4   | 2026-10-09 | Joel Teixeira | Correction du passage de configuration dans la commande `read`, qui échouait avec un `TypeError` avant le scraping |
 | 5   | 2026-10-09 | Joel Teixeira | Copie des helpers de date et durée dans ingestion pour démarrer sans package backend |
 | 6 | 2026-10-11 | Joel Teixeira | Sélection dbt post-scraping incluant les modèles intermédiaires et finaux et leurs dépendances |
-| 7 | 2026-10-15 | Data Team DataForGood | Persistance des URL d’affiche, migration additive, backfill local journalisé, export/import SQL ciblé et tests PostgreSQL isolés. |
+| 7 | 2026-10-15 | Joel Teixeira | Persistance des URL d’affiche, migration additive, backfill local journalisé, export/import SQL ciblé et tests PostgreSQL isolés. |
+| 8 | 2026-11-12 | Joel Teixeira | Vérification du réalisateur CNC et examen de plusieurs candidats ; statut needs_review pour les correspondances non confirmées. |
+| 9 | 2026-11-13 | Joel Teixeira | Déploiement manuel, navigation DOMContentLoaded et reprise bornée ; navigation allégée, isolation des pages et sessions, diagnostic et reprise de l’issue 50. Limite max_films dans le déploiement manuel séparé et override CLI --limit pour sync/read. Reprise automatique des ID Allociné corrigés, sélection ciblée --source-id et prise en compte de VALIDATION_MANUELLE sans reprise répétée des succès. Extraction de la date sur les balises a et span de la fiche Allociné. |
+| 10 | 2026-11-14 | Joel Teixeira | Forçage CLI limité aux identifiants explicites et parcours Metabase par visa avec Airbyte et dbt. |
 
 Job de scraping standalone pour le sous-graphe cible `Scraping flow`.
 
@@ -28,7 +31,7 @@ Objectif: remplacer le handoff CSV historique dans `database/data/allocine/` par
 
 1. Lit actuellement les films candidats depuis `raw.id_matching`.
 2. Crée automatiquement la table mémoire de sortie si elle n'existe pas encore.
-3. Lit les lignes déjà réussies dans `raw.allocine_data` pour ignorer les enregistrements déjà traités.
+3. Compare la cible actuelle au dernier traitement terminé dans `raw.allocine_data` pour ignorer uniquement les correspondances déjà traitées.
 4. Utilise le parseur HTML Allociné et la session navigateur Playwright du package ingestion :
    - `ingestion/scraping/allocine/allocine_scraper.py`
    - `ingestion/scraping/browser.py`
@@ -39,6 +42,11 @@ Objectif: remplacer le handoff CSV historique dans `database/data/allocine/` par
 Le connecteur utilise `ingestion/scraping/date_utils.py` pour convertir les dates françaises et les durées. Ce module contient une copie de `parse_release_date` et `parse_duration` du backend, avec le même comportement. Les fonctions originales restent dans le backend pour ses consommateurs.
 
 Le démarrage du scraper ne nécessite pas le package `backend`. La dépendance `dateparser` est déjà déclarée dans `requirements.txt` et installée dans l'image Prefect. Toute évolution de ces conversions doit tenir compte des deux copies.
+
+La date est extraite de `.date.blue-link` dans `div.meta-body-info`, que le site
+utilise un lien `a` ou une balise `span`. Les dates présentes dans d'autres
+sections ne servent pas de repli. Les tests couvrent ces deux formes et l'absence
+de date dans `tests/ingestion/test_allocine_date_utils.py`.
 
 Pour vérifier les conversions et le démarrage CLI avec une copie isolée du package ingestion, après installation des dépendances du scraper et de `pytest`, depuis la racine du dépôt :
 
@@ -79,6 +87,7 @@ Exemple minimal:
   "input_year_column": null,
   "input_allocine_id_column": "ID_ALLOCINE",
   "input_allocine_url_column": null,
+  "input_manual_validation_column": "VALIDATION_MANUELLE",
   "scrape_limit": 10,
   "playwright_ws_endpoint": "${PLAYWRIGHT_WS_ENDPOINT:-ws://browserless:3000}"
 }
@@ -94,7 +103,50 @@ Les accès PostgreSQL sont isolés via `SCRAPER_POSTGRES_USER` et `SCRAPER_POSTG
 
 Dans l'environnement Airbyte actuel, la table source par défaut est `raw.id_matching` et reprend les noms de colonnes bruts du sheet (`VISA`, `TITRE`, `ID_ALLOCINE`). Les champs absents comme l'année CNC ou l'URL Allociné peuvent être laissés à `null`.
 
+`input_manual_validation_column` désigne la colonne des cases à cocher
+(`VALIDATION_MANUELLE` par défaut). Une colonne absente, une valeur vide ou une
+configuration à `null` désactive cette validation. Les valeurs acceptées sont
+le booléen `true` et les textes `TRUE`, `VRAI`, `1`, sans distinction de casse
+et après retrait des espaces aux extrémités. Toute autre valeur reste inactive.
+
 La configuration applique actuellement `scrape_limit: 10`, ce qui borne les runs de debug et évite un scraping trop large par défaut. Ajuster cette valeur, la mettre à `null` ou la supprimer pour changer le volume traité.
+
+### Délais et timeouts
+
+Le déploiement `Recuperer les donnees Allocine/lancer-scrapping-allocine` lance uniquement ce scraper. Publication et déclenchement : [guide Prefect](../../README.md#publier-et-lancer-le-scraping-seul).
+
+| Réglage | Valeur runtime | Périmètre |
+| --- | --- | --- |
+| `navigation_timeout_seconds` | 60 s | Chargement de chaque page jusqu’à `DOMContentLoaded`, réglable dans `config.json`, strictement positif et fini. |
+| `record_timeout_seconds` | 240 s | Budget d’une tentative par film avec ID fourni, incluant fiche, casting et interactions. `0` désactive ce garde-fou. |
+| Ouverture de session | 45 s au total | Inclut les reprises CDP (15 s par connexion) et la création du contexte/page. |
+| Fermeture de session | 5 s par ressource | Page, contexte, navigateur et pilote sont fermés séparément ; au plus 20 s hors latence d’annulation. |
+| `CONNECTION_TIMEOUT` Browserless | 600 000 ms dans Compose | Durée maximale de session distante ; indépendante des deux budgets précédents. |
+
+Chaque film et chaque reprise ouvrent une session indépendante. Sans ID fourni, le connecteur multiplie le budget film par six : 1 440 s pour la recherche et cinq candidats au maximum. Une recherche peut encore dépasser les 600 s de Browserless ; une expiration provoque une erreur technique et une seule reprise, jamais une publication de résultat partiel.
+
+Allociné attend maintenant `DOMContentLoaded`, puis conserve les pauses, le consentement et le défilement avant lecture du HTML. L’ancienne attente `networkidle` exigeait une période sans connexions réseau ; des requêtes publicitaires peuvent empêcher cette condition. [Playwright déconseille cette attente](https://playwright.dev/python/docs/api/class-page#page-goto-option-wait-until). Les autres scrapers conservent leur réglage de navigation existant.
+
+Le connecteur active le mode navigateur `lightweight` : images, médias et polices ne sont pas téléchargés, et les domaines publicitaires/vidéo identifiés pendant le diagnostic sont filtrés. Les URL d’affiche restent extraites du DOM. Une nouvelle page remplace la précédente avant chaque navigation, pour arrêter ses requêtes publicitaires. Si la fermeture de cette page dépasse 5 s, le navigateur est déconnecté et une nouvelle session est ouverte (45 s maximum), sans recommencer la fiche déjà lue. Ce remplacement appartient au budget de scraping et n’augmente pas le nombre maximal de tentatives. Les documents métier, scripts Allociné, contrôles d’accès et interactions de consentement restent actifs. Ce mode est désactivé par défaut pour les autres consommateurs du navigateur, dont Mubi et le backfill des affiches. Les délais de navigation (60 s) et de scraping (240 s) ne sont pas augmentés.
+
+Un timeout de navigation produit `Navigation timed out after ...` avec URL et condition attendue. Le connecteur ferme la session, en ouvre une autre et retente le film une fois au maximum. Le budget de scraping s’applique à chaque tentative, en plus des budgets d’ouverture et de fermeture. Un ID fourni est borné à deux fois (45 + 240 + 20) s par défaut, hors latence d’annulation et délai entre films. Une recherche est bornée à deux fois (45 + 1 440 + 20) s. Avec `record_timeout_seconds=0`, le budget global de scraping est explicitement désactivé. Après deux échecs, le résultat reste `error`. Il est rééligible si aucun ancien traitement terminé ne couvre cette cible ; sinon, utiliser la reprise ciblée ci-dessous. Dans tous les cas, aucun HTML partiel n’est utilisé après un timeout. Les réponses 403/429 restent `blocked`. Le backfill des affiches utilise les mêmes paramètres de navigation mais conserve une seule tentative par candidat.
+
+Les erreurs techniques rencontrées pendant une recherche restent `error` et les refus restent `blocked` ; ils interrompent l’examen des candidats. `needs_review` est réservé aux identités non confirmées ou ambiguës.
+
+Pour diagnostiquer, activer `verbose: true` et conserver `parallel_sessions: 1`. Les logs donnent le numéro de tentative, la durée de navigation, la durée complète de chaque page et celle du film. Comparer les durées et le nombre de succès sur des lots comparables. Distinguer dans les logs :
+
+- `Navigation timed out` : chargement d’une page.
+- `Record timed out` : budget total du film épuisé.
+- `connect_over_cdp` : accès au navigateur distant.
+- `Browser connection lost` : fermeture ou panne de session ; vérifier les logs Browserless et les ressources Docker.
+
+Vérifications locales sans scraping ni écriture en base :
+
+```bash
+python3 -m pytest -q tests/ingestion/test_allocine_timeouts.py \
+  tests/ingestion/test_allocine_identity.py tests/ingestion/test_allocine_date_utils.py
+bash -n ingestion/prefect/start_worker.sh
+```
 
 Fichiers fournis dans le repo:
 
@@ -117,6 +169,103 @@ Exemple par défaut:
 2. table: `allocine_data`
 
 Cette table sert de mémoire d'exécution pour la logique de skip incrémental.
+
+Pour chaque `source_record_id`, le scraper retient le dernier résultat dont le
+statut figure dans `completed_statuses` (`success`, `not_found`, `visa_mismatch`
+par défaut). Un ID Allociné renseigné dans `id_matching` n'est ignoré que s'il
+correspond à celui de ce résultat, sauf anomalie validée manuellement selon la
+procédure ci-dessous. Un changement d'ID remet donc le film parmi
+les candidats au prochain scraping, sans supprimer son historique. Un échec
+non terminé sur le nouvel ID ne bloque pas les tentatives suivantes.
+
+Sans ID en entrée, une recherche déjà terminée reste ignorée, même si elle a
+découvert un ID Allociné. Retirer un ID précédemment fourni déclenche une
+nouvelle recherche. Un retour vers un ancien ID est comparé au dernier résultat
+terminé, et non à n'importe quel succès historique.
+
+Airbyte doit d'abord synchroniser la correction GSheet. Le flow d'ingestion
+Airbyte/dbt ne lance pas de scraping : cette reprise s'applique lors du prochain
+run du scraper. La limite de volume et le tirage des candidats restent actifs.
+Pour traiter un visa précis, sans forcer les cibles déjà traitées :
+
+```bash
+python3 ingestion/scraping/allocine/main.py sync \
+  --config ingestion/scraping/allocine/config.json --source-id 144246 --limit 1
+```
+
+`--source-id` est répétable et filtre avant la limite. Avec la configuration
+canonique, il désigne le visa CNC (`VISA`), pas l'ID Allociné. `read` accepte
+aussi ce filtre. Relancer dbt après scraping pour publier les enrichissements.
+Sans validation manuelle, un nouveau scraping peut encore produire
+`visa_mismatch` ou `needs_review`.
+
+### Rejouer des visas après un incident technique
+
+`--source-id` conserve le filtre des traitements terminés : un succès ancien
+peut donc empêcher la reprise, même si le dernier essai brut est une erreur.
+Pour forcer un visa explicite, utiliser :
+
+```bash
+python3 ingestion/scraping/allocine/main.py sync \
+  --config ingestion/scraping/allocine/config.json --source-id 144246 --limit 1 --force
+```
+
+`--force` exige `sync` et au moins un `--source-id`. Il remplace
+`completed_statuses` par une liste vide en mémoire, sans modifier le JSON partagé.
+Les contrôles de visa et de correspondance restent actifs ; l'historique est conservé.
+`--require-success`, utilisé par Prefect pour le parcours ciblé, exige également
+un identifiant explicite : aucun film éligible ou tout statut autre que `success`
+fait échouer la commande. Les tentatives non confirmées sont écrites avant l'échec.
+Le deuxième bouton Metabase **Scraper un visa CNC** expose ce ciblage et le
+forçage (Non par défaut). Le déploiement Prefect attend d'abord Airbyte, lance
+le scraping ciblé, puis dbt phase 2 avec ses dépendances. Une étape en échec
+arrête les suivantes ; la demande passe en succès seulement après dbt.
+
+Pour une reprise programmée de plusieurs visas, le connecteur en mémoire reste
+utilisable avec `config.source_ids` et `config.completed_statuses = []`.
+Limiter le lot, conserver une seule session parallèle et contrôler tous les
+résultats avant d’appeler `_insert_records(config, records)` : quatre `success`
+avec date et réalisation renseignées pour le lot de l’issue 50. Cette méthode
+ajoute de nouveaux essais ; elle ne supprime ni ne modifie les succès historiques.
+
+Après le scraping, exécuter séparément l’ingestion dbt. Le staging conserve le
+dernier `success` par visa ; comparer le dernier essai brut, le dernier succès
+et les tables `fnl.fnl_films` / `fnl.fnl_film_credits`. Ne pas déduire la
+publication du seul statut Completed de Prefect. La date du 5 avril 2022 de
+Matin calme ([fiche Allociné *Vanishing*](https://www.allocine.fr/film/fichefilm_gen_cfilm=296988.html)) correspond à une diffusion télévisée,
+pas à une sortie en salle : le champ actuel ne distingue pas ces supports.
+
+### Reprendre une correspondance validée manuellement
+
+Dans `id_matching`, cocher `VALIDATION_MANUELLE` uniquement après vérification
+du lien entre le film CNC et l'ID Allociné renseigné. Compléter les champs
+existants `COMMENTAIRES`, `UPDATED BY` et `UPDATED DATE`. Décocher avant de
+modifier `VISA` ou `ID_ALLOCINE`, puis recocher après vérification : la case
+ne mémorise pas l'identité précédemment approuvée.
+
+1. Actualiser si nécessaire le schéma de la connexion Airbyte pour sélectionner
+   la nouvelle colonne, puis synchroniser `id_matching`. Vérifier sa présence
+   et sa valeur dans `raw.id_matching` ; une colonne absente reste inactive.
+2. Lancer le scraper. La validation rend les `visa_mismatch` éligibles malgré
+   leur statut terminé. Les `needs_review` sont déjà réessayés par défaut ;
+   la validation permet aussi leur reprise si ce statut a été ajouté à
+   `completed_statuses`. La limite de lot et `--source-id` restent applicables.
+3. Si la collecte aboutit, une anomalie d'identité validée devient `success`,
+   avec `match_strategy=manual_validation`. `visa_number` conserve le visa CNC
+   et `allocine_visa_number` conserve celui extrait d'Allociné, même différents.
+   Les erreurs techniques et blocages ne sont pas convertis en succès.
+4. Relancer dbt pour publier ce succès dans les modèles existants.
+
+Une case cochée ne déclenche aucun run à elle seule et ne relance pas un succès
+sur le même ID à chaque passage. Les correspondances confirmées automatiquement
+continuent à réussir sans case cochée. La validation exige un ID Allociné
+strictement positif fourni en entrée ; elle ne s'applique jamais aux candidats
+trouvés par recherche. Elle ne force pas la reprise d'un `not_found` terminé
+sur la même cible. Les tentatives précédentes restent dans l'historique.
+
+Tests de reprise : `python3 -m pytest -q tests/ingestion/test_allocine_reprocessing.py`.
+Les scénarios PostgreSQL utilisent la fixture temporaire décrite dans « Tests sans
+Allociné » et exigent `RIC_POSTER_TEST_DB=1`.
 
 Index créés au bootstrap:
 
@@ -162,13 +311,13 @@ Dans la stratégie retenue:
 
 1. Airbyte ne pilote pas ce job;
 2. Airbyte reste réservé aux Google Sheets source vers `raw`;
-3. Prefect orchestre `dbt phase 1` puis ce job de scraping depuis `prefect-worker`;
+3. Prefect lance ce job dans un déploiement manuel séparé, sans Airbyte ni dbt;
 4. `read` et `catalog.template.json` sont conservés surtout pour compatibilité technique et tests locaux.
 
 Séparation assumée:
 
-1. la phase `dbt` avant scraping est finalisée côté Prefect;
-2. la phase `dbt` après scraping exécute `dbt build --select +tag:phase2` quand elle est activée;
+1. le flow d’ingestion exécute Airbyte puis les deux phases dbt;
+2. sa phase finale exécute `dbt build --select +tag:phase2` sur les données déjà collectées;
 3. le flow Prefect peut aussi déclencher les syncs Airbyte par noms de connexions explicites;
 4. ce job couvre uniquement la partie scraping Allocine.
 
@@ -383,3 +532,23 @@ récupération staging. L'import échoue atomiquement si une écriture est impos
 Il cible toujours `raw.allocine_data`, même si l'export utilise une autre source.
 Les identifiants sans correspondance en production ne modifient aucune ligne.
 Rafraîchir ensuite `stg_allocine_films` avec le profil dbt production approprié.
+
+## Vérification des correspondances
+
+Le connecteur lit `REALISATEUR` dans la table `films` du schéma source, par `VISA`, pour compléter les lignes de `id_matching`. Le compte scraper doit pouvoir lire cette table. Une référence absente ou plusieurs valeurs distinctes pour un visa empêchent la confirmation par réalisateur.
+
+Un visa identique confirme le candidat ; un visa différent le rejette, même si le réalisateur correspond, sauf validation manuelle de l'ID fourni selon la procédure ci-dessus. Le réalisateur est lu dans le casting, avec repli sur les données structurées `Movie.director` de la fiche principale. Sans visa comparable, les ensembles de noms complets des réalisateurs doivent correspondre exactement après normalisation de la casse, des accents, de la ponctuation et de l’ordre des mots. Les coréalisations séparées par `/`, `;`, `&` ou `et` sont comparées séparément. Les initiales, alias, noms partiels et variantes ambiguës ne sont pas rapprochés automatiquement.
+
+Sans ID Allociné fourni, le scraper examine au maximum cinq candidats distincts. Il ne retient une correspondance que si un seul candidat est confirmé et si tous les candidats ont pu être examinés. Plus de cinq résultats, plusieurs correspondances ou aucune correspondance confirmée produisent `needs_review`. Une erreur technique interrompt la recherche avec `error` et un refus du site avec `blocked`, sans publier un candidat partiellement vérifié. Une recherche sans résultat reste `not_found`. Le budget de temps d’une recherche est six fois `record_timeout_seconds` pour couvrir la recherche et les cinq candidats ; celui d’un ID fourni reste inchangé.
+
+Les lignes `needs_review` ne sont pas considérées comme terminées et pourront être retentées. Le staging dbt existant ne consomme que `success`, donc elles ne sont pas publiées comme enrichissements. Les anciens résultats déjà enregistrés ne sont pas requalifiés automatiquement.
+
+Vérifications locales sans réseau : `python -m pytest tests/ingestion/test_allocine_identity.py`. Le flag CLI `--dry-run` reste réservé au backfill des affiches ; un test de recherche sans écriture doit utiliser des entrées en mémoire et ne pas appeler `sync_to_postgres`.
+
+### Limite par run Prefect
+
+Le déploiement `lancer-scrapping-allocine` expose `max_films=10`, entier strictement
+positif. Il n’a aucun calendrier automatique. Le flow transmet `--limit` au CLI
+`sync`, qui remplace `scrape_limit` en mémoire pour ce run uniquement. `read`
+accepte aussi `--limit`. Après scraping, relancer l’ingestion Airbyte/dbt pour
+actualiser les modèles finaux.
