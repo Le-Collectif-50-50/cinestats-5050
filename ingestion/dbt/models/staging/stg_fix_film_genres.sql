@@ -3,11 +3,10 @@
 }}
 
 SELECT
-    TRIM("ID")::UUID AS film_genre_id,
     CAST("FILM_ID" AS TEXT)::UUID AS film_id,
     CAST("GENRE_ID" AS TEXT)::UUID AS genre_id,
     -- METADATA
-    TO_DATE("UPDATED_DATE", 'DD/MM/YYYY') AS updated_date,
+    {{ gsheet_updated_timestamp('"UPDATED_DATE"') }} AS updated_date,
     TRIM("UPDATED_BY") AS updated_by,
     _airbyte_raw_id AS airbyte_raw_id,
     CAST(_airbyte_generation_id AS INTEGER) AS airbyte_generation_id,
@@ -16,4 +15,4 @@ SELECT
 FROM {{ source('raw', 'film_genres') }}
 WHERE "UPDATED_BY" IS NOT NULL
     AND "UPDATED_DATE" IS NOT NULL
-    AND "ID" <> '9999999999999-9999999999999'
+    AND "UPDATED_BY" <> 'Hugo Laurens'

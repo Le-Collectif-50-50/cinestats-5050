@@ -1,19 +1,21 @@
 import argparse
 import asyncio
 import os
+import re
 import socket
 import shlex
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 import psycopg
 from prefect import flow, get_run_logger
 from prefect.client.orchestration import get_client
 from psycopg.rows import dict_row
+from pydantic import Field
 
 from ingestion.airbyte.client import ensure_workspace_id
 from ingestion.airbyte.client import extract_job_id
@@ -51,7 +53,10 @@ DEFAULT_AIRBYTE_SYNC_POLL_SECONDS = int(
     os.getenv("AIRBYTE_SYNC_POLL_SECONDS", "10")
 )
 REQUEST_TABLE_NAME = "ops.ingestion_run_requests"
-DEFAULT_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-donnees"
+DEFAULT_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-complete"
+ALLOCINE_DEPLOYMENT_NAME = "Recuperer les donnees Allocine/lancer-scrapping-allocine"
+LEGACY_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-donnees"
+FilmLimit = Annotated[int, Field(gt=0, strict=True)]
 DEFAULT_REQUEST_FLOW_RUN_NAME_PREFIX = "metabase-ingestion"
 CREATE_QUEUE_SQL = """
 CREATE SCHEMA IF NOT EXISTS ops;
@@ -89,6 +94,38 @@ ALTER TABLE ops.ingestion_run_requests
   ADD COLUMN IF NOT EXISTS request_reason TEXT;
 
 ALTER TABLE ops.ingestion_run_requests
+  ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'ingestion'
+    CHECK (request_type IN ('ingestion', 'allocine')),
+  ADD COLUMN IF NOT EXISTS max_films INTEGER;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'ops.ingestion_run_requests'::regclass
+                   AND conname = 'allocine_request_parameters') THEN
+    ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT allocine_request_parameters
+      CHECK (request_type <> 'allocine' OR (
+        max_films IS NOT NULL AND max_films > 0
+        AND length(btrim(requested_by_metabase_user)) > 0
+        AND request_reason IS NOT NULL AND length(btrim(request_reason)) > 0));
+  END IF;
+END $$;
+
+ALTER TABLE ops.ingestion_run_requests
+  ADD COLUMN IF NOT EXISTS visa_number TEXT,
+  ADD COLUMN IF NOT EXISTS force_rescrape BOOLEAN NOT NULL DEFAULT false;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'ops.ingestion_run_requests'::regclass
+                   AND conname = 'allocine_target_parameters') THEN
+    ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT allocine_target_parameters
+      CHECK ((visa_number IS NULL AND NOT force_rescrape) OR (
+        request_type = 'allocine' AND visa_number IS NOT NULL
+        AND visa_number ~ '^[0-9]+$' AND visa_number ~ '[1-9]' AND max_films = 1));
+  END IF;
+END $$;
+
+ALTER TABLE ops.ingestion_run_requests
   DROP COLUMN IF EXISTS requested_extraction_date;
 """
 
@@ -105,6 +142,29 @@ def _parse_csv(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _main_deployment_name() -> str:
+    configured = os.getenv("INGESTION_REQUEST_MAIN_DEPLOYMENT_NAME", DEFAULT_MAIN_DEPLOYMENT_NAME)
+    # Les .env existants sont conservés au déploiement : migrer l'ancien nom connu.
+    return DEFAULT_MAIN_DEPLOYMENT_NAME if configured == LEGACY_MAIN_DEPLOYMENT_NAME else configured
+
+
+def _validate_film_limit(max_films: int) -> None:
+    if isinstance(max_films, bool) or not isinstance(max_films, int) or max_films < 1:
+        raise ValueError("max_films doit être un entier strictement positif")
+
+
+def _validate_allocine_target(visa_number: str | None, force_rescrape: bool) -> None:
+    if not isinstance(force_rescrape, bool):
+        raise ValueError("force_rescrape doit être un booléen")
+    if visa_number is None:
+        if force_rescrape:
+            raise ValueError("Le forçage exige un visa CNC explicite")
+    elif not isinstance(visa_number, str) or not re.fullmatch(r"[0-9]+", visa_number) or not any(
+        digit != "0" for digit in visa_number
+    ):
+        raise ValueError("Le visa CNC doit être une chaîne de chiffres strictement positive")
+
+
 @dataclass(frozen=True)
 class IngestionRequestSettings:
     database_host: str
@@ -115,7 +175,6 @@ class IngestionRequestSettings:
     claim_timeout_seconds: int
     claimed_by: str
     main_deployment_name: str
-    config_path: str
     flow_run_name_prefix: str
     auto_init_queue_schema: bool
     run_airbyte_sync_step: bool
@@ -140,14 +199,7 @@ class IngestionRequestSettings:
                 "INGESTION_REQUEST_CLAIMED_BY",
                 socket.gethostname() or "prefect-worker",
             ),
-            main_deployment_name=os.getenv(
-                "INGESTION_REQUEST_MAIN_DEPLOYMENT_NAME",
-                DEFAULT_MAIN_DEPLOYMENT_NAME,
-            ),
-            config_path=os.getenv(
-                "INGESTION_REQUEST_ALLOCINE_CONFIG_PATH",
-                str(ALLOCINE_CONFIG_PATH),
-            ),
+            main_deployment_name=_main_deployment_name(),
             flow_run_name_prefix=os.getenv(
                 "INGESTION_REQUEST_FLOW_RUN_NAME_PREFIX",
                 DEFAULT_REQUEST_FLOW_RUN_NAME_PREFIX,
@@ -250,10 +302,11 @@ def _mark_request_processing(
     sql = f"""
     UPDATE {REQUEST_TABLE_NAME}
     SET
-        request_status = 'processing',
+        request_status = CASE WHEN request_status IN ('success', 'failed')
+                              THEN request_status ELSE 'processing' END,
         claimed_at = COALESCE(claimed_at, now()),
         triggered_flow_run_id = COALESCE(%(flow_run_id)s, triggered_flow_run_id),
-        trigger_error = NULL
+        trigger_error = CASE WHEN request_status = 'failed' THEN trigger_error ELSE NULL END
     WHERE request_id = %(request_id)s;
     """
 
@@ -353,7 +406,6 @@ def _build_request_parameters(
 ) -> dict[str, object]:
     return {
         "request_id": str(request_id),
-        "config_path": settings.config_path,
         "run_airbyte_sync_step": settings.run_airbyte_sync_step,
         "run_dbt_phase_2_step": settings.run_dbt_phase_2_step,
         "airbyte_connection_names": (
@@ -370,27 +422,70 @@ async def _trigger_ingestion_request_run(
     request_row: dict[str, Any],
 ) -> str:
     request_id = request_row["request_id"]
+    request_type = request_row.get("request_type", "ingestion")
+    if request_type == "allocine":
+        max_films = request_row.get("max_films")
+        _validate_film_limit(max_films)
+        deployment_name = ALLOCINE_DEPLOYMENT_NAME
+        parameters = {"request_id": str(request_id), "max_films": max_films}
+        visa_number = request_row.get("visa_number")
+        force_rescrape = request_row.get("force_rescrape", False)
+        _validate_allocine_target(visa_number, force_rescrape)
+        if visa_number is not None:
+            if max_films != 1:
+                raise ValueError("Une demande par visa doit avoir max_films=1")
+            parameters.update(visa_number=visa_number, force_rescrape=force_rescrape,
+                              airbyte_connection_names=settings.airbyte_connection_names)
+    elif request_type == "ingestion":
+        deployment_name = settings.main_deployment_name
+        parameters = _build_request_parameters(settings, request_id=request_id)
+    else:
+        raise ValueError(f"Type de demande inconnu : {request_type}")
     labels = {
         "request_id": str(request_id),
         "request_source": str(request_row["request_source"]),
         "requested_by": str(request_row["requested_by_metabase_user"]),
+        "request_type": request_type,
     }
 
     async with get_client() as client:
         deployment = await client.read_deployment_by_name(
-            settings.main_deployment_name
+            deployment_name
         )
         flow_run = await client.create_flow_run_from_deployment(
             deployment.id,
-            parameters=_build_request_parameters(
-                settings,
-                request_id=request_id,
-            ),
-            name=f"{settings.flow_run_name_prefix}-{request_id}",
+            parameters=parameters,
+            name=f"metabase-allocine-{request_id}" if request_type == "allocine"
+                 else f"{settings.flow_run_name_prefix}-{request_id}",
             idempotency_key=str(request_id),
             labels=labels,
         )
     return str(flow_run.id)
+
+
+async def _reconcile_allocine_requests(settings: IngestionRequestSettings) -> None:
+    """Récupérer aussi les annulations/crashes survenus hors du corps du flow."""
+    with _connect_request_db(settings) as connection:
+        rows = connection.execute(f"""
+            SELECT request_id, triggered_flow_run_id FROM {REQUEST_TABLE_NAME}
+            WHERE request_type = 'allocine' AND request_status = 'processing'
+              AND triggered_flow_run_id IS NOT NULL
+        """).fetchall()
+    if not rows:
+        return
+    async with get_client() as client:
+        for row in rows:
+            try:
+                run = await client.read_flow_run(UUID(row["triggered_flow_run_id"]))
+            except Exception:
+                get_run_logger().exception("État Prefect inaccessible pour %s", row["request_id"])
+                continue
+            if run.state and run.state.is_final():
+                if run.state.is_completed():
+                    _mark_request_success(settings, request_id=row["request_id"])
+                else:
+                    _mark_request_failed(settings, request_id=row["request_id"],
+                                         error_message=f"Prefect {run.state.name}: {run.state.message or ''}")
 
 
 def _run(command: list[str], step_name: str, cwd: Path | None = None) -> None:
@@ -576,15 +671,23 @@ def _run_dbt_phase_1_step() -> None:
 
 @flow(
     name="Preparer les donnees",
-    description="Execute la preparation dbt avant le scraping Allocine.",
+    description="Execute la preparation dbt des donnees CNC.",
 )
 def run_dbt_phase_1() -> None:
     _run_dbt_phase_1_step()
 
 
-def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH)) -> None:
+def _run_allocine_scraping_step(
+    config_path: str = str(ALLOCINE_CONFIG_PATH), max_films: int = 10,
+    visa_number: str | None = None, force_rescrape: bool = False,
+) -> None:
+    _validate_film_limit(max_films)
     logger = get_run_logger()
-    logger.info("Task parameters: config_path=%s", config_path)
+    _validate_allocine_target(visa_number, force_rescrape)
+    target_args = ["--source-id", visa_number, "--require-success"] if visa_number is not None else []
+    if force_rescrape:
+        target_args.append("--force")
+    logger.info("Task parameters: config_path=%s, max_films=%s", config_path, max_films)
     _run(
         [
             "python3",
@@ -593,7 +696,9 @@ def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH)) ->
             "sync",
             "--config",
             config_path,
-        ],
+            "--limit",
+            str(max_films),
+        ] + target_args,
         step_name="Recuperer les donnees Allocine",
         cwd=REPO_ROOT,
     )
@@ -601,10 +706,34 @@ def _run_allocine_scraping_step(config_path: str = str(ALLOCINE_CONFIG_PATH)) ->
 
 @flow(
     name="Recuperer les donnees Allocine",
-    description="Lance le scraping Allocine avec la configuration fournie.",
+    description="Airbyte puis scraping Allociné ; avec visa_number, publication dbt incluse.",
 )
-def run_allocine_scraping(config_path: str = str(ALLOCINE_CONFIG_PATH)) -> None:
-    _run_allocine_scraping_step(config_path=config_path)
+def run_allocine_scraping(
+    config_path: str = str(ALLOCINE_CONFIG_PATH), max_films: FilmLimit = 10,
+    request_id: str | None = None,
+    visa_number: str | None = None, force_rescrape: bool = False,
+    airbyte_connection_names: list[str] | None = None,
+) -> None:
+    request_uuid = UUID(request_id) if request_id is not None else None
+    settings = IngestionRequestSettings.from_env() if request_uuid is not None else None
+    if settings is not None:
+        _mark_request_processing(settings, request_id=request_uuid)
+    try:
+        _validate_allocine_target(visa_number, force_rescrape)
+        _validate_film_limit(max_films)
+        _run_airbyte_sync_step(enabled=True, connection_names=airbyte_connection_names)
+        if visa_number is None:
+            _run_allocine_scraping_step(config_path=config_path, max_films=max_films)
+        else:
+            _run_allocine_scraping_step(config_path=config_path, max_films=1,
+                                       visa_number=visa_number, force_rescrape=force_rescrape)
+            _run_dbt_phase_2_step()
+    except Exception as exc:
+        if settings is not None:
+            _mark_request_failed(settings, request_id=request_uuid, error_message=str(exc))
+        raise
+    if settings is not None:
+        _mark_request_success(settings, request_id=request_uuid)
 
 
 def _run_mubi_scraping_step(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
@@ -632,9 +761,10 @@ def run_mubi_scraping(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
     _run_mubi_scraping_step(config_path=config_path)
 
 
-def _run_mubi_cnc_scraping_step(config_path: str = str(MUBI_CNC_CONFIG_PATH)) -> None:
+def _run_mubi_cnc_scraping_step(config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: int = 10) -> None:
+    _validate_film_limit(max_films)
     logger = get_run_logger()
-    logger.info("Task parameters: config_path=%s", config_path)
+    logger.info("Task parameters: config_path=%s, max_films=%s", config_path, max_films)
     _run(
         [
             "python3",
@@ -643,6 +773,8 @@ def _run_mubi_cnc_scraping_step(config_path: str = str(MUBI_CNC_CONFIG_PATH)) ->
             "sync",
             "--config",
             config_path,
+            "--limit",
+            str(max_films),
         ],
         step_name="Recuperer les donnees Mubi (CNC)",
         cwd=REPO_ROOT,
@@ -653,8 +785,8 @@ def _run_mubi_cnc_scraping_step(config_path: str = str(MUBI_CNC_CONFIG_PATH)) ->
     name="Recuperer les donnees Mubi (CNC)",
     description="Lance le scraping Mubi restreint aux films du referentiel CNC (palmares puis editions de festivals concernees).",
 )
-def run_mubi_cnc_scraping(config_path: str = str(MUBI_CNC_CONFIG_PATH)) -> None:
-    _run_mubi_cnc_scraping_step(config_path=config_path)
+def run_mubi_cnc_scraping(config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: FilmLimit = 10) -> None:
+    _run_mubi_cnc_scraping_step(config_path=config_path, max_films=max_films)
 
 
 def _run_dbt_phase_2_step() -> None:
@@ -684,19 +816,17 @@ def run_dbt_phase_2() -> None:
 
 @flow(
     name="Lancer l'ingestion complete",
-    description="Orchestre la preparation des donnees, le scraping Allocine et les etapes optionnelles de synchronisation et de finalisation.",
+    description="Orchestre Airbyte puis les deux phases dbt, sans aucun scraping.",
 )
 def main_ingestion_flow(
     request_id: str | None = None,
-    config_path: str = str(ALLOCINE_CONFIG_PATH),
     run_airbyte_sync_step: bool = True,
     run_dbt_phase_2_step: bool = True,
     airbyte_connection_names: list[str] | None = None,
 ) -> None:
     logger = get_run_logger()
     logger.info(
-        "Flow parameters: config_path=%s, run_airbyte_sync_step=%s, run_dbt_phase_2_step=%s, airbyte_connection_names=%s",
-        config_path,
+        "Flow parameters: run_airbyte_sync_step=%s, run_dbt_phase_2_step=%s, airbyte_connection_names=%s",
         run_airbyte_sync_step,
         run_dbt_phase_2_step,
         airbyte_connection_names or [],
@@ -717,7 +847,6 @@ def main_ingestion_flow(
             connection_names=airbyte_connection_names,
         )
         _run_dbt_phase_1_step()
-        _run_allocine_scraping_step(config_path=config_path)
         if run_dbt_phase_2_step:
             _run_dbt_phase_2_step()
     except Exception as exc:
@@ -738,12 +867,14 @@ def main_ingestion_flow(
 
 @flow(
     name="Traiter les demandes d'ingestion",
-    description="Claim une requete Metabase, declenche le deployment d'ingestion principal, puis persiste l'etat terminal dans ops.ingestion_run_requests.",
+    description="Claim une requete Metabase et declenche l'ingestion ou le scraping Allocine selon request_type.",
 )
 def dispatch_ingestion_requests(max_requests_per_run: int = 1) -> int:
     logger = get_run_logger()
     settings = IngestionRequestSettings.from_env()
     _ensure_request_queue(settings)
+
+    asyncio.run(_reconcile_allocine_requests(settings))
 
     processed_count = 0
     for _ in range(max_requests_per_run):
@@ -822,11 +953,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ],
     )
     parser.add_argument(
-        "--config-path",
-        default=str(ALLOCINE_CONFIG_PATH),
-        help="Chemin du fichier de configuration du scraping Allocine.",
-    )
-    parser.add_argument(
         "--request-id",
         default=None,
         help="Identifiant ops.ingestion_run_requests a mettre a jour pendant l'execution.",
@@ -874,7 +1000,6 @@ def main() -> None:
 
     main_ingestion_flow(
         request_id=args.request_id,
-        config_path=args.config_path,
         run_airbyte_sync_step=args.run_airbyte_sync,
         run_dbt_phase_2_step=args.run_dbt_phase_2,
         airbyte_connection_names=args.airbyte_connection_names,

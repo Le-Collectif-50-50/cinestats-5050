@@ -7,24 +7,16 @@ SELECT
     "TITRE" AS cnc_name,
     "GENRE" AS genre,
     CAST("ANNEE_D_AGREMENT" AS INTEGER) AS cnc_agreement_year,
-    CASE
-        -- Si l'année est >= 2013, on multiplie par 1 000 000 (peu importe le format)
-        WHEN CAST("ANNEE_D_AGREMENT" AS INTEGER) >= 2013 THEN
-            CAST(
-                REPLACE(
-                    TRANSLATE("DEVIS", ' ' || CHR(160) || CHR(8239), ''),
-                    ',', '.'
-                ) AS FLOAT
-            ) * 1000000
-        -- Sinon, on ne multiplie pas
-        ELSE
-            CAST(
-                REPLACE(
-                    TRANSLATE("DEVIS", ' ' || CHR(160) || CHR(8239), ''),
-                    ',', '.'
-                ) AS FLOAT
-            )
-    END AS budget,
+    -- Contrat source : DEVIS contient des euros exacts pour toutes les années.
+    CAST(
+        NULLIF(
+            REPLACE(
+                TRANSLATE("DEVIS", ' ' || CHR(160) || CHR(8239), ''),
+                ',', '.'
+            ),
+            ''
+        ) AS NUMERIC
+    ) AS budget,
     -- ARRAYS
     STRING_TO_ARRAY(REPLACE("REALISATEUR", ' ', ''), ' / ') AS director,
     CAST(REPLACE("RANG", ' ', '') AS TEXT) AS director_rank,
@@ -65,7 +57,8 @@ SELECT
         ELSE FALSE
     END AS has_sofica,
     CASE
-        WHEN LOWER("CREDIT_D_IMPOT") = 'x' THEN TRUE
+        WHEN LOWER(TRIM("CREDIT_D_IMPOT")) IN ('x', 'oui') THEN TRUE
+        WHEN LOWER(TRIM("CREDIT_D_IMPOT")) = 'd' THEN NULL
         ELSE FALSE
     END AS has_tax_credit,
     CASE
@@ -73,7 +66,7 @@ SELECT
         ELSE FALSE
     END AS has_regional_funding,
     -- METADATA
-    TO_DATE("UPDATED_DATE", 'DD/MM/YYYY') AS updated_date,
+    {{ gsheet_updated_timestamp('"UPDATED_DATE"') }} AS updated_date,
     "UPDATED_BY" AS updated_by,
     _airbyte_raw_id AS airbyte_raw_id,
     CAST(_airbyte_generation_id AS INTEGER) AS airbyte_generation_id,

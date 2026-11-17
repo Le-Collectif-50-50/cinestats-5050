@@ -225,32 +225,32 @@ models:
         description: "Pourcentage ou montant du budget attribué à ce pays pour le film."
 
   - name: int_fix_film_credits
-    description: "Table intermédiaire issue de stg_fix_film_credits. Expose les corrections manuelles sur les crédits des films, sans les métadonnées techniques. En cas de corrections multiples sur un même id, seule la plus récente (order by updated_date DESC) est conservée."
+    description: "Table intermédiaire issue de stg_fix_film_credits. Expose les corrections manuelles sur les crédits des films, sans les métadonnées techniques. En cas de corrections multiples sur une même association (film_id, role_id, credit_holder_id), seule la plus récente (order by updated_date DESC) est conservée."
     columns:
-      - name: film_credit_id
-        description: "Identifiant unique du crédit de film."
-        tests:
-          - not_null
-          - unique
       - name: film_id
         description: "Identifiant du film concerné."
-      - name: role_id
-        description: "Identifiant du rôle occupé dans le film."
-      - name: credit_holder_id
-        description: "Identifiant de la personne ou entité créditée."
-
-  - name: int_fix_film_genres
-    description: "Table intermédiaire issue de stg_fix_film_genres. Expose les corrections manuelles sur les associations film-genre, sans les métadonnées techniques. En cas de corrections multiples sur un même id, seule la plus récente (order by updated_date DESC) est conservée."
-    columns:
-      - name: film_genre_id
-        description: "Identifiant unique de la relation film-genre."
         tests:
           - not_null
-          - unique
+      - name: role_id
+        description: "Identifiant du rôle occupé dans le film."
+        tests:
+          - not_null
+      - name: credit_holder_id
+        description: "Identifiant de la personne ou entité créditée."
+        tests:
+          - not_null
+
+  - name: int_fix_film_genres
+    description: "Table intermédiaire issue de stg_fix_film_genres. Expose les corrections manuelles sur les associations film-genre, sans les métadonnées techniques. En cas de corrections multiples sur une même association (film_id, genre_id), seule la plus récente (order by updated_date DESC) est conservée."
+    columns:
       - name: film_id
         description: "Identifiant du film."
+        tests:
+          - not_null
       - name: genre_id
         description: "Identifiant du genre cinématographique."
+        tests:
+          - not_null
 
   - name: int_fix_genres
     description: "Table intermédiaire issue de stg_fix_genres. Expose les corrections manuelles sur le référentiel des genres, sans les métadonnées techniques. En cas de corrections multiples sur un même id, seule la plus récente (order by updated_date DESC) est conservée."
@@ -275,7 +275,5 @@ models:
         description: "Nom du rôle."
       - name: is_key_role
         description: "Indique si le rôle est considéré comme un rôle clé dans une production."
-      - name: allocine_name
-        description: "Nom du rôle tel qu'utilisé sur Allociné."
       - name: inclusive_name
         description: "Nom inclusif du rôle pour harmonisation des données."

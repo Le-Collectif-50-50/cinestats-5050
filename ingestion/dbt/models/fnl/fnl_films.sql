@@ -13,7 +13,11 @@ WITH french_financed AS (
 SELECT
     films.film_id,
     films.cnc_visa,
-    COALESCE(allocine.allocine_name, films.cnc_name) AS movie_name,
+    COALESCE(
+        NULLIF(TRIM(matching.cnc_name), ''),
+        NULLIF(TRIM(allocine.allocine_name), ''),
+        films.cnc_name
+    ) AS movie_name,
     films.cnc_agreement_year,
     allocine.release_date,
     allocine.duration_mn,
@@ -32,6 +36,6 @@ FROM {{ ref('int_cnc_films') }} AS films
 INNER JOIN {{ ref('int_id_matching') }} AS matching
     ON films.cnc_visa = matching.cnc_visa
 LEFT JOIN {{ ref('int_allocine_films') }} AS allocine
-    ON matching.allocine_id = allocine.allocine_id
+    ON films.film_id = allocine.film_id
 LEFT JOIN french_financed
     ON films.film_id = french_financed.film_id

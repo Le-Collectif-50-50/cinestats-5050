@@ -1,0 +1,23 @@
+version: 2
+seeds:
+  - name: allocine_association_rejections
+    description: "Décisions humaines de rejet, limitées au triplet source/visa/ID ; aucune blacklist globale."
+    columns:
+      - name: source_record_id
+        tests: [not_null]
+      - name: visa_number
+        tests: [not_null]
+      - name: allocine_id
+        tests: [not_null]
+      - name: reason
+        tests: [not_null]
+      - name: source_url
+        tests: [not_null]
+      - name: reviewed_at
+        tests: [not_null]
+      - name: reviewed_by
+        tests: [not_null]
+      - name: evidence_run_id
+        tests: [not_null]
+      - name: evidence_record_hash
+        tests: [not_null]

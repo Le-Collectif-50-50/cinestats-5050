@@ -1,5 +1,5 @@
-# Use the official Python 3.9 image as the base image
-FROM python:3.10
+# Même version mineure que le backend de production.
+FROM python:3.12
 
 # Install Poetry
 RUN pip install poetry

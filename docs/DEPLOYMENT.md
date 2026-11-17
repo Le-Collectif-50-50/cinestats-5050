@@ -1,7 +1,7 @@
 # Déploiement
 
-**Resonsable** Data Team DataForGood
-**Dernière révision:** 2026-11-09
+**Resonsable** Nicolas Revel
+**Dernière révision:** 2026-11-17
 **Status:** active
 
 ## Historique du document
@@ -9,7 +9,7 @@
 | # | Date | Auteur | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-10-09 | Joel Teixeira | Ajout du parcours de validation en preview et clarification des branches sources de promotion. |
-| 2 | 2026-11-09 | Nicolas Revel | Limitation de débit nginx par IP cliente sur l'API et les pages. |
+| 2 | 2026-11-17 | Nicolas Revel | Limitation de débit nginx par IP cliente sur l'API et les pages. |
 
 ## Stratégie de branches
 

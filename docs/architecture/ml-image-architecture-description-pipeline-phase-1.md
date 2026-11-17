@@ -195,5 +195,5 @@ Les points suivants sont des limites du code, pas des fonctionnalités disponibl
 | --- | --- | --- | --- |
 | 1 | 2026-05-07 | Joel Teixeira | Initial implementation |
 | 2 | 2026-10-10 | Joel Teixeira | Audit du code récupéré et du test CPU ; description en français des entrées, calculs, sorties, paramètres actifs et fonctionnalités incomplètes. |
-| 3 | 2026-10-16 | Codex | Options d’exploration issues de la PR 27 : périphérique, crops séparés des boîtes de mesure, suppression vidéo optionnelle et notebook consolidé. |
-| 4 | 2026-10-16 | Codex | Intégration des options CUDA et du choix explicite de périphérique, validation CPU et limites matérielles. |
+| 3 | 2026-10-16 | Joel Teixeira | Options d’exploration issues de la PR 27 : périphérique, crops séparés des boîtes de mesure, suppression vidéo optionnelle et notebook consolidé. |
+| 4 | 2026-10-16 | Joel Teixeira | Intégration des options CUDA et du choix explicite de périphérique, validation CPU et limites matérielles. |

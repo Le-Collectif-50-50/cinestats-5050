@@ -2,11 +2,11 @@
 
 ## Metadata du document
 
-**Responsable:** Joel Teixeira
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-10-06
+**Dernière révision:** 2026-11-13
 
-**Statut:** actif
+**Status:** actif
 
 ### Historique du document
 
@@ -14,6 +14,7 @@
 | --- | ---------- | ------------- | ------------------------------------- |
 | 1   | 2026-06-25 | Joel Teixeira | Flux Mubi restreint aux films du CNC  |
 | 2   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement |
+| 3 | 2026-11-13 | Joel Teixeira | Déploiement manuel lancer-scrapping-mubi et paramètre max_films=10 transmis au CLI. |
 
 Job de scraping Mubi **piloté par l'entrée** (input-driven), en alternative au job de découverte `ingestion/scraping/mubi/`.
 
@@ -70,7 +71,7 @@ Champs spécifiques à ce job :
 | --- | --- |
 | `input_schema` / `input_table` | Table de référence CNC (défaut `raw.id_matching`) |
 | `input_mubi_id_column` | Colonne portant l'identifiant Mubi numérique (défaut `ID_MUBI`) |
-| `scrape_limit` | Borne le nombre de films CNC traités en Phase A (tests). `null` en production. |
+| `scrape_limit` | Borne le nombre de films CNC traités en Phase A (tests). Le déploiement Prefect impose 10 par défaut, surchargeable par `max_films`. |
 
 Les autres champs (`output_schema`, tables de sortie, délais, retry, navigateur) sont identiques au job `mubi/`.
 
@@ -102,3 +103,13 @@ Pour un test limité, utiliser `config-debug.json` (`scrape_limit` réduit, `ver
 2. La résolution par identifiant numérique et l'extraction des récompenses reposent sur la structure `__NEXT_DATA__` de Next.js. Si Mubi change son frontend, ces mécanismes peuvent nécessiter une mise à jour.
 3. Le rapprochement avec un film déjà scrapé par le job `mubi/` se fait sur `mubi_id`. Une ancienne ligne avec `mubi_id` nul ne sera pas reconnue comme traitée ; le film sera re-scrapé (les nouvelles lignes, porteuses du `mubi_id`, sont conservées par `stg_mubi_film_awards` qui ne garde que le dernier run par `film_link`).
 4. Le scraping des éditions (Phase B) utilise toujours les sélecteurs HTML `css-*` de `mubi_scraper.py`, susceptibles d'être modifiés par Mubi.
+
+## Déploiement Prefect
+
+`Recuperer les donnees Mubi (CNC)/lancer-scrapping-mubi` est publié au démarrage du
+worker, sans calendrier et sans exécution automatique. `max_films=10` limite les
+films CNC sélectionnés en phase A ; la phase B consulte leurs éditions associées
+et peut produire davantage de lignes. Le paramètre doit être un entier positif.
+Il est transmis via `sync --limit N`, sans modification du fichier de configuration.
+Ce déploiement ne lance ni Airbyte ni dbt. Relancer l’ingestion après le scraping
+pour reconstruire les modèles finaux.
