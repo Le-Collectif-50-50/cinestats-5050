@@ -47,9 +47,12 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(flow.parameters.properties["max_films"]["default"], 10)
             self.assertEqual(flow.parameters.properties["max_films"]["exclusiveMinimum"], 0)
             for kwargs, expected in [({}, "10"), ({"max_films": 25}, "25")]:
-                with patch.object(flows, "get_run_logger"), patch.object(flows, "_run_airbyte_sync_step"), patch.object(flows, "_run_dbt_phase_2_step"), patch.object(flows, "_run") as run:
+                with patch.object(flows, "get_run_logger"), patch.object(flows, "_run_airbyte_sync_step"), patch.object(flows, "_run_dbt_phase_2_step"), patch.object(flows, "_run") as run, patch.object(flows, "_run_mubi_cnc_scraping_step") as mubi:
                     flow.fn(**kwargs)
-                    self.assertEqual(run.call_args.args[0][-2:], ["--limit", expected])
+                    if flow is flows.run_mubi_cnc_scraping:
+                        self.assertEqual(mubi.call_args.kwargs["max_films"], int(expected))
+                    else:
+                        self.assertEqual(run.call_args.args[0][-2:], ["--limit", expected])
             for invalid in (0, -1, True, 1.5):
                 with patch.object(flows, "_run") as run, self.assertRaises(ValueError):
                     flow.fn(max_films=invalid)

@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-16
+**Dernière révision:** 2026-11-17
 
 **Status:** actif
 
@@ -30,6 +30,7 @@
 
 | 15 | 2026-11-16 | Joel Teixeira | Parcours Mubi CNC Airbyte/collecte/dbt, dashboard Metabase et verrou global des demandes (#83). |
 | 16 | 2026-11-16 | Joel Teixeira | CLI de recherche des identifiants MUBI/TMDB manquants avec vérification titre/réalisateur et propositions dans ops ; déploiement Prefect manuel distinct. |
+| 17 | 2026-11-17 | Joel Teixeira | Sous-flows Mubi bornés et reprenables, enchaînement séquentiel et publication dbt après drainage. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -283,7 +284,7 @@ Au démarrage, `start_worker.sh` publie exactement cinq déploiements gérés :
 | --- | --- | --- | --- |
 | `lancer-ingestion-complete` | Airbyte → dbt phase 1 → dbt phase 2 | Manuel ou demande Metabase | Aucun scraping |
 | `lancer-scrapping-allocine` | Lot : Airbyte → scraping ; visa : Airbyte → scraping ciblé → dbt phase 2 | Manuel ou demande Metabase, aucun calendrier | `max_films=10` |
-| `lancer-scrapping-mubi` | Airbyte → Mubi CNC → dbt phase 2 | Manuel, aucun calendrier | `max_films=10` |
+| `lancer-scrapping-mubi` | Airbyte → lots palmarès puis éditions → dbt phase 2 | Manuel, aucun calendrier | `max_films=10`, lots de 10 films / 25 pages |
 | `rechercher-identifiants-manquants` | Recherche MUBI/TMDB → propositions dans `ops` | Manuel, aucun calendrier | `max_films=10` |
 | `traiter-les-demandes-ingestion` | Poll de `ops.ingestion_run_requests` | Toutes les 300 secondes par défaut | `max_requests_per_run=1` |
 
@@ -302,7 +303,11 @@ pour créer les tables et lancer un petit lot.
 
 Mubi utilise `mubi_cnc`, pas le crawler global de festivals. La limite porte sur
 les films CNC sélectionnés en phase A. La phase B consulte leurs éditions de
-festivals associées et peut produire davantage de lignes que `max_films`.
+festivals associées et peut produire davantage de lignes que `max_films`. Les
+sous-flows sont séquentiels et reprenables : dix films ou 25 pages candidates
+par lot, avec un budget de collecte de 900 secondes et un garde-fou du processus.
+Le parcours parent peut être long ; dbt attend la fin de la collecte. Voir le
+[guide Mubi borné](scraping/mubi_cnc/README.md#déploiement-prefect).
 
 Le flow principal n’accepte plus de configuration Allociné et n’appelle aucun
 scraper. Airbyte est activé par défaut et utilise

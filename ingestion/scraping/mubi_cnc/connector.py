@@ -578,7 +578,7 @@ class MubiCncAirbyteSource:
     # --- Phase B: only the festival editions referenced by CNC films ---
 
     async def _scrape_festival_editions(
-        self, config: ConnectorConfig, editions: list[tuple[str, str]]
+        self, config: ConnectorConfig, editions: list[tuple[str, str]], *, page_limit: int | None = None
     ) -> list[dict[str, Any]]:
         from ingestion.scraping.mubi.mubi_scraper import MubiPageScraper
         from ingestion.scraping.browser import AsyncBrowserSession
@@ -593,26 +593,14 @@ class MubiCncAirbyteSource:
         engine = create_engine(config.database_url)
         try:
             with engine.connect() as conn:
-                processed_page_combos = _fetch_processed_page_combos(conn, config)
-                edition_empty_boundaries = _fetch_edition_empty_boundaries(conn, config)
+                pending = _pending_edition_pages(conn, config, editions)
         finally:
             engine.dispose()
 
-        # Build the pending (slug, year, page) list, skipping editions already
-        # completed in a prior run and pages past a known empty boundary.
-        pending: list[tuple[str, int, int]] = []
-        for slug, year_str in editions:
-            try:
-                year = int(year_str)
-            except (TypeError, ValueError):
-                continue
-            empty_from = edition_empty_boundaries.get((slug, year))
-            last_page = config.max_pages_per_edition
-            if empty_from is not None:
-                last_page = min(last_page, empty_from - 1)
-            for page in range(1, last_page + 1):
-                if (slug, year, page) not in processed_page_combos:
-                    pending.append((slug, year, page))
+        if page_limit is not None:
+            if isinstance(page_limit, bool) or not isinstance(page_limit, int) or page_limit < 1:
+                raise ValueError("page_limit doit être un entier strictement positif")
+            pending = pending[:page_limit]
 
         if not pending:
             print("Mubi CNC festival films: nothing pending (all editions already scraped).")
@@ -1036,6 +1024,22 @@ def _fetch_processed_mubi_ids(conn, config: ConnectorConfig) -> set[int]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+def _pending_edition_pages(conn, config: ConnectorConfig, editions) -> list[tuple[str, int, int]]:
+    """Même sélection pour le compteur de reprise et la collecte effective."""
+    processed = _fetch_processed_page_combos(conn, config)
+    boundaries = _fetch_edition_empty_boundaries(conn, config)
+    pending = []
+    for slug, year_string in sorted(set(editions)):
+        try:
+            year = int(year_string)
+        except (TypeError, ValueError):
+            continue
+        last_page = min(config.max_pages_per_edition, boundaries.get((slug, year), config.max_pages_per_edition + 1) - 1)
+        pending.extend((slug, year, page) for page in range(1, last_page + 1)
+                       if (slug, year, page) not in processed)
+    return pending
 
 
 def _fetch_processed_page_combos(conn, config: ConnectorConfig) -> set[tuple]:

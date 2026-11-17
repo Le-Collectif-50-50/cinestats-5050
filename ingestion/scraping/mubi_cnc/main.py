@@ -75,7 +75,14 @@ def main() -> int:
     parser.add_argument("--limit", type=int, help="Nombre maximum de films CNC (sync)")
     parser.add_argument("--visa", help="Visa CNC explicite")
     parser.add_argument("--force", action="store_true", help="Retraiter le visa demandé")
+    parser.add_argument("--phase", choices=["all", "awards", "festivals"], default="all")
+    parser.add_argument("--page-limit", type=int, default=25)
+    parser.add_argument("--job-timeout-seconds", type=int, default=900)
     args = parser.parse_args()
+    if args.page_limit < 1 or not 1 <= args.job_timeout_seconds <= 900:
+        parser.error("Limite de pages positive et budget de 1 à 900 secondes requis")
+    if args.phase != "all" and args.command != "sync":
+        parser.error("--phase exige sync")
     if (args.visa or args.force) and args.command != "sync":
         parser.error("--visa/--force exigent sync")
     if args.force and not args.visa:
@@ -111,6 +118,12 @@ def main() -> int:
         return 0
 
     if args.command == "sync":
+        if args.phase != "all":
+            from ingestion.scraping.mubi_cnc.bounded import run_phase
+
+            run_phase(config, phase=args.phase, page_limit=args.page_limit,
+                      job_timeout_seconds=args.job_timeout_seconds)
+            return 0
         counts = source.sync_to_postgres(config)
         print(
             f"Inserted {counts.get('film_awards', 0)} film award records "

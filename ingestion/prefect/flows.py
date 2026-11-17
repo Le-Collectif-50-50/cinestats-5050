@@ -5,6 +5,8 @@ import re
 import socket
 import shlex
 import subprocess
+import signal
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -511,7 +513,8 @@ async def _reconcile_allocine_requests(settings: IngestionRequestSettings) -> No
                                          error_message=f"Prefect {run.state.name}: {run.state.message or ''}")
 
 
-def _run(command: list[str], step_name: str, cwd: Path | None = None) -> None:
+def _run(command: list[str], step_name: str, cwd: Path | None = None,
+         timeout_seconds: float | None = None) -> None:
     logger = get_run_logger()
     pretty_command = " ".join(shlex.quote(part) for part in command)
     logger.info("Starting step '%s' with command: %s", step_name, pretty_command)
@@ -523,13 +526,43 @@ def _run(command: list[str], step_name: str, cwd: Path | None = None) -> None:
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        start_new_session=timeout_seconds is not None,
     )
+    expired = threading.Event()
 
-    if process.stdout is not None:
-        for line in process.stdout:
-            logger.info("[%s] %s", step_name, line.rstrip())
+    def stop_process_group():
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+            except ProcessLookupError:
+                pass
 
-    return_code = process.wait()
+    def expire():
+        expired.set()
+        stop_process_group()
+
+    timer = threading.Timer(timeout_seconds, expire) if timeout_seconds is not None else None
+    if timer:
+        timer.daemon = True
+        timer.start()
+    try:
+        if process.stdout is not None:
+            for line in process.stdout:
+                logger.info("[%s] %s", step_name, line.rstrip())
+        return_code = process.wait()
+    except BaseException:
+        if timeout_seconds is not None:
+            stop_process_group()
+        raise
+    finally:
+        if timer:
+            timer.cancel()
+    if expired.is_set():
+        raise subprocess.TimeoutExpired(command, timeout_seconds)
     if return_code != 0:
         raise subprocess.CalledProcessError(return_code, command)
 
@@ -849,30 +882,106 @@ def run_missing_id_matching(
     _run(command, step_name="Rechercher les identifiants MUBI et TMDB", cwd=REPO_ROOT)
 
 
-def _run_mubi_cnc_scraping_step(
-    config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: int = 10,
-    visa_number: str | None = None, force_rescrape: bool = False,
-) -> None:
+def _mubi_pending(config_path: str, visa_number: str | None = None) -> dict:
+    from ingestion.scraping.mubi_cnc.main import _load_json
+    from ingestion.scraping.mubi_cnc.bounded import pending_work
+
+    config = _load_json(config_path)
+    config.update(visa_number=visa_number, force_rescrape=False)
+    return pending_work(config)
+
+
+def _run_mubi_phase(config_path, phase, *, max_films=10, page_limit=25,
+                    visa_number=None, force_rescrape=False, job_timeout_seconds=900):
     _validate_film_limit(max_films)
     _validate_allocine_target(visa_number, force_rescrape)
-    command = ["python3", "-u", str(MUBI_CNC_MAIN_PATH), "sync", "--config", config_path]
+    if isinstance(page_limit, bool) or not isinstance(page_limit, int) or page_limit < 1:
+        raise ValueError("page_limit doit être un entier strictement positif")
+    if isinstance(job_timeout_seconds, bool) or not isinstance(job_timeout_seconds, int) or not 1 <= job_timeout_seconds <= 900:
+        raise ValueError("Budget de collecte entre 1 et 900 secondes requis")
+    command = ["python3", "-u", str(MUBI_CNC_MAIN_PATH), "sync", "--config", config_path,
+               "--phase", phase, "--page-limit", str(page_limit),
+               "--job-timeout-seconds", str(job_timeout_seconds), "--limit", str(max_films)]
     if visa_number is not None:
         command.extend(["--visa", visa_number])
     if force_rescrape:
         command.append("--force")
-    command.extend(["--limit", str(1 if visa_number is not None else max_films)])
-    _run(command, step_name="Recuperer les donnees Mubi (CNC)", cwd=REPO_ROOT)
+    _run(command, step_name=f"Mubi CNC {phase}", cwd=REPO_ROOT,
+         timeout_seconds=job_timeout_seconds + 60)
+
+
+@flow(name="Collecter les palmares Mubi par lot", flow_run_name="mubi-palmares-lot-{batch_number}")
+def run_mubi_awards_batch(config_path: str, max_films: FilmLimit = 10,
+                          visa_number: str | None = None, force_rescrape: bool = False,
+                          job_timeout_seconds: int = 900, batch_number: int = 1):
+    _run_mubi_phase(config_path, "awards", max_films=max_films, visa_number=visa_number,
+                    force_rescrape=force_rescrape, job_timeout_seconds=job_timeout_seconds)
+
+
+@flow(name="Collecter les editions Mubi par lot", flow_run_name="mubi-festivals-lot-{batch_number}")
+def run_mubi_festival_batch(config_path: str, page_limit: FilmLimit = 25,
+                            visa_number: str | None = None, job_timeout_seconds: int = 900,
+                            batch_number: int = 1):
+    _run_mubi_phase(config_path, "festivals", page_limit=page_limit, visa_number=visa_number,
+                    job_timeout_seconds=job_timeout_seconds)
+
+
+def _run_mubi_cnc_scraping_step(
+    config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: int = 10,
+    visa_number: str | None = None, force_rescrape: bool = False,
+    batch_size: int = 10, festival_page_limit: int = 25, job_timeout_seconds: int = 900,
+) -> None:
+    _validate_film_limit(max_films)
+    _validate_film_limit(batch_size)
+    _validate_film_limit(festival_page_limit)
+    if isinstance(job_timeout_seconds, bool) or not isinstance(job_timeout_seconds, int) or not 1 <= job_timeout_seconds <= 900:
+        raise ValueError("Budget de collecte entre 1 et 900 secondes requis")
+    _validate_allocine_target(visa_number, force_rescrape)
+    logger = get_run_logger()
+    done, batch = 0, 0
+    while done < (1 if visa_number else max_films):
+        before = _mubi_pending(config_path, visa_number)
+        if not before["film_ids"] and not (force_rescrape and batch == 0):
+            break
+        count = min(batch_size, max_films - done, max(1, len(before["film_ids"])))
+        batch += 1
+        run_mubi_awards_batch(config_path=config_path, max_films=count,
+                             visa_number=visa_number, force_rescrape=force_rescrape,
+                             job_timeout_seconds=job_timeout_seconds, batch_number=batch)
+        after = _mubi_pending(config_path, visa_number)
+        progress = len(set(before["film_ids"]) - set(after["film_ids"]))
+        if force_rescrape and batch == 1:
+            progress = max(progress, 1)
+        if not progress:
+            raise RuntimeError("Lot palmarès sans progression ; checkpoints conservés")
+        done += progress
+        logger.info("Palmarès : %s films terminés dans ce parcours ; %s encore éligibles", done, len(after["film_ids"]))
+    batch = 0
+    while True:
+        before = _mubi_pending(config_path, visa_number)
+        if not before["festival_pages"]:
+            break
+        batch += 1
+        run_mubi_festival_batch(config_path=config_path, page_limit=festival_page_limit,
+                               visa_number=visa_number, job_timeout_seconds=job_timeout_seconds,
+                               batch_number=batch)
+        after = _mubi_pending(config_path, visa_number)
+        logger.info("Éditions : %s pages candidates restantes", after["festival_pages"])
+        if after["festival_pages"] >= before["festival_pages"]:
+            raise RuntimeError("Lot éditions sans progression ; checkpoints conservés")
 
 
 @flow(
     name="Recuperer les donnees Mubi (CNC)",
-    description="Airbyte, scraping Mubi CNC (palmarès et éditions), puis publication dbt.",
+    description="Airbyte, lots bornés de palmarès puis d'éditions Mubi, et publication dbt.",
 )
 def run_mubi_cnc_scraping(
     config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: FilmLimit = 10,
     request_id: str | None = None,
     visa_number: str | None = None, force_rescrape: bool = False,
     airbyte_connection_names: list[str] | None = None,
+    batch_size: FilmLimit = 10, festival_page_limit: FilmLimit = 25,
+    job_timeout_seconds: Annotated[int, Field(gt=0, le=900, strict=True)] = 900,
 ) -> None:
     request_uuid = UUID(request_id) if request_id is not None else None
     settings = IngestionRequestSettings.from_env() if request_uuid is not None else None
@@ -881,9 +990,15 @@ def run_mubi_cnc_scraping(
     try:
         _validate_allocine_target(visa_number, force_rescrape)
         _validate_film_limit(max_films)
+        _validate_film_limit(batch_size)
+        _validate_film_limit(festival_page_limit)
+        if isinstance(job_timeout_seconds, bool) or not isinstance(job_timeout_seconds, int) or not 1 <= job_timeout_seconds <= 900:
+            raise ValueError("Budget de collecte entre 1 et 900 secondes requis")
         _run_airbyte_sync_step(enabled=True, connection_names=airbyte_connection_names)
         _run_mubi_cnc_scraping_step(config_path=config_path, max_films=max_films,
-                                    visa_number=visa_number, force_rescrape=force_rescrape)
+                                    visa_number=visa_number, force_rescrape=force_rescrape,
+                                    batch_size=batch_size, festival_page_limit=festival_page_limit,
+                                    job_timeout_seconds=job_timeout_seconds)
         _run_dbt_phase_2_step()
     except Exception as exc:
         if settings is not None:

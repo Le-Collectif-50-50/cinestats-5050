@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-16
+**Dernière révision:** 2026-11-17
 
 **Status:** actif
 
@@ -12,6 +12,7 @@
 
 | #   | Date       | Auteur        | Observations                          |
 | --- | ---------- | ------------- | ------------------------------------- |
+| 5 | 2026-11-17 | Joel Teixeira | Lots palmarès/éditions bornés en volume et durée, reprise persistante et publication après drainage. |
 | 1   | 2026-06-25 | Joel Teixeira | Flux Mubi restreint aux films du CNC  |
 | 2   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement |
 | 4 | 2026-11-16 | Joel Teixeira | Reprise persistante des éditions, performances navigateur, ciblage et parcours Airbyte/Mubi/dbt depuis Metabase (#83). |
@@ -90,10 +91,15 @@ docker compose -f ingestion/docker-compose.yml exec prefect-worker \
   python3 /app/ingestion/scraping/mubi_cnc/main.py check \
   --config /app/ingestion/scraping/mubi_cnc/config.json
 
-# Sync complet (Phase A puis Phase B)
+# Un lot de dix films, sans collecte de festivals
 docker compose -f ingestion/docker-compose.yml exec prefect-worker \
   python3 -u /app/ingestion/scraping/mubi_cnc/main.py sync \
-  --config /app/ingestion/scraping/mubi_cnc/config.json
+  --config /app/ingestion/scraping/mubi_cnc/config.json --phase awards --limit 10
+
+# Un lot de 25 pages candidates de festivals
+docker compose -f ingestion/docker-compose.yml exec prefect-worker \
+  python3 -u /app/ingestion/scraping/mubi_cnc/main.py sync \
+  --config /app/ingestion/scraping/mubi_cnc/config.json --phase festivals --page-limit 25
 ```
 
 Pour un test limité, utiliser `config-debug.json` (`scrape_limit` réduit, `verbose: true`).
@@ -109,20 +115,38 @@ Pour un test limité, utiliser `config-debug.json` (`scrape_limit` réduit, `ver
 
 `Recuperer les donnees Mubi (CNC)/lancer-scrapping-mubi` reste manuel, sans
 calendrier ni lancement au démarrage. Il synchronise désormais Airbyte, exécute
-la collecte CNC, puis `dbt build --select +tag:phase2`. Cela publie les modèles
+des lots séquentiels CNC, puis `dbt build --select +tag:phase2`. Cela publie les modèles
 Mubi staging/intermediate et le suivi `ops`, sans créer de nouvelles tables
 finales métier. Le CLI `sync` seul ne lance ni Airbyte ni dbt.
 
 `max_films=10` borne les nouveaux ID Mubi de phase A. Un ID partagé valide est
-collecté une seule fois. La phase B consulte les éditions associées et peut
-produire davantage de lignes ; la limite ne borne pas la durée totale.
+collecté une seule fois. `batch_size=10` répartit ce volume dans des sous-flows
+**Collecter les palmarès Mubi par lot**. Les éditions sont ensuite drainées par
+des sous-flows **Collecter les éditions Mubi par lot**, avec
+`festival_page_limit=25` pages candidates au maximum. Ces sous-flows sont des
+runs Prefect séparés, enfants du parcours principal ; aucun déploiement ni
+calendrier supplémentaire n'est créé.
+
+Chaque lot dispose de `job_timeout_seconds=900` secondes de collecte au maximum.
+Un garde-fou termine son groupe de processus après 60 secondes supplémentaires
+de nettoyage, puis force l'arrêt après cinq secondes si nécessaire. Les requêtes
+PostgreSQL des lots sont limitées à 30 secondes et l'attente des verrous à dix
+secondes. Un verrou consultatif PostgreSQL empêche deux lots bornés Mubi de
+collecter simultanément. Le nombre total de pages n'est pas prédit : une page
+vide supprime les suivantes de la file.
+
+La fin du budget de collecte conserve les checkpoints et permet un prochain lot.
+Le parcours contrôle que la file diminue ; une absence de progression, une erreur
+ou un blocage arrête le parcours avant dbt. Le parent peut durer plusieurs heures
+si de nombreuses éditions restent à traiter, mais chaque sous-job est borné.
+dbt ne démarre qu'après les lots de films demandés et le drainage des éditions.
 `visa_number` cible explicitement un visa et ramène la limite à un ID.
 `force_rescrape=true` exige ce visa ; il rejoue son palmarès sans supprimer
 l’historique. Les pages de festivals déjà complétées restent ignorées.
 
 ```bash
 python3 ingestion/scraping/mubi_cnc/main.py sync \
-  --config ingestion/scraping/mubi_cnc/config.json --visa 134877 --force --limit 1
+  --config ingestion/scraping/mubi_cnc/config.json --phase awards --visa 134877 --force --limit 1
 ```
 
 Le visa absent, une correspondance ambiguë ou un ID manquant/invalide font échouer
@@ -132,6 +156,17 @@ Un film sans palmarès n’est confirmé `no_awards` que si l’ID de la page co
 à l’entrée et que le tableau structuré `awards` est présent et vide.
 
 ## Reprise et performances
+
+Le CLI `--phase awards` traite uniquement les films ; `--phase festivals` reprend
+les éditions référencées par les derniers succès déjà enregistrés. Répéter la
+même commande reprend les films/pages non terminés. `--job-timeout-seconds`
+accepte un entier de 1 à 900. Le chemin historique sans `--phase` (`all`) reste
+disponible pour compatibilité ; utiliser les phases explicites ou Prefect pour
+bénéficier des lots bornés.
+
+Le parcours Prefect attend la fin d'un lot avant le suivant, sans créneaux fixes.
+Après interruption du parent, relancer le même déploiement : les succès déjà
+persistés et les bornes de pages vides évitent de recommencer la collecte.
 
 Chaque film et chaque page sont enregistrés avant le suivant. Les colonnes
 additives `event_slug` et `event_type` de `raw.mubi_film_awards` conservent les
