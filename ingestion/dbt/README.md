@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-16
+**Dernière révision:** 2026-11-18
 
 **Status:** actif
 
@@ -31,6 +31,7 @@
 | 14 | 2026-11-15 | Joel Teixeira | Contrat DEVIS en euros exacts, conversion NUMERIC et procédure de bascule coordonnée source/dbt (#43). |
 
 | 15 | 2026-11-16 | Joel Teixeira | Vue ops de couverture Mubi et dashboard de suivi CNC (#83). |
+| 16 | 2026-11-18 | Joel Teixeira | Préservation des associations et libellés de genres manuels dans la colonne agrégée (#86), priorité des noms corrigés et prise en charge des personnes manuelles dans full_name (#90). |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -191,36 +192,47 @@ et repli CNC. Comme les autres tests SQL de ce module, il nécessite
 
 ## Classification des genres
 
-Le `CASE` de `int_film_genres` classe `Judiciaire` dans `Aventure/Policier/Thriller` et accepte `Epouvante-horreur` avec ou sans accent initial pour `Fantastique/Horreur/SF`. `Péplum` rejoint `Biopic/Guerre/Histoire`. `Divers`, `Erotique` et `Évènement Sportif` conservent chacun une catégorie explicite. Ce mapping couvre les 29 genres distincts observés dans `staging.stg_allocine_films` le 11 novembre 2026. Les nouveaux genres sans correspondance restent nuls et font échouer les tests de présence des tables finales : ajouter leur classement explicitement, sans catégorie de repli « Autre ».
+Le `CASE` de `int_film_genres` classe `Judiciaire` dans `Aventure/Policier/Thriller` et accepte `Epouvante-horreur` avec ou sans accent initial pour `Fantastique/Horreur/SF`. `Péplum` rejoint `Biopic/Guerre/Histoire`. `Divers`, `Erotique` et `Évènement Sportif` conservent chacun une catégorie explicite. Les nouveaux genres sans correspondance restent nuls et font échouer les tests du référentiel final : ajouter leur classement explicitement, sans catégorie de repli « Autre ».
 
-### Associations film-genre manuelles (#57)
+### Corrections manuelles et colonne agrégée (#57, #86)
 
 `fnl_film_genre` réunit `int_film_genres` et `int_fix_film_genres` avec une
 association unique par `(film_id, genre_id)`. Une correction ajoute un genre,
-y compris si le scraping n’en fournit aucun. Elle ne remplace ni ne supprime
-les autres genres du film. Un doublon présent dans les deux sources reste une
-seule association finale.
+y compris sans scraping, sans remplacer les associations existantes.
+`fnl_genre` applique les libellés corrigés de `int_fix_genres` et conserve les
+genres définis uniquement à la main.
 
-Dans l’onglet GSheet `film_genres`, renseigner `FILM ID`, `GENRE ID`,
+`fnl_films.genre` agrège ces associations et leurs libellés corrigés, triés et
+dédupliqués, avec le séparateur `, `. L'agrégation précède la jointure aux films :
+plusieurs genres ne multiplient pas les lignes de `fnl_films`. Un film sans
+genre conserve une valeur nulle. Les tables d'associations et de référence
+restent disponibles pour compatibilité et pour contrôler les corrections.
+
+Dans l'onglet GSheet `film_genres`, renseigner `FILM ID`, `GENRE ID`,
 `UPDATED DATE` et `UPDATED BY`. Utiliser les UUID existants de `fnl_films`
 et `fnl_genre`, puis synchroniser Airbyte et exécuter la phase 2 dbt. Aucun
-nouveau scraping n’est nécessaire. Les règles d’admission du staging restent
-inchangées, notamment son exclusion actuelle des lignes signées Hugo Laurens.
-Les tests bloquants vérifient les deux références, l’unicité des associations
-et la conservation des corrections admises. Une référence invalide n’est pas
-filtrée silencieusement ; le test signale l’erreur.
+nouveau scraping n'est nécessaire. Les règles d'admission du staging restent
+inchangées, notamment son exclusion des lignes signées Hugo Laurens.
+Les tests bloquants vérifient les références, l'unicité des associations et
+la conservation des corrections admises. Une référence invalide déclenche
+une erreur ; elle n'est pas validée par sa seule absence de la colonne agrégée.
 
-Le test PostgreSQL
-`test_manual_film_genres_added_without_replacing_scraped_associations` couvre
-l’ajout sans scraping, l’ajout d’un second genre, les doublons, l’absence de
-correction et les sources vides. Il utilise les mêmes prérequis read-only que
-les autres tests de `tests/ingestion/test_dbt_manual_recovery.py`.
+Le module `tests/ingestion/test_dbt_manual_recovery.py` vérifie l'ajout sans
+scraping, les doublons, les libellés corrigés, les genres uniquement manuels et
+la conservation d'une ligne par film. Il utilise PostgreSQL en transaction
+read-only avec `DBT_TEST_SSH` et `DBT_TEST_DATABASE`.
 
-Après déploiement, reconstruire le modèle et ses dépendances avec
-`dbt build --profile ric --project-dir /app/ingestion/dbt --select +fnl_film_genre`.
-Le build de phase 2 habituel inclut aussi cette sélection. Pour revenir en
-arrière, restaurer le SQL précédent puis reconstruire le modèle : les ajouts
-manuels resteront dans la source, mais ne seront plus publiés.
+Après déploiement, reconstruire les modèles avec le build de phase 2 habituel,
+ou `dbt build --profile ric --project-dir /app/ingestion/dbt --select +fnl_films`.
+Dans les questions Metabase de budgets moyens, supprimer les jointures vers
+`fnl_film_genre` et `fnl_genre`, puis filtrer directement `fnl_films.genre`
+avec « contient ». Changer uniquement le filtre ne supprime pas les occurrences
+créées par une jointure encore présente. Pour plusieurs genres, conserver la
+logique OU/ET métier attendue. Comparer les résultats sans genre, avec un genre
+et avec plusieurs genres au même grain, aux mêmes périodes et populations.
+Ne pas employer `AVG(DISTINCT budget)` : deux films peuvent partager un budget.
+La publication et la vérification Metabase constituent une étape distincte du
+correctif dbt ; elles ne sont pas effectuées par le build.
 
 ## Correctif temporaire des noms (#41)
 
@@ -243,6 +255,34 @@ en arrière, rétablir le SQL précédent puis reconstruire les mêmes modèles.
 Le test SQL `test_last_name_preserves_remaining_words_in_all_credit_categories`
 couvre les sept catégories, les particules, espaces, mononymes et la stabilité
 des identifiants avec les prérequis PostgreSQL décrits ci-dessous.
+
+## Noms complets finaux (#90)
+
+`fnl_credit_holders.full_name` privilégie les corrections de `first_name` et
+`last_name` non vides du GSheet. Une correction partielle conserve l'autre
+composante source. Les personnes ajoutées uniquement à la main utilisent leurs
+composantes disponibles, sans espaces de bord ni séparateur superflu.
+
+Sans correction de nom, le nom complet source est conservé, même si les champs
+séparés sont incomplets. Une correction de genre ou de date de naissance ne
+recompose donc pas le nom. Un nom complet source absent ou vide se replie sur
+les composantes source disponibles. Sans aucune composante, le résultat est nul.
+Les sociétés conservent `legal_name` ; leur `full_name` reste nul.
+Les identifiants et les associations de crédits ne sont pas recalculés.
+
+Les champs historiques `first_name` et `last_name` restent exposés. Aucun champ
+GSheet supplémentaire n'est requis. Cette priorité permet la compatibilité avec
+les corrections existantes ; elle ne constitue pas une migration du backend
+historique `ric_*` vers les modèles dbt.
+
+Le test `test_full_name_preserves_corrections_and_manual_people` couvre les
+corrections complètes et partielles, les personnes uniquement manuelles, les
+mononymes, particules, accents, apostrophes, traits d'union, espaces insécables,
+valeurs vides, corrections sans nom et sociétés. Après déploiement, reconstruire
+`fnl_credit_holders` via le build de phase 2 ou `dbt build --select +fnl_credit_holders`.
+Aucun scraping supplémentaire n'est nécessaire. Pour revenir au comportement
+précédent, restaurer le SQL puis reconstruire ce modèle ; les sources restent
+inchangées.
 
 ## Qualité des identifiants
 
