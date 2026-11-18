@@ -140,26 +140,6 @@ models:
       - name: airbyte_meta
         description: "Métadonnées techniques issues d’Airbyte."
 
-  - name: stg_fix_film_genres
-    description: "Table de staging issue du gsheet Cinéstats 50/50, permettant d'apporter des corrections aux associations entre films et genres (fnl_film_genres)."
-    columns:
-      - name: film_id
-        description: "Identifiant du film."
-      - name: genre_id
-        description: "Identifiant du genre cinématographique."
-      - name: updated_date
-        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
-      - name: updated_by
-        description: "Utilisateur ayant modifié la donnée."
-      - name: airbyte_raw_id
-        description: "Identifiant technique Airbyte."
-      - name: airbyte_generation_id
-        description: "Version de génération Airbyte."
-      - name: airbyte_extraction_date
-        description: "Date d’extraction de la donnée."
-      - name: airbyte_meta
-        description: "Métadonnées techniques Airbyte."
-
   - name: stg_fix_award_nomination
     description: "Table de staging issue du gsheet Cinéstats 50/50, permettant de corriger les nominations et récompenses des films (fnl_award_nominations)."
     columns:
@@ -239,28 +219,6 @@ models:
         description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
       - name: updated_by
         description: "Utilisateur ayant effectué la modification."
-      - name: airbyte_raw_id
-        description: "Identifiant technique Airbyte."
-      - name: airbyte_generation_id
-        description: "Version de génération Airbyte."
-      - name: airbyte_extraction_date
-        description: "Date d’extraction Airbyte."
-      - name: airbyte_meta
-        description: "Métadonnées techniques Airbyte."
-
-  - name: stg_fix_genres
-    description: "Table de staging issue du gsheet Cinéstats 50/50, permettant de corriger et standardiser les genres cinématographiques (fnl_genres)."
-    columns:
-      - name: id
-        description: "Identifiant unique du genre."
-        tests: 
-          - not_null
-      - name: name
-        description: "Nom du genre cinématographique."
-      - name: updated_date
-        description: "Date et heure locales de mise à jour (timestamp sans fuseau) ; les dates seules valent minuit."
-      - name: updated_by
-        description: "Utilisateur ayant modifié la donnée."
       - name: airbyte_raw_id
         description: "Identifiant technique Airbyte."
       - name: airbyte_generation_id

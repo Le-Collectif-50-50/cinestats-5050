@@ -37,6 +37,8 @@ models:
         description: "Budget du film en euros."
       - name: budget_category
         description: "Tranche de budget du film (ex: petit, moyen, grand budget)."
+      - name: genre
+        description: "Genres du film issus de int_film_genres, concaténés avec une virgule et dédupliqués."
       - name: genre_category
         description: "Genre cinématographique du film."
       - name: broadcasters
@@ -138,39 +140,6 @@ models:
               arguments:
                 to: ref('fnl_credit_holders')
                 field: credit_holder_id
-
-  - name: fnl_film_genre
-    description: "Table finale associant chaque film à ses genres cinématographiques, incluant les ajouts manuels sans remplacer les associations scrapées."
-    columns:
-      - name: film_id
-        description: "Identifiant du film concerné."
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('fnl_films')
-                field: film_id
-      - name: genre_id
-        description: "Identifiant du genre cinématographique associé au film."
-        tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('fnl_genre')
-                field: genre_id
-
-  - name: fnl_genre
-    description: "Table finale référençant les genres cinématographiques, après application des corrections manuelles du gsheet."
-    columns:
-      - name: genre_id
-        description: "Identifiant unique du genre cinématographique."
-        tests:
-          - not_null
-          - unique
-      - name: genre_name
-        description: "Nom du genre cinématographique, corrigé si applicable."
-        tests:
-          - not_null
 
   - name: fnl_role
     description: >
