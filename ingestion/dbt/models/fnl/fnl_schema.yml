@@ -37,6 +37,8 @@ models:
         description: "Budget du film en euros."
       - name: budget_category
         description: "Tranche de budget du film (ex: petit, moyen, grand budget)."
+      - name: genre
+        description: "Genres du film issus de int_film_genres, concaténés avec une virgule et dédupliqués."
       - name: genre_category
         description: "Genre cinématographique du film."
       - name: broadcasters
