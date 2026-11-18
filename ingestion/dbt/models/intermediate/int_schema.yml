@@ -240,29 +240,6 @@ models:
         tests:
           - not_null
 
-  - name: int_fix_film_genres
-    description: "Table intermédiaire issue de stg_fix_film_genres. Expose les corrections manuelles sur les associations film-genre, sans les métadonnées techniques. En cas de corrections multiples sur une même association (film_id, genre_id), seule la plus récente (order by updated_date DESC) est conservée."
-    columns:
-      - name: film_id
-        description: "Identifiant du film."
-        tests:
-          - not_null
-      - name: genre_id
-        description: "Identifiant du genre cinématographique."
-        tests:
-          - not_null
-
-  - name: int_fix_genres
-    description: "Table intermédiaire issue de stg_fix_genres. Expose les corrections manuelles sur le référentiel des genres, sans les métadonnées techniques. En cas de corrections multiples sur un même id, seule la plus récente (order by updated_date DESC) est conservée."
-    columns:
-      - name: id
-        description: "Identifiant unique du genre."
-        tests:
-          - not_null
-          - unique
-      - name: name
-        description: "Nom du genre cinématographique."
-
   - name: int_fix_roles
     description: "Table intermédiaire issue de stg_fix_roles. Expose les corrections manuelles sur les rôles, sans les métadonnées techniques. En cas de corrections multiples sur un même id, seule la plus récente (order by updated_date DESC) est conservée."
     columns:
