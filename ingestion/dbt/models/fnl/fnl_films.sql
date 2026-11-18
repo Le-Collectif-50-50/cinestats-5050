@@ -5,18 +5,27 @@ WITH film_genres AS (
     FROM {{ ref('int_film_genres') }}
     GROUP BY film_id
 ),
-french_financed AS (
+
+max_allocation AS (
     SELECT
         film_id,
         country_name,
         budget_allocation,
+        MAX(budget_allocation) OVER (PARTITION BY film_id) AS max_budget_allocation
+    FROM {{ ref('fnl_film_country_budget_allocation') }}
+),
+
+french_financed AS (
+    SELECT
+        film_id,
         CASE
-            WHEN country_name = 'France' AND budget_allocation >= 50 THEN TRUE
+            WHEN budget_allocation = max_budget_allocation THEN TRUE
             ELSE FALSE
         END AS is_french_financed
-    FROM {{ ref('int_film_country_budget_allocation') }}
+    FROM max_allocation
     WHERE country_name = 'France'
 )
+
 SELECT
     films.film_id,
     films.cnc_visa,

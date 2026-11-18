@@ -44,7 +44,7 @@ models:
       - name: broadcasters
         description: "Chaîne texte des diffuseurs TV associés au film, séparés par une virgule."
       - name: is_french_financed
-        description: "Vrai si la France finance au moins 50% du budget du film."
+        description: "Vrai si la part de financement de la France est égale à la part la plus élevée parmi les pays contributeurs, y compris à égalité."
       - name: has_parity_bonus
         description: "Vrai si le film a bénéficié du bonus parité CNC, récompensant les productions respectant l'égalité femmes-hommes."
       - name: has_eof
