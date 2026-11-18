@@ -2,6 +2,7 @@ SELECT
     DISTINCT
     COALESCE(casting.credit_holder_id, fix.id) AS credit_holder_id,
     COALESCE(fix.type, casting.type) AS type,
+    casting.full_name,
     COALESCE(fix.first_name, casting.first_name) AS first_name,
     COALESCE(fix.last_name, casting.last_name) AS last_name,
     COALESCE(fix.legal_name, casting.legal_name) AS legal_name,
