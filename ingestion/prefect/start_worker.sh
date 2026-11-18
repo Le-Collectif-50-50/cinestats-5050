@@ -75,7 +75,7 @@ prefect --no-prompt deploy "${FLOWS_FILE}:run_allocine_scraping" \
 
 prefect --no-prompt deploy "${FLOWS_FILE}:run_mubi_cnc_scraping" \
 	--name "lancer-scrapping-mubi" \
-	--description "Mubi CNC manuel : Airbyte, palmares et editions associees, puis dbt. max_films=10, ciblage par visa disponible." \
+	--description "Mubi CNC manuel : Airbyte, lots palmares/editions bornes a 15 minutes, puis dbt. max_films=10, batch_size=10, festival_page_limit=25." \
 	--concurrency-limit 1 \
 	--pool "${POOL_NAME}" >/tmp/prefect-deploy-mubi.log 2>&1 || {
 	cat /tmp/prefect-deploy-mubi.log
