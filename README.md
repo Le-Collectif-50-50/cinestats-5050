@@ -1,7 +1,7 @@
 # Révéler les Inégalités dans le Cinéma (RIC)
 
 **Resonsable** Nicolas Revel (front/back/devops), Joel Teixeira (data)
-**Dernière révision:** 2026-10-10
+**Dernière révision:** 2026-11-18
 **Status:** active
 
 Projet Data For Good et Collectif 50/50 : informer le grand public et les institutions sur les inégalités de genre dans le cinéma français.
@@ -41,6 +41,7 @@ L'ingestion et le ML ont leurs propres prérequis et commandes.
 
 Agents : [consignes communes](AGENTS.md), importées par [CLAUDE.md](CLAUDE.md).
 Documentation : suivre le [standard documentaire](docs/repo-documentation-guidelines.md).
+Suivi GitHub : [statuts automatiques des issues liées aux PR](docs/runbooks/github-statuts-issues.md).
 
 Pour le code Python, depuis la racine :
 
@@ -69,3 +70,4 @@ Les PR ciblent `main`. Pour déployer, suivre le [runbook de promotion](docs/run
 | 1 | 2026-05-07 | Joel Teixeira | Révision post implementation module ingestion |
 | 2 | 2026-10-09 | Joel Teixeira | Ajout du guide de promotion preview vers production |
 | 3 | 2026-10-10 | Joel Teixeira | Vue d'ensemble condensée, parcours local et liens ciblés vers les guides de travail et d'exploitation. |
+| 4 | 2026-11-18 | Joel Teixeira | Référence du suivi automatique des statuts des issues GitHub. |
