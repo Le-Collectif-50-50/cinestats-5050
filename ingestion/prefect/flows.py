@@ -55,6 +55,7 @@ DEFAULT_AIRBYTE_SYNC_POLL_SECONDS = int(
 REQUEST_TABLE_NAME = "ops.ingestion_run_requests"
 DEFAULT_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-complete"
 ALLOCINE_DEPLOYMENT_NAME = "Recuperer les donnees Allocine/lancer-scrapping-allocine"
+MUBI_CNC_DEPLOYMENT_NAME = "Recuperer les donnees Mubi (CNC)/lancer-scrapping-mubi"
 LEGACY_MAIN_DEPLOYMENT_NAME = "Lancer l'ingestion complete/lancer-ingestion-donnees"
 FilmLimit = Annotated[int, Field(gt=0, strict=True)]
 DEFAULT_REQUEST_FLOW_RUN_NAME_PREFIX = "metabase-ingestion"
@@ -127,6 +128,26 @@ END $$;
 
 ALTER TABLE ops.ingestion_run_requests
   DROP COLUMN IF EXISTS requested_extraction_date;
+
+-- Mubi partage la file et le verrou global avec ingestion et Allociné.
+ALTER TABLE ops.ingestion_run_requests DROP CONSTRAINT IF EXISTS ingestion_run_requests_request_type_check;
+ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT ingestion_run_requests_request_type_check
+  CHECK (request_type IN ('ingestion', 'allocine', 'mubi'));
+ALTER TABLE ops.ingestion_run_requests DROP CONSTRAINT IF EXISTS allocine_target_parameters;
+ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT allocine_target_parameters
+  CHECK ((visa_number IS NULL AND NOT force_rescrape) OR (
+    request_type IN ('allocine', 'mubi') AND visa_number IS NOT NULL
+    AND visa_number ~ '^[0-9]+$' AND visa_number ~ '[1-9]' AND max_films = 1));
+ALTER TABLE ops.ingestion_run_requests DROP CONSTRAINT IF EXISTS mubi_request_parameters;
+ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT mubi_request_parameters
+  CHECK (request_type <> 'mubi' OR (
+    max_films IS NOT NULL AND max_films > 0
+    AND length(btrim(requested_by_metabase_user)) > 0
+    AND request_reason IS NOT NULL AND length(btrim(request_reason)) > 0));
+-- Échoue sans modifier les données si plusieurs demandes sont déjà actives.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ingestion_run_requests_global_active
+  ON ops.ingestion_run_requests ((true)) WHERE request_status IN ('pending', 'processing');
+
 """
 
 
@@ -423,10 +444,10 @@ async def _trigger_ingestion_request_run(
 ) -> str:
     request_id = request_row["request_id"]
     request_type = request_row.get("request_type", "ingestion")
-    if request_type == "allocine":
+    if request_type in {"allocine", "mubi"}:
         max_films = request_row.get("max_films")
         _validate_film_limit(max_films)
-        deployment_name = ALLOCINE_DEPLOYMENT_NAME
+        deployment_name = ALLOCINE_DEPLOYMENT_NAME if request_type == "allocine" else MUBI_CNC_DEPLOYMENT_NAME
         parameters = {"request_id": str(request_id), "max_films": max_films}
         visa_number = request_row.get("visa_number")
         force_rescrape = request_row.get("force_rescrape", False)
@@ -436,6 +457,8 @@ async def _trigger_ingestion_request_run(
                 raise ValueError("Une demande par visa doit avoir max_films=1")
             parameters.update(visa_number=visa_number, force_rescrape=force_rescrape,
                               airbyte_connection_names=settings.airbyte_connection_names)
+        if request_type == "mubi":
+            parameters["airbyte_connection_names"] = settings.airbyte_connection_names
     elif request_type == "ingestion":
         deployment_name = settings.main_deployment_name
         parameters = _build_request_parameters(settings, request_id=request_id)
@@ -455,7 +478,7 @@ async def _trigger_ingestion_request_run(
         flow_run = await client.create_flow_run_from_deployment(
             deployment.id,
             parameters=parameters,
-            name=f"metabase-allocine-{request_id}" if request_type == "allocine"
+            name=f"metabase-{request_type}-{request_id}" if request_type in {"allocine", "mubi"}
                  else f"{settings.flow_run_name_prefix}-{request_id}",
             idempotency_key=str(request_id),
             labels=labels,
@@ -468,7 +491,7 @@ async def _reconcile_allocine_requests(settings: IngestionRequestSettings) -> No
     with _connect_request_db(settings) as connection:
         rows = connection.execute(f"""
             SELECT request_id, triggered_flow_run_id FROM {REQUEST_TABLE_NAME}
-            WHERE request_type = 'allocine' AND request_status = 'processing'
+            WHERE request_type IN ('allocine', 'mubi') AND request_status = 'processing'
               AND triggered_flow_run_id IS NOT NULL
         """).fetchall()
     if not rows:
@@ -761,32 +784,48 @@ def run_mubi_scraping(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
     _run_mubi_scraping_step(config_path=config_path)
 
 
-def _run_mubi_cnc_scraping_step(config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: int = 10) -> None:
+def _run_mubi_cnc_scraping_step(
+    config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: int = 10,
+    visa_number: str | None = None, force_rescrape: bool = False,
+) -> None:
     _validate_film_limit(max_films)
-    logger = get_run_logger()
-    logger.info("Task parameters: config_path=%s, max_films=%s", config_path, max_films)
-    _run(
-        [
-            "python3",
-            "-u",
-            str(MUBI_CNC_MAIN_PATH),
-            "sync",
-            "--config",
-            config_path,
-            "--limit",
-            str(max_films),
-        ],
-        step_name="Recuperer les donnees Mubi (CNC)",
-        cwd=REPO_ROOT,
-    )
+    _validate_allocine_target(visa_number, force_rescrape)
+    command = ["python3", "-u", str(MUBI_CNC_MAIN_PATH), "sync", "--config", config_path]
+    if visa_number is not None:
+        command.extend(["--visa", visa_number])
+    if force_rescrape:
+        command.append("--force")
+    command.extend(["--limit", str(1 if visa_number is not None else max_films)])
+    _run(command, step_name="Recuperer les donnees Mubi (CNC)", cwd=REPO_ROOT)
 
 
 @flow(
     name="Recuperer les donnees Mubi (CNC)",
-    description="Lance le scraping Mubi restreint aux films du referentiel CNC (palmares puis editions de festivals concernees).",
+    description="Airbyte, scraping Mubi CNC (palmarès et éditions), puis publication dbt.",
 )
-def run_mubi_cnc_scraping(config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: FilmLimit = 10) -> None:
-    _run_mubi_cnc_scraping_step(config_path=config_path, max_films=max_films)
+def run_mubi_cnc_scraping(
+    config_path: str = str(MUBI_CNC_CONFIG_PATH), max_films: FilmLimit = 10,
+    request_id: str | None = None,
+    visa_number: str | None = None, force_rescrape: bool = False,
+    airbyte_connection_names: list[str] | None = None,
+) -> None:
+    request_uuid = UUID(request_id) if request_id is not None else None
+    settings = IngestionRequestSettings.from_env() if request_uuid is not None else None
+    if settings is not None:
+        _mark_request_processing(settings, request_id=request_uuid)
+    try:
+        _validate_allocine_target(visa_number, force_rescrape)
+        _validate_film_limit(max_films)
+        _run_airbyte_sync_step(enabled=True, connection_names=airbyte_connection_names)
+        _run_mubi_cnc_scraping_step(config_path=config_path, max_films=max_films,
+                                    visa_number=visa_number, force_rescrape=force_rescrape)
+        _run_dbt_phase_2_step()
+    except Exception as exc:
+        if settings is not None:
+            _mark_request_failed(settings, request_id=request_uuid, error_message=str(exc))
+        raise
+    if settings is not None:
+        _mark_request_success(settings, request_id=request_uuid)
 
 
 def _run_dbt_phase_2_step() -> None:

@@ -2,17 +2,18 @@
 
 ## Metadata du document
 
-**Responsable:** Joel Teixeira
+**Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-10-06
+**Dernière révision:** 2026-11-16
 
-**Statut:** actif
+**Status:** actif
 
 ### Historique du document
 
 | #   | Date       | Auteur        | Observations           |
 | --- | ---------- | ------------- | ---------------------- |
 | 1   | 2026-05-27 | Joel Teixeira | Initial implementation |
+| 3 | 2026-11-16 | Joel Teixeira | Clarification du crawler global différé et du flux CNC opérationnel (#83). |
 | 2   | 2026-10-06 | Joel Teixeira | Compte Postgres scraper dédié et SSL configuré par environnement |
 
 Job de scraping standalone pour la collecte des données de festivals et palmarès depuis Mubi.
@@ -174,28 +175,18 @@ docker compose -f ingestion/docker-compose.yml exec prefect-worker \
 
 Pour un test limité, ajuster temporairement `scrape_limit` dans `config.json` (ex. `2`) et passer `verbose: true` pour voir les logs détaillés par page.
 
-Via Prefect (après redémarrage du worker ou déploiement manuel) :
-
-```bash
-docker compose -f ingestion/docker-compose.yml exec prefect-worker \
-  prefect deployment run "Recuperer les donnees Mubi/lancer-scraping-mubi"
-```
+Pour un lancement opérationnel via Prefect, utiliser le
+[connecteur CNC](../mubi_cnc/README.md#déploiement-prefect), pas ce crawler global.
 
 ## Positionnement dans l'architecture
 
-Ce job est orchestré par Prefect, pas par Airbyte. Airbyte reste réservé aux sources Google Sheets vers `raw`.
+Le flux Mubi CNC est orchestré par Prefect, pas par Airbyte. Airbyte reste réservé aux sources Google Sheets vers `raw`.
 
-Séquence d'exécution dans le flow Prefect principal (`main_ingestion_flow`) :
-
-```
-Airbyte sync (optionnel)
-  → dbt phase 1
-  → scraping Allocine
-  → scraping Mubi         ← ce job
-  → dbt phase 2 (optionnel)
-```
-
-Le job peut aussi être déclenché de façon autonome via le déploiement `lancer-scraping-mubi`, planifié toutes les 12 minutes avec une limite de concurrence à 1.
+Le flow principal ne lance aucun scraper. Le déploiement Mubi manuel utilise
+le [connecteur CNC](../mubi_cnc/README.md), avec synchronisation Airbyte et
+publication dbt. Ce crawler global n’a aucun déploiement actif ni calendrier.
+Sa réactivation et son intégration sont différées. Le CLI reste disponible pour
+une utilisation technique explicitement coordonnée.
 
 Modèles dbt associés (tag `mubi`) :
 
@@ -224,4 +215,4 @@ Les scripts d'origine se trouvent dans `database/data/mubi/` :
 - `mubi_all_film_awards_to_csv.py` : orchestration vers CSV, remplacé par ce job
 - `mubi_scraping_sandbox.ipynb` : notebook d'exploration
 
-Ces scripts sont conservés à titre d'archive. Ce job est le point d'entrée opérationnel.
+Ces scripts sont conservés à titre d'archive. Le connecteur CNC est le point d’entrée opérationnel.

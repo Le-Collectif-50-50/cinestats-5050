@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-15
+**Dernière révision:** 2026-11-16
 
 **Status:** actif
 
@@ -28,6 +28,8 @@
 | 13 | 2026-11-14 | Joel Teixeira | Référence de la revue #53 : qualification des visas sans ID Allociné, correspondances confirmées et contrôles de publication. |
 | 14 | 2026-11-15 | Joel Teixeira | Reprise automatique des conteneurs Prefect après redémarrage Docker et attente de disponibilité de l’API avant initialisation du worker (issue 71). |
 
+| 15 | 2026-11-16 | Joel Teixeira | Parcours Mubi CNC Airbyte/collecte/dbt, dashboard Metabase et verrou global des demandes (#83). |
+
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
 Ce README sert de point d'entrée rapide: statut courant, structure et commandes usuelles. Pour le setup complet, les contrats cible ou la roadmap, voir les liens en fin de document.
@@ -41,7 +43,7 @@ Strategie retenue:
 3. `dbt` transforme les tables brutes et les sorties de scraping, puis publie les tables finales prévues par `schema1`.
 4. `scraping/allocine/` exécute le scraping Allociné et écrit les données enrichies dans `raw.allocine_data`.
 5. `Prefect` orchestre les syncs Airbyte via API puis les deux phases `dbt`. Les scrapers sont des déploiements manuels séparés.
-6. `Prefect` poll aussi la file `ops.ingestion_run_requests` dans la base projet, claim une requête à la fois et déclenche le deployment ingestion ou Allociné selon `request_type`.
+6. `Prefect` poll aussi la file `ops.ingestion_run_requests` dans la base projet, claim une requête à la fois et déclenche le deployment ingestion, Allociné ou Mubi selon `request_type`.
 
 Pour les configs locales de debug, le CLI de scraping charge automatiquement `ingestion/.env` avant de résoudre les placeholders JSON de type `${...}`.
 
@@ -280,7 +282,7 @@ Au démarrage, `start_worker.sh` publie exactement quatre déploiements gérés 
 | --- | --- | --- | --- |
 | `lancer-ingestion-complete` | Airbyte → dbt phase 1 → dbt phase 2 | Manuel ou demande Metabase | Aucun scraping |
 | `lancer-scrapping-allocine` | Lot : Airbyte → scraping ; visa : Airbyte → scraping ciblé → dbt phase 2 | Manuel ou demande Metabase, aucun calendrier | `max_films=10` |
-| `lancer-scrapping-mubi` | Scraping Mubi piloté CNC | Manuel, aucun calendrier | `max_films=10` |
+| `lancer-scrapping-mubi` | Airbyte → Mubi CNC → dbt phase 2 | Manuel, aucun calendrier | `max_films=10` |
 | `traiter-les-demandes-ingestion` | Poll de `ops.ingestion_run_requests` | Toutes les 300 secondes par défaut | `max_requests_per_run=1` |
 
 Les scrapers sont désactivés automatiquement au sens **absence de calendrier et
@@ -304,7 +306,12 @@ La phase 1 exécute `dbt build --select tag:phase1` ; la phase 2 exécute
 cette dernière. Les flags CLI correspondants restent disponibles.
 Les lots Allociné sans visa attendent Airbyte avant le scraping, puis nécessitent
 une ingestion séparée pour publier leurs résultats dans les modèles finaux.
-Le scraper Mubi ne lance ni Airbyte ni dbt.
+Le flow Mubi synchronise Airbyte puis collecte les palmarès/éditions et publie dbt phase 2.
+Son CLI seul reste limité à la collecte. Il accepte `visa_number` et
+`force_rescrape` (ciblage obligatoire pour forcer). Une erreur technique ou un
+blocage empêche la publication ; les résultats déjà collectés sont conservés.
+Voir le [guide Mubi CNC](scraping/mubi_cnc/README.md#piloter-depuis-metabase)
+pour le dashboard, les actions Metabase et la reprise après interruption.
 Avec `visa_number`, le même déploiement Allociné attend les syncs Airbyte configurés,
 scrape uniquement ce visa (`max_films` est ramené à 1), puis exécute
 `dbt build --select +tag:phase2`. `force_rescrape=true` rejoue les traitements
@@ -384,7 +391,11 @@ Le polling Metabase est maintenant porté directement par des flows Prefect:
 2. `request_id` est maintenant généré automatiquement par PostgreSQL via `gen_random_uuid()`;
 3. il claim au plus une ligne `pending` par run via `FOR UPDATE SKIP LOCKED` et la passe en `processing`;
 4. il route `request_type=ingestion` (valeur par défaut, historique conservé) vers `lancer-ingestion-complete`, et `request_type=allocine` vers `lancer-scrapping-allocine` avec `max_films`, `request_id` et, pour le deuxième bouton, `visa_number`, `force_rescrape` et les connexions Airbyte configurées;
-5. le flow concerné écrit l'état terminal `success` ou `failed` dans la même table ; le poller réconcilie aussi les annulations/crashes Prefect des demandes Allociné au passage suivant;
+   Le type `mubi` est routé vers `lancer-scrapping-mubi`, avec les connexions Airbyte,
+   la limite et le ciblage éventuel. La migration de file ajoute un verrou global
+   à toutes les demandes actives, partagé avec ingestion et Allociné.
+
+5. le flow concerné écrit l'état terminal `success` ou `failed` dans la même table ; le poller réconcilie aussi les annulations/crashes Prefect des demandes Allociné et Mubi au passage suivant;
 6. `Requeue les demandes d'ingestion stale` reste disponible en CLI/code comme maintenance explicite pour les lignes `processing` trop anciennes sans flow run associé; il n'est pas publié automatiquement comme deployment schedulé.
 
 Important:

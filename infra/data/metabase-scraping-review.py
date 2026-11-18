@@ -98,9 +98,9 @@ ORDER BY extracted_at ASC NULLS FIRST, source_record_id, record_hash
     return cards
 
 
-def dataset_query(database_id, query, extracted_at_field_id=None):
+def dataset_query(database_id, query, extracted_at_field_id=None, parameters=None):
     tags = {p["id"]: {"id": p["id"], "name": p["id"], "display-name": p["name"],
-                      "type": "text", "required": False} for p in PARAMETERS
+                      "type": "text", "required": False} for p in (PARAMETERS if parameters is None else parameters)
             if "{{" + p["id"] + "}}" in query}
     if "periode" in tags:
         if extracted_at_field_id is None:
@@ -188,7 +188,18 @@ def header_offset(dashboard):
                     card.get("visualization_settings", {}).get("text", ""))), default=0)
 
 
-def main():
+def main(profile=None):
+    # Publication commune ; chaque profil conserve ses requêtes et contrats métier.
+    dashboard_name = profile.NAME if profile else NAME
+    description = profile.DESCRIPTION if profile else DESCRIPTION
+    parameters = profile.PARAMETERS if profile else PARAMETERS
+    make_cards = profile.dashboard_cards if profile else dashboard_cards
+    make_action = profile.action_body if profile else action_body
+    place_action = profile.action_placement if profile else action_placement
+    raw_table = profile.RAW_TABLE if profile else "allocine_data"
+    default_state = profile.STATE_FILE if profile else ROOT / "ingestion/scraping/allocine/local-runs/metabase-review-state.json"
+    def make_query(database_id, query, field_id):
+        return dataset_query(database_id, query, field_id, parameters=parameters)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default=os.environ.get("METABASE_SITE_URL"))
     parser.add_argument("--env-file", type=Path, help="Fichier .env contenant METABASE_API_KEY (python-dotenv requis).")
@@ -197,11 +208,11 @@ def main():
     parser.add_argument("--collection-id", type=int)
     parser.add_argument("--action-model-id", type=int,
                         help="Modèle Metabase de la file des demandes (38 sur Cinestats). Nécessite le poller migré.")
-    parser.add_argument("--state-file", type=Path, default=ROOT / "ingestion/scraping/allocine/local-runs/metabase-review-state.json")
+    parser.add_argument("--state-file", type=Path, default=default_state)
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--check", action="store_true", help="Exécuter les requêtes sans créer de dashboard.")
     args = parser.parse_args()
-    definitions = dashboard_cards()
+    definitions = make_cards()
     if args.preview:
         print(json.dumps(definitions, ensure_ascii=False, indent=2))
         return
@@ -233,10 +244,10 @@ def main():
     database_id = matches[0]["id"]
     metadata = api("GET", f"database/{database_id}/metadata")
     date_fields = [field["id"] for table in metadata["tables"]
-                   if table["schema"] == "raw" and table["name"] == "allocine_data"
+                   if table["schema"] == "raw" and table["name"] == raw_table
                    for field in table.get("fields", []) if field["name"] == "extracted_at"]
     if len(date_fields) != 1:
-        parser.error("Champ raw.allocine_data.extracted_at absent ou ambigu : synchroniser le schéma Metabase.")
+        parser.error(f"Champ raw.{raw_table}.extracted_at absent ou ambigu : synchroniser le schéma Metabase.")
     extracted_at_field_id = date_fields[0]
     state = json.loads(args.state_file.read_text()) if args.state_file.exists() else {}
     if state and (state["url"] != base_url or state["database_id"] != database_id
@@ -250,7 +261,7 @@ def main():
 
     # Vérifier droits et schéma avant toute création. Aucun résultat métier sauvé.
     for definition in definitions:
-        result = api("POST", "dataset", dataset_query(database_id, definition["query"], extracted_at_field_id))
+        result = api("POST", "dataset", make_query(database_id, definition["query"], extracted_at_field_id))
         if result.get("status") != "completed":
             raise SystemExit(f"Requête en échec : {definition['name']}. {result.get('error', '')}")
         rows = result.get("data", {}).get("rows", [])
@@ -265,8 +276,8 @@ def main():
 
     if not state:
         dashboard = api("POST", "dashboard", {
-            "name": NAME, "description": DESCRIPTION,
-            "collection_id": args.collection_id, "parameters": PARAMETERS,
+            "name": dashboard_name, "description": description,
+            "collection_id": args.collection_id, "parameters": parameters,
         })
         state = dict(url=base_url, database_id=database_id, collection_id=args.collection_id,
                      dashboard_id=dashboard["id"], cards={})
@@ -280,9 +291,9 @@ def main():
     for index, definition in enumerate(definitions):
         name = definition["name"]
         body = {
-            "name": "Scraping · " + name, "description": definition.get("description", DESCRIPTION),
+            "name": ("Mubi · " if profile else "Scraping · ") + name, "description": definition.get("description", description),
             "display": definition["display"], "visualization_settings": definition.get("visualization_settings", {}),
-            "dataset_query": dataset_query(database_id, definition["query"], extracted_at_field_id),
+            "dataset_query": make_query(database_id, definition["query"], extracted_at_field_id),
             "collection_id": args.collection_id,
         }
         legacy_name = definition.get("legacy_name")
@@ -302,14 +313,14 @@ def main():
                          parameter_mappings=[{"parameter_id": p["id"], "card_id": card_id,
                                               "target": ["dimension" if p["id"] == "periode" else "variable",
                                                          ["template-tag", p["id"]]]}
-                                             for p in PARAMETERS
+                                             for p in parameters
                                              if p["id"] in body["dataset_query"]["native"]["template-tags"]])
         layout.append(placement)
     managed_ids = set(state["cards"].values())
     managed_action_ids = set()
     if model_id:
         for action_index, (state_key, targeted) in enumerate((("action_id", False), ("visa_action_id", True))):
-            body = action_body(database_id, model_id, targeted=targeted)
+            body = make_action(database_id, model_id, targeted=targeted)
             if state.get(state_key):
                 api("PUT", f"action/{state[state_key]}", body)
             else:
@@ -319,17 +330,17 @@ def main():
             managed_action_ids.add(state[state_key])
             previous = next((c for c in dashboard.get("dashcards", [])
                              if c.get("action_id") == state[state_key]), {})
-            placement = action_placement(state[state_key], previous.get("id", -(len(definitions) + 1 + action_index)),
+            placement = place_action(state[state_key], previous.get("id", -(len(definitions) + 1 + action_index)),
                                          targeted=targeted)
             placement["row"] += offset
             layout.append(placement)
     layout.extend(card for card in dashboard.get("dashcards", [])
                   if card.get("card_id") not in managed_ids
                   and card.get("action_id") not in managed_action_ids)
-    parameters = PARAMETERS + [p for p in dashboard.get("parameters", [])
-                               if p["id"] not in {item["id"] for item in PARAMETERS}]
+    saved_parameters = parameters + [p for p in dashboard.get("parameters", [])
+                               if p["id"] not in {item["id"] for item in parameters}]
     api("PUT", f"dashboard/{dashboard_id}", {
-        "name": NAME, "description": DESCRIPTION, "parameters": parameters, "dashcards": layout,
+        "name": dashboard_name, "description": description, "parameters": saved_parameters, "dashcards": layout,
     })
     saved = api("GET", f"dashboard/{dashboard_id}")
     if not managed_ids.issubset({card.get("card_id") for card in saved.get("dashcards", [])}):

@@ -42,6 +42,7 @@ import json
 import os
 import random
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -65,6 +66,7 @@ DEFAULT_INPUT_TABLE = "id_matching"
 DEFAULT_INPUT_MUBI_ID_COLUMN = "ID_MUBI"
 DEFAULT_MAX_PAGES_PER_EDITION = 100
 DEFAULT_MAX_REQUESTS_PER_SESSION = 6
+SESSION_OPEN_TIMEOUT_SECONDS = 45.0
 DEFAULT_RECORD_TIMEOUT_SECONDS = 60.0
 DEFAULT_FETCH_MAX_ATTEMPTS = 3
 DEFAULT_FETCH_RETRY_BASE_DELAY_SECONDS = 3.0
@@ -100,6 +102,8 @@ CONNECTION_SPECIFICATION = {
             "default": "disable",
             "enum": ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"],
         },
+        "visa_number": {"type": ["string", "null"], "title": "Visa CNC ciblé"},
+        "force_rescrape": {"type": "boolean", "default": False},
         "input_schema": {
             "type": "string",
             "title": "Input schema (CNC reference)",
@@ -232,6 +236,8 @@ class ConnectorConfig:
     inter_request_delay_min_seconds: float
     inter_request_delay_max_seconds: float
     verbose: bool
+    visa_number: str | None = None
+    force_rescrape: bool = False
 
     @classmethod
     def from_dict(cls, raw_config: dict[str, Any]) -> "ConnectorConfig":
@@ -272,7 +278,15 @@ class ConnectorConfig:
             if (key.endswith("_table") or key.endswith("_schema") or key.endswith("_column")) and value:
                 _validate_identifier(value)
 
-        return cls(**values)
+        visa = raw_config.get("visa_number")
+        force = raw_config.get("force_rescrape", False)
+        if not isinstance(force, bool):
+            raise ValueError("force_rescrape doit être un booléen")
+        if visa is not None and (not isinstance(visa, str) or not re.fullmatch(r"[0-9]+", visa) or int(visa) < 1):
+            raise ValueError("Visa CNC invalide")
+        if force and visa is None:
+            raise ValueError("Le forçage exige un visa CNC explicite")
+        return cls(**values, visa_number=visa, force_rescrape=force)
 
 
 def _build_database_url(raw_config: dict[str, Any]) -> str:
@@ -372,28 +386,21 @@ class MubiCncAirbyteSource:
     def sync_to_postgres(self, raw_config: dict[str, Any]) -> dict[str, int]:
         config = ConnectorConfig.from_dict(raw_config)
 
-        # Phase A — awards per CNC film. Returns the inserted award records and
-        # the distinct (festival_slug, year) editions to scrape in Phase B.
+        started = time.monotonic()
+        self.run_id = str(uuid.uuid4())
+        # Chaque film/page est persisté avant de passer au suivant.
         award_records, editions = asyncio.run(self._scrape_cnc_film_awards(config))
-
-        if award_records:
-            self._insert_deduped(
-                config,
-                config.film_awards_table,
-                award_records,
-                _insert_film_awards,
-            )
-
-        # Phase B — only the festival editions referenced by CNC films' awards.
+        engine = create_engine(config.database_url)
+        try:
+            with engine.connect() as conn:
+                editions = sorted(set(editions) | set(_fetch_referenced_editions(conn, config)))
+        finally:
+            engine.dispose()
         festival_records = asyncio.run(self._scrape_festival_editions(config, editions))
-
-        if festival_records:
-            self._insert_deduped(
-                config,
-                config.festival_films_table,
-                festival_records,
-                _insert_festival_films,
-            )
+        failures = [r for r in award_records + festival_records if r["scrape_status"] in {"error", "blocked"}]
+        print(f"Mubi CNC run={self.run_id} total_seconds={time.monotonic() - started:.2f}")
+        if failures:
+            raise RuntimeError(f"Collecte Mubi incomplète : {len(failures)} erreurs/blocages ; historique conservé")
 
         festival_inserted = len([r for r in festival_records if r["scrape_status"] == "success"])
         awards_inserted = len([r for r in award_records if r["scrape_status"] == "success"])
@@ -413,7 +420,7 @@ class MubiCncAirbyteSource:
         from ingestion.scraping.browser import AsyncBrowserSession
 
         scraper = MubiPageScraper()
-        run_id = str(uuid.uuid4())
+        run_id = getattr(self, "run_id", None) or str(uuid.uuid4())
 
         engine = create_engine(config.database_url)
         try:
@@ -447,8 +454,15 @@ class MubiCncAirbyteSource:
                 ws_endpoint=config.playwright_ws_endpoint,
                 headless=config.headless,
                 verbose=config.verbose,
+                navigation_wait_until="domcontentloaded",
+                lightweight=True,
+                ready_selector="script#__NEXT_DATA__",
             )
-            session = await session_cm.__aenter__()
+            try:
+                session = await asyncio.wait_for(session_cm.__aenter__(), SESSION_OPEN_TIMEOUT_SECONDS)
+            except BaseException:
+                await close_session()
+                raise
 
         async def close_session():
             nonlocal session_cm, session
@@ -469,6 +483,8 @@ class MubiCncAirbyteSource:
                     )
                     await asyncio.sleep(delay)
 
+                record_start = len(records)
+                started = time.monotonic()
                 extracted_at = _now_iso()
                 url = scraper.FILM_ALL_AWARDS_BY_ID_URL.format(mubi_id=mubi_id)
                 if config.verbose:
@@ -484,7 +500,12 @@ class MubiCncAirbyteSource:
 
                     identity = scraper.extract_film_identity(html)
                     film_link = identity.get("film_link")
-                    resolved_id = identity.get("mubi_id") or mubi_id
+                    resolved_id = identity.get("mubi_id")
+                    props = scraper._next_page_props(html)
+                    if resolved_id != mubi_id or not film_link or not isinstance(props.get("awards"), list):
+                        raise ValueError("Identité Mubi ou payload palmarès absente/incohérente")
+                    if any(not isinstance(a, dict) or not isinstance(a.get("industry_event"), dict) for a in props["awards"]):
+                        raise ValueError("Entrée de palmarès Mubi invalide")
                     awards = scraper.extract_film_awards_structured(html)
 
                     if not awards:
@@ -502,6 +523,7 @@ class MubiCncAirbyteSource:
                                 festival=a.get("festival"), year=a.get("year"),
                                 distinction=a.get("distinction"), award=a.get("award"),
                                 scrape_status="success", error_message=None,
+                                event_slug=a.get("event_slug"), event_type=a.get("event_type"),
                             ))
                             slug = a.get("event_slug")
                             yr = a.get("year")
@@ -516,6 +538,7 @@ class MubiCncAirbyteSource:
                         scrape_status="blocked", error_message=str(exc),
                     ))
                     print(f"[awards] mubi_id={mubi_id}: blocked — restarting session")
+                    self._checkpoint(config, records[record_start:])
                     await close_session()
                     await open_session()
                     request_count = 0
@@ -538,6 +561,8 @@ class MubiCncAirbyteSource:
                     ))
                     print(f"[awards] mubi_id={mubi_id}: error — {exc}")
 
+                self._checkpoint(config, records[record_start:])
+                print(f"Mubi page_seconds={time.monotonic() - started:.2f}")
                 request_count += 1
                 if request_count >= config.max_requests_per_session:
                     await close_session()
@@ -563,7 +588,7 @@ class MubiCncAirbyteSource:
             return []
 
         scraper = MubiPageScraper()
-        run_id = str(uuid.uuid4())
+        run_id = getattr(self, "run_id", None) or str(uuid.uuid4())
 
         engine = create_engine(config.database_url)
         try:
@@ -609,8 +634,15 @@ class MubiCncAirbyteSource:
                 ws_endpoint=config.playwright_ws_endpoint,
                 headless=config.headless,
                 verbose=config.verbose,
+                navigation_wait_until="domcontentloaded",
+                lightweight=True,
+                ready_selector="script#__NEXT_DATA__",
             )
-            session = await session_cm.__aenter__()
+            try:
+                session = await asyncio.wait_for(session_cm.__aenter__(), SESSION_OPEN_TIMEOUT_SECONDS)
+            except BaseException:
+                await close_session()
+                raise
 
         async def close_session():
             nonlocal session_cm, session
@@ -634,6 +666,8 @@ class MubiCncAirbyteSource:
                     )
                     await asyncio.sleep(delay)
 
+                record_start = len(records)
+                started = time.monotonic()
                 extracted_at = _now_iso()
                 url = scraper.FESTIVAL_EDITION_ALL_FILMS_URL.format(
                     festival=slug, page_num=page, year=year
@@ -658,7 +692,16 @@ class MubiCncAirbyteSource:
                     if last_error is not None:
                         raise last_error
 
+                    props = scraper._next_page_props(html)
+                    event = props.get("industryEvent") or {}
+                    if event.get("slug") != slug or not isinstance(props.get("yearsAvailable"), list):
+                        raise ValueError("Payload édition Mubi absente/incohérente")
                     films = scraper.extract_festival_edition_all_films(html)
+                    # Ne pas assimiler une rupture de sélecteurs à une page vide.
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(html, "html.parser")
+                    if not films and soup.select("a[href*='/films/'] h3"):
+                        raise ValueError("Sélecteurs films Mubi obsolètes")
 
                     if not films:
                         record = {
@@ -697,6 +740,7 @@ class MubiCncAirbyteSource:
                     record["record_hash"] = _hash_record(record)
                     records.append(record)
                     print(f"[films] {slug} {year} p{page}: blocked — restarting session")
+                    self._checkpoint(config, records[record_start:])
                     await close_session()
                     await open_session()
                     request_count = 0
@@ -725,6 +769,8 @@ class MubiCncAirbyteSource:
                     records.append(record)
                     print(f"[films] {slug} {year} p{page}: error — {exc}")
 
+                self._checkpoint(config, records[record_start:])
+                print(f"Mubi page_seconds={time.monotonic() - started:.2f}")
                 request_count += 1
                 if request_count >= config.max_requests_per_session:
                     await close_session()
@@ -764,6 +810,12 @@ class MubiCncAirbyteSource:
                 last_error = exc
 
             if attempt < config.fetch_max_attempts:
+                # Le renderer d’une tentative échouée ne doit pas contaminer la suivante.
+                await session.__aexit__(None, None, None)
+                try:
+                    await asyncio.wait_for(session.__aenter__(), SESSION_OPEN_TIMEOUT_SECONDS)
+                except Exception as exc:
+                    return None, exc
                 backoff = config.fetch_retry_base_delay_seconds * attempt
                 print(
                     f"[{label}] attempt {attempt}/{config.fetch_max_attempts} "
@@ -774,17 +826,26 @@ class MubiCncAirbyteSource:
 
         return html, last_error
 
+    def _checkpoint(self, config, records):
+        if not records:
+            return
+        is_awards = "mubi_id" in records[0]
+        self._insert_deduped(
+            config, config.film_awards_table if is_awards else config.festival_films_table,
+            records, _insert_film_awards if is_awards else _insert_festival_films,
+        )
+
     def _insert_deduped(self, config, table, records, insert_fn) -> None:
         """Insert records whose record_hash is not already in the target table.
 
         Filters in-batch duplicates and rows whose hash already exists, so
-        re-runs and CNC films sharing a festival edition never append duplicate
-        rows into the append-only tables.
+        retrying insertion of the same snapshot cannot append it twice. New
+        attempts keep their own run/timestamp and remain in the history.
         """
         engine = create_engine(config.database_url)
         try:
             with engine.begin() as conn:
-                existing = _fetch_existing_hashes(conn, config.output_schema, table)
+                existing = _fetch_existing_hashes(conn, config.output_schema, table, [r["record_hash"] for r in records])
                 fresh: list[dict[str, Any]] = []
                 seen: set[str] = set()
                 for r in records:
@@ -808,12 +869,15 @@ class MubiCncAirbyteSource:
 def _award_record(
     run_id, extracted_at, film_link, mubi_id, *,
     festival, year, distinction, award, scrape_status, error_message,
+    event_slug=None, event_type=None,
 ) -> dict[str, Any]:
     record = {
         "run_id": run_id,
         "extracted_at": extracted_at,
         "film_link": film_link,
         "mubi_id": mubi_id,
+        "event_slug": event_slug,
+        "event_type": event_type,
         "festival": festival,
         "year": year,
         "distinction": distinction,
@@ -882,6 +946,11 @@ def _ensure_festival_films_table(conn, config: ConnectorConfig) -> None:
 def _ensure_film_awards_table(conn, config: ConnectorConfig) -> None:
     rel = _relation(config.output_schema, config.film_awards_table)
     if _table_exists(conn, config.output_schema, config.film_awards_table):
+        columns = {row[0] for row in conn.execute(text(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema=:s AND table_name=:t"
+        ), {"s": config.output_schema, "t": config.film_awards_table})}
+        if not {"event_slug", "event_type"}.issubset(columns):
+            raise RuntimeError("Migration requise : infra/data/2026-11-16-mubi-cnc-events.sql (propriétaire de la table)")
         return
     conn.execute(text(f"""
         create table if not exists {rel} (
@@ -889,6 +958,8 @@ def _ensure_film_awards_table(conn, config: ConnectorConfig) -> None:
             extracted_at timestamptz,
             film_link text,
             mubi_id integer,
+            event_slug text,
+            event_type text,
             festival text,
             year text,
             distinction text,
@@ -911,20 +982,42 @@ def _fetch_pending_mubi_ids(conn, config: ConnectorConfig) -> list[int]:
     completed status (success/no_awards), matched on mubi_id.
     """
     col = _quote_identifier(config.input_mubi_id_column)
+    where = f"{col} is not null"
+    params = {}
+    if config.visa_number is not None:
+        where = 'CAST("VISA" AS TEXT) = :visa'
+        params["visa"] = config.visa_number
     rows = conn.execute(text(
         f"select distinct {col} as mubi_id "
-        f"from {_relation(config.input_schema, config.input_table)} "
-        f"where {col} is not null"
-    )).fetchall()
-    candidate_ids: list[int] = []
+        f"from {_relation(config.input_schema, config.input_table)} where {where}"
+    ), params).fetchall()
+    candidate_ids = set()
     for row in rows:
-        try:
-            candidate_ids.append(int(row[0]))
-        except (TypeError, ValueError):
-            continue
+        value = str(row[0]).strip()
+        if re.fullmatch(r"[0-9]+", value) and 0 < int(value) <= 2147483647:
+            candidate_ids.add(int(value))
+    if config.visa_number is not None and len(candidate_ids) != 1:
+        raise ValueError("Visa absent, ID Mubi manquant/invalide ou correspondance ambiguë")
+    processed = set() if config.force_rescrape else _fetch_processed_mubi_ids(conn, config)
+    return sorted(candidate_ids - processed)
 
-    processed = _fetch_processed_mubi_ids(conn, config)
-    return [i for i in dict.fromkeys(candidate_ids) if i not in processed]
+
+def _fetch_referenced_editions(conn, config):
+    """Reprendre aussi les éditions après un arrêt entre phases A et B."""
+    awards = _relation(config.output_schema, config.film_awards_table)
+    inputs = _relation(config.input_schema, config.input_table)
+    col = _quote_identifier(config.input_mubi_id_column)
+    target = 'AND CAST(i."VISA" AS TEXT) = :visa' if config.visa_number else ""
+    return conn.execute(text(f"""
+        WITH snapshots AS (
+          SELECT *, dense_rank() OVER (PARTITION BY mubi_id ORDER BY extracted_at DESC, run_id DESC) AS r
+          FROM {awards} WHERE scrape_status IN ('success', 'no_awards')
+        )
+        SELECT DISTINCT a.event_slug, a.year FROM snapshots a
+        WHERE a.r = 1 AND a.event_type = 'festival' AND a.event_slug IS NOT NULL
+          AND a.year ~ '^[0-9]{{4}}$'
+          AND EXISTS (SELECT 1 FROM {inputs} i WHERE btrim(CAST(i.{col} AS TEXT)) = CAST(a.mubi_id AS TEXT) {target})
+    """), {"visa": config.visa_number}).fetchall()
 
 
 def _fetch_processed_mubi_ids(conn, config: ConnectorConfig) -> set[int]:
@@ -968,13 +1061,13 @@ def _fetch_edition_empty_boundaries(conn, config: ConnectorConfig) -> dict[tuple
     return {(row[0], row[1]): row[2] for row in rows if row[2] is not None}
 
 
-def _fetch_existing_hashes(conn, schema_name: str, table_name: str) -> set[str]:
+def _fetch_existing_hashes(conn, schema_name: str, table_name: str, hashes: list[str]) -> set[str]:
     if not _table_exists(conn, schema_name, table_name):
         return set()
     rows = conn.execute(text(
         f"select record_hash from {_relation(schema_name, table_name)} "
-        f"where record_hash is not null"
-    )).fetchall()
+        f"where record_hash = any(:hashes)"
+    ), {"hashes": hashes}).fetchall()
     return {row[0] for row in rows}
 
 
@@ -1001,10 +1094,10 @@ def _insert_film_awards(conn, config: ConnectorConfig, records: list[dict]) -> N
     rel = _relation(config.output_schema, config.film_awards_table)
     conn.execute(text(f"""
         insert into {rel} (
-            run_id, extracted_at, film_link, mubi_id, festival, year,
+            run_id, extracted_at, film_link, mubi_id, event_slug, event_type, festival, year,
             distinction, award, scrape_status, error_message, record_hash
         ) values (
-            :run_id, :extracted_at, :film_link, :mubi_id, :festival, :year,
+            :run_id, :extracted_at, :film_link, :mubi_id, :event_slug, :event_type, :festival, :year,
             :distinction, :award, :scrape_status, :error_message, :record_hash
         )
     """), records)
@@ -1039,6 +1132,8 @@ _FILM_AWARDS_SCHEMA = {
         "extracted_at": {"type": "string", "format": "date-time"},
         "film_link": {"type": ["string", "null"]},
         "mubi_id": {"type": ["integer", "null"]},
+        "event_slug": {"type": ["string", "null"]},
+        "event_type": {"type": ["string", "null"]},
         "festival": {"type": ["string", "null"]},
         "year": {"type": ["string", "null"]},
         "distinction": {"type": ["string", "null"]},
