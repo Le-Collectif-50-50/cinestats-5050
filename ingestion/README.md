@@ -23,10 +23,10 @@
 | 9 | 2026-11-13 | Joel Teixeira | Dernier succès Allociné par visa et intégration des personnes et crédits manuels dans les modèles finaux. Déploiement Allociné manuel réactivé et délais de navigation documentés. |
 | 10 | 2026-11-13 | Joel Teixeira | Quatre déploiements Prefect : ingestion sans scraping, scrapers Allociné et Mubi CNC manuels avec max_films=10, migration du nom ciblé par le poller. |
 | 11 | 2026-11-13 | Joel Teixeira | Reprise Allociné lorsque l'ID cible change dans id_matching ; sélection ciblée par visa dans le CLI. Déclenchement Allociné depuis Metabase avec limite de films et suivi des demandes. |
-
 | 12 | 2026-11-14 | Joel Teixeira | Deuxième bouton Metabase par visa, forçage explicite et parcours Prefect Airbyte → scraping ciblé → dbt. |
 | 13 | 2026-11-14 | Joel Teixeira | Référence de la revue #53 : qualification des visas sans ID Allociné, correspondances confirmées et contrôles de publication. |
 | 14 | 2026-11-15 | Joel Teixeira | Reprise automatique des conteneurs Prefect après redémarrage Docker et attente de disponibilité de l’API avant initialisation du worker (issue 71). |
+| 15 | 2026-11-17 | Nicolas Revel | Lien vers la spécification brouillon d'ingestion sur la preview avant la production. |
 
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
@@ -417,6 +417,7 @@ Artefacts associés:
 1. [README dbt](dbt/README.md): modèles préparés, tags d'exécution et sources brutes consommées par le projet dbt.
 1. [Runbook infra](../docs/runbooks/ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md): installation et exploitation locale Airbyte/dbt/PostgreSQL.
 1. [Specification Airbyte/dbt](../docs/specifications/ingestion-specification-airbyte-dbt-mises-a-jour-donnees.md): contrats cible et critères d'acceptation.
+1. [Specification preview avant production](../docs/specifications/ingestion-specification-preview-avant-production.md) (brouillon): lancer l'ingestion sur la base preview et vérifier dans l'app avant la production.
 1. [Architecture ingestion](../docs/architecture/ingestion-architecture-airbyte-dbt-prefect-scraping.md): cible de référence, état actuel relatif et roadmap de convergence.
 1. [Revue du matching incomplet — issue 53](../docs/reference/ingestion-revue-matching-issue-53.md) : lot de 236 visas, décisions documentées et contrôles des 18 correspondances confirmées.
 
