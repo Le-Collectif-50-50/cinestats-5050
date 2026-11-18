@@ -8,7 +8,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import psycopg
@@ -782,6 +782,71 @@ def _run_mubi_scraping_step(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
 )
 def run_mubi_scraping(config_path: str = str(MUBI_CONFIG_PATH)) -> None:
     _run_mubi_scraping_step(config_path=config_path)
+
+
+async def _wait_for_matching_predecessor(flow_run_id: str) -> None:
+    deadline = time.monotonic() + 6 * 3600
+    logger = get_run_logger()
+    async with get_client() as client:
+        while True:
+            run = await client.read_flow_run(UUID(flow_run_id))
+            if run.state is not None and run.state.is_final():
+                logger.info("Run préalable terminé : %s (%s)", flow_run_id, run.state.name)
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Run préalable encore actif après six heures")
+            logger.info("Attente du run préalable %s ; aucun navigateur de matching ouvert", flow_run_id)
+            await asyncio.sleep(30)
+
+
+@flow(
+    name="Rechercher les identifiants MUBI et TMDB",
+    description="Recherche manuelle des IDs manquants ; propositions et preuves dans ops.",
+)
+def run_missing_id_matching(
+    provider: Literal["all", "mubi", "tmdb"] = "all",
+    max_films: FilmLimit = 10,
+    visa_number: str | None = None,
+    max_candidates: FilmLimit = 10,
+    dry_run: bool = False,
+    visa_numbers: list[str] | None = None,
+    skip_processed: bool = False,
+    wait_for_flow_run_id: str | None = None,
+) -> None:
+    _validate_film_limit(max_films)
+    if provider not in {"all", "mubi", "tmdb"}:
+        raise ValueError("provider doit valoir all, mubi ou tmdb")
+    if isinstance(max_candidates, bool) or not isinstance(max_candidates, int) or max_candidates < 1:
+        raise ValueError("max_candidates doit être un entier strictement positif")
+    if not isinstance(dry_run, bool):
+        raise ValueError("dry_run doit être un booléen")
+    if not isinstance(skip_processed, bool):
+        raise ValueError("skip_processed doit être un booléen")
+    if visa_numbers is not None:
+        if visa_number is not None or not isinstance(visa_numbers, list) or not visa_numbers:
+            raise ValueError("Fournir visa_number ou une liste non vide visa_numbers")
+        for visa in visa_numbers:
+            _validate_allocine_target(visa, False)
+        if len(set(visa_numbers)) != len(visa_numbers) or len(visa_numbers) > max_films:
+            raise ValueError("visa_numbers doit être sans doublons et respecter max_films")
+    _validate_allocine_target(visa_number, False)
+    if wait_for_flow_run_id is not None:
+        UUID(wait_for_flow_run_id)
+        asyncio.run(_wait_for_matching_predecessor(wait_for_flow_run_id))
+    command = [
+        "python3", "-u", "-m", "ingestion.scraping.id_matching",
+        "--provider", provider, "--limit", str(max_films),
+        "--max-candidates", str(max_candidates),
+    ]
+    if visa_number is not None:
+        command.extend(["--visa", visa_number])
+    if dry_run:
+        command.append("--dry-run")
+    if visa_numbers is not None:
+        command.extend(["--visas", *visa_numbers])
+    if skip_processed:
+        command.append("--skip-processed")
+    _run(command, step_name="Rechercher les identifiants MUBI et TMDB", cwd=REPO_ROOT)
 
 
 def _run_mubi_cnc_scraping_step(
