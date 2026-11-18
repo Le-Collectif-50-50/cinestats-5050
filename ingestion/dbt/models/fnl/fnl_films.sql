@@ -1,8 +1,10 @@
 WITH film_genres AS (
     SELECT
         film_id,
-        STRING_AGG(DISTINCT genre_name, ', ' ORDER BY genre_name) AS genre
-    FROM {{ ref('int_film_genres') }}
+        STRING_AGG(DISTINCT genres.genre_name, ', ' ORDER BY genres.genre_name) AS genre
+    FROM {{ ref('fnl_film_genre') }} AS associations
+    LEFT JOIN {{ ref('fnl_genre') }} AS genres
+        ON associations.genre_id = genres.genre_id
     GROUP BY film_id
 ),
 

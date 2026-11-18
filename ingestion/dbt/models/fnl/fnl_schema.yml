@@ -38,7 +38,7 @@ models:
       - name: budget_category
         description: "Tranche de budget du film (ex: petit, moyen, grand budget)."
       - name: genre
-        description: "Genres du film issus de int_film_genres, concaténés avec une virgule et dédupliqués."
+        description: "Genres scrapés et ajoutés manuellement, avec les libellés corrigés, concaténés par virgule et dédupliqués."
       - name: genre_category
         description: "Genre cinématographique du film."
       - name: broadcasters
@@ -99,7 +99,7 @@ models:
       - name: type
         description: "Type de crédit (personne physique, société, etc.)."
       - name: full_name
-        description: "Nom complet de la personne créditée."
+        description: "Nom complet de la personne : corrections prénom/nom prioritaires, puis nom complet source. Inclut les personnes manuelles ; nul pour les sociétés, qui utilisent legal_name."
       - name: first_name
         description: "Prénom de la personne créditée."
       - name: last_name
@@ -162,3 +162,36 @@ models:
         description: "Libellé inclusif (écriture épicène) du rôle, dérivé du nom d'origine."
       - name: is_key_role
         description: "Indique si le rôle est considéré comme un rôle clé (ex: réalisateur·rice, scénariste, directeur·rice de la photographie) pour l'analyse des inégalités."
+
+  - name: fnl_film_genre
+    description: "Table finale associant chaque film à ses genres cinématographiques, incluant les ajouts manuels sans remplacer les associations scrapées."
+    columns:
+      - name: film_id
+        description: "Identifiant du film concerné."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fnl_films')
+                field: film_id
+      - name: genre_id
+        description: "Identifiant du genre cinématographique associé au film."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fnl_genre')
+                field: genre_id
+
+  - name: fnl_genre
+    description: "Table finale référençant les genres cinématographiques, après application des corrections manuelles du gsheet."
+    columns:
+      - name: genre_id
+        description: "Identifiant unique du genre cinématographique."
+        tests:
+          - not_null
+          - unique
+      - name: genre_name
+        description: "Nom du genre cinématographique, corrigé si applicable."
+        tests:
+          - not_null
