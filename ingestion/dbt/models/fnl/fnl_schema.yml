@@ -98,6 +98,8 @@ models:
           - unique
       - name: type
         description: "Type de crédit (personne physique, société, etc.)."
+      - name: full_name
+        description: "Nom complet de la personne créditée."
       - name: first_name
         description: "Prénom de la personne créditée."
       - name: last_name
