@@ -19,7 +19,7 @@ Lire uniquement le guide du composant concerné, puis suivre ses références se
 | `ingestion/` | [Airbyte, dbt, Prefect et scraping : état actuel, configuration et architecture](ingestion/README.md) |
 | `ml-image/` | [Analyse d'images et bandes-annonces : installation et modèles](ml-image/README.md) |
 | `infra/`, `scripts/`, `.github/` | [Infrastructure et déploiement applicatif](docs/DEPLOYMENT.md), [exploitation de la stack data](docs/runbooks/stack-data.md) |
-| `docs/` | Architecture, spécifications et runbooks, référencés depuis les guides ci-dessus |
+| `docs/` | Architecture, spécifications et runbooks, référencés depuis les guides ci-dessus ; [mesures de sécurité en place](docs/architecture/securite-application-et-infrastructure.md) |
 
 ## Démarrer en local
 
@@ -69,3 +69,4 @@ Les PR ciblent `main`. Pour déployer, suivre le [runbook de promotion](docs/run
 | 1 | 2026-05-07 | Joel Teixeira | Révision post implementation module ingestion |
 | 2 | 2026-10-09 | Joel Teixeira | Ajout du guide de promotion preview vers production |
 | 3 | 2026-10-10 | Joel Teixeira | Vue d'ensemble condensée, parcours local et liens ciblés vers les guides de travail et d'exploitation. |
+| 4 | 2026-11-17 | Nicolas Revel | Lien vers le document de sécurité. |
