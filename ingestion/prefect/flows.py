@@ -539,6 +539,7 @@ def _run(command: list[str], step_name: str, cwd: Path | None = None,
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
             except ProcessLookupError:
+                # Le groupe peut disparaître entre poll() et killpg() : il est déjà arrêté.
                 pass
 
     def expire():
