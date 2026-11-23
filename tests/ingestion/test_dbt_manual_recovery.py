@@ -116,12 +116,100 @@ class ManualRecoverySQLTests(unittest.TestCase):
                     "int_allocine_films": fixture(dict(film_id="uuid", allocine_name="text",
                                                         release_date="date", duration_mn="integer"),
                                                  [dict(film_id=FILM, allocine_name=allocine)]),
-                    "int_film_country_budget_allocation": fixture(dict(film_id="uuid", country_name="text", budget_allocation="numeric"), []),
+                    "fnl_film_country_budget_allocation": fixture(dict(film_id="uuid", country_name="text", budget_allocation="numeric"), []),
+                    "fnl_film_genre": fixture(dict(film_id="uuid", genre_id="uuid"), []),
+                    "fnl_genre": fixture(dict(genre_id="uuid", genre_name="text"), []),
                 })
                 self.assertEqual(len(result), 1)
                 self.assertEqual(result[0]["movie_name"], expected)
                 self.assertEqual(result[0]["film_id"], FILM)
                 self.assertEqual(result[0]["cnc_visa"], 144246)
+
+    def test_aggregated_genres_preserve_manual_associations_and_labels(self):
+        documentary = "9ae49857-f08a-c282-64e0-f228627d3e4c"
+        drama = "00000000-0000-0000-0000-000000000001"
+        manual_only = "00000000-0000-0000-0000-000000000002"
+        columns = dict(film_id="uuid", cnc_visa="integer", cnc_name="text",
+                       cnc_agreement_year="integer", budget="numeric", budget_category="text",
+                       broadcasters="text", has_parity_bonus="boolean", has_eof="boolean",
+                       has_sofica="boolean", has_tax_credit="boolean",
+                       has_regional_funding="boolean", filmography_rank="text", has_asr="boolean")
+        scraped = dict(film_id=FILM, genre_id=drama, genre_name="Drame")
+        correction = dict(film_id=FILM, genre_id=documentary)
+        cases = [
+            ([], [], [], None),
+            ([scraped, scraped], [], [], "Drame"),
+            ([scraped], [correction, correction],
+             [dict(id=documentary, name="Documentaire")], "Documentaire, Drame"),
+            ([], [correction], [dict(id=documentary, name="Documentaire")], "Documentaire"),
+            ([scraped], [], [dict(id=drama, name="Drame corrigé")], "Drame corrigé"),
+            ([scraped], [dict(film_id=FILM, genre_id=drama)], [], "Drame"),
+            ([scraped], [dict(film_id=FILM, genre_id=manual_only)],
+             [dict(id=manual_only, name="Genre manuel")], "Drame, Genre manuel"),
+        ]
+        env = Environment()
+        for genres, manual, labels, expected in cases:
+            with self.subTest(expected=expected, manual=manual):
+                inputs = {
+                    "int_cnc_films": fixture(columns, [dict(film_id=FILM, cnc_visa=144246, cnc_name="Film")]),
+                    "int_id_matching": fixture(dict(cnc_visa="integer", cnc_name="text"),
+                                               [dict(cnc_visa=144246, cnc_name="Film")]),
+                    "int_allocine_films": fixture(dict(film_id="uuid", allocine_name="text",
+                                                        release_date="date", duration_mn="integer"), []),
+                    "fnl_film_country_budget_allocation": fixture(
+                        dict(film_id="uuid", country_name="text", budget_allocation="numeric"), []),
+                    "int_film_genres": fixture(dict(film_id="uuid", genre_id="uuid", genre_name="text"), genres),
+                    "int_fix_film_genres": fixture(dict(film_id="uuid", genre_id="uuid"), manual),
+                    "int_fix_genres": fixture(dict(id="uuid", name="text"), labels),
+                }
+                for model in ("fnl_film_genre", "fnl_genre"):
+                    inputs[model] = env.from_string((MODELS / "fnl" / f"{model}.sql").read_text()).render(
+                        ref=lambda name: name)
+                result = self.run_model("fnl/fnl_films.sql", inputs)
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0]["film_id"], FILM)
+                self.assertEqual(result[0]["genre"], expected)
+
+    def test_full_name_preserves_corrections_and_manual_people(self):
+        cases = [
+            # Nom source préservé même si les champs séparés sont incomplets.
+            (dict(full_name="Eliane de Latour", first_name="Eliane", last_name="de"),
+             dict(gender="female"), "Eliane de Latour"),
+            (dict(full_name="Ancien Nom", first_name="Ancien", last_name="Nom"),
+             dict(first_name="Eliane", last_name="de Latour"), "Eliane de Latour"),
+            (dict(full_name="Eliane de", first_name="Eliane", last_name="de"),
+             dict(last_name="de Latour"), "Eliane de Latour"),
+            (dict(full_name="Ancien de Latour", first_name="Ancien", last_name="de Latour"),
+             dict(first_name="Eliane"), "Eliane de Latour"),
+            (None, dict(type="Individual", first_name="Eliane", last_name="de Latour"), "Eliane de Latour"),
+            (None, dict(type="Individual", first_name="Cher"), "Cher"),
+            (None, dict(type="Individual", last_name="Nyong’o"), "Nyong’o"),
+            (dict(full_name="  Jean-Pierre Van der Meersch  "), None, "Jean-Pierre Van der Meersch"),
+            (dict(full_name="Élodie Dupont-Martin"), dict(first_name=" ", last_name=""), "Élodie Dupont-Martin"),
+            (dict(full_name="Jean\u00a0Claude Van Damme"), None, "Jean\u00a0Claude Van Damme"),
+            (dict(first_name="  Lupita ", last_name=" Nyong’o ", full_name=" "), None, "Lupita Nyong’o"),
+            (dict(type="Company", legal_name="Société"), None, None),
+            (None, dict(type="Company", legal_name="Société"), None),
+            (None, dict(type="Individual", gender="female"), None),
+        ]
+        scraped, corrections, expected = [], [], {}
+        for index, (source, fix, name) in enumerate(cases, 1):
+            identifier = f"00000000-0000-0000-0000-{index:012d}"
+            if source is not None:
+                scraped.append(dict({"credit_holder_id": identifier, "type": "Individual", **source}))
+            if fix is not None:
+                corrections.append(dict(id=identifier, **fix))
+            expected[identifier] = name
+        result = self.run_model("fnl/fnl_credit_holders.sql", {
+            "int_credit_holders_role": fixture(dict(credit_holder_id="uuid", type="text", full_name="text",
+                                                      first_name="text", last_name="text", legal_name="text"), scraped),
+            "int_credit_holders_genre": fixture(dict(full_name="text", gender="text"), []),
+            "int_fix_credit_holders": fixture(dict(id="uuid", type="text", first_name="text", last_name="text",
+                                                      legal_name="text", gender="text", birthdate="date"), corrections),
+        })
+        self.assertEqual(len(result), len(cases))
+        self.assertEqual({row["credit_holder_id"]: row["full_name"] for row in result}, expected)
+        self.assertTrue(all(row["legal_name"] == "Société" for row in result if row["type"] == "Company"))
 
     def test_updated_timestamp_formats_and_type(self):
         dates = ["13/11/2026", "13/11/2026 15:42", "13/11/2026 15:42:08",
@@ -317,7 +405,7 @@ class ManualRecoverySQLTests(unittest.TestCase):
             (2024, "0", "0", "Moins de 2M€"),
         ]
         rows = [dict(VISA=str(i + 1), ANNEE_D_AGREMENT=year, DEVIS=raw,
-                     UPDATED_DATE="15/11/2026", UPDATED_BY="Test")
+                     UPDATED_DATE="15/11/2026", UPDATED_BY="Test", PAYANT="C+ C+", CLAIR="F2")
                 for i, (year, raw, _, _) in enumerate(cases)]
         staging = self.run_model("staging/stg_cnc_films.sql", {
             "source_films": fixture(cols, rows),
@@ -336,12 +424,27 @@ class ManualRecoverySQLTests(unittest.TestCase):
         ).module.gsheet_updated_timestamp
         stage_sql = env.from_string((MODELS / "staging/stg_cnc_films.sql").read_text()).render(
             source=lambda schema, name: "source_films", config=lambda **kwargs: "")
+        env.globals["ref"] = lambda name: name
+        env.globals["config"] = lambda **kwargs: ""
+        env.globals["cnc_broadcaster_tokens"] = env.from_string(
+            (MODELS.parent / "macros/cnc_broadcaster_tokens.sql").read_text()
+        ).module.cnc_broadcaster_tokens
+        broadcaster_sql = env.from_string(
+            (MODELS / "intermediate/int_cnc_broadcasters.sql").read_text()
+        ).render()
         categories = self.run_model("intermediate/int_cnc_films.sql", {
             "source_films": fixture(cols, rows),
             "stg_cnc_films": stage_sql,
+            "cnc_broadcaster_aliases": fixture(
+                dict(priority="integer", alias_pattern="text", broadcaster_name="text", is_excluded="boolean"),
+                [dict(priority=1, alias_pattern=r"C\+", broadcaster_name="Canal+", is_excluded=False),
+                 dict(priority=2, alias_pattern="F2", broadcaster_name="France2", is_excluded=False)],
+            ),
+            "int_cnc_broadcasters": broadcaster_sql,
             "stg_id_matching": fixture(dict(film_id="uuid", cnc_visa="integer"), []),
         })
         self.assertEqual(len(categories), len(cases))
+        self.assertEqual({r["broadcasters"] for r in categories}, {"Canal+, France2"})
         self.assertEqual([r["budget_category"] for r in sorted(categories, key=lambda r: r["cnc_visa"])],
                          [category for _, _, _, category in cases])
 

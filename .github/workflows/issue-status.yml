@@ -1,0 +1,40 @@
+name: Issue status
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize, ready_for_review, converted_to_draft, closed]
+  issues:
+    types: [closed, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Numéro de PR à synchroniser (utile après un lien manuel)
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+# Sérialiser les changements quand plusieurs PR concernent la même issue.
+concurrency:
+  group: issue-status
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Le code exécuté vient du commit du workflow, jamais de la branche de PR.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const sync = require('./.github/scripts/issue-status.cjs');
+            await sync({github, context, core});

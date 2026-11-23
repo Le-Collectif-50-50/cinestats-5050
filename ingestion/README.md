@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-15
+**Dernière révision:** 2026-11-17
 
 **Status:** actif
 
@@ -28,6 +28,10 @@
 | 14 | 2026-11-15 | Joel Teixeira | Reprise automatique des conteneurs Prefect après redémarrage Docker et attente de disponibilité de l’API avant initialisation du worker (issue 71). |
 | 15 | 2026-11-17 | Nicolas Revel | Lien vers la spécification brouillon d'ingestion sur la preview avant la production. |
 
+| 15 | 2026-11-16 | Joel Teixeira | Parcours Mubi CNC Airbyte/collecte/dbt, dashboard Metabase et verrou global des demandes (#83). |
+| 16 | 2026-11-16 | Joel Teixeira | CLI de recherche des identifiants MUBI/TMDB manquants avec vérification titre/réalisateur et propositions dans ops ; déploiement Prefect manuel distinct. |
+| 17 | 2026-11-17 | Joel Teixeira | Sous-flows Mubi bornés et reprenables, enchaînement séquentiel et publication dbt après drainage. |
+
 Ce dossier regroupe les assets d'ingestion et de transformation de données, séparés du code applicatif principal.
 
 Ce README sert de point d'entrée rapide: statut courant, structure et commandes usuelles. Pour le setup complet, les contrats cible ou la roadmap, voir les liens en fin de document.
@@ -41,7 +45,7 @@ Strategie retenue:
 3. `dbt` transforme les tables brutes et les sorties de scraping, puis publie les tables finales prévues par `schema1`.
 4. `scraping/allocine/` exécute le scraping Allociné et écrit les données enrichies dans `raw.allocine_data`.
 5. `Prefect` orchestre les syncs Airbyte via API puis les deux phases `dbt`. Les scrapers sont des déploiements manuels séparés.
-6. `Prefect` poll aussi la file `ops.ingestion_run_requests` dans la base projet, claim une requête à la fois et déclenche le deployment ingestion ou Allociné selon `request_type`.
+6. `Prefect` poll aussi la file `ops.ingestion_run_requests` dans la base projet, claim une requête à la fois et déclenche le deployment ingestion, Allociné ou Mubi selon `request_type`.
 
 Pour les configs locales de debug, le CLI de scraping charge automatiquement `ingestion/.env` avant de résoudre les placeholders JSON de type `${...}`.
 
@@ -52,7 +56,7 @@ Ce que cela implique:
 3. le Google Sheet `Modification data` n'est pas un flux unique: il faut un sync Airbyte distinct par onglet / table métier;
 4. `dbt` ne scrape rien: il transforme seulement les tables d'entrée;
 5. `Prefect` devient le point d'entrée opérationnel du flux complet, y compris pour déclencher les syncs Airbyte via API.
-6. le runtime Prefect expose l’ingestion, deux scrapers manuels (Allociné et Mubi CNC) et un poller de demandes Metabase;
+6. le runtime Prefect expose l’ingestion, deux scrapers manuels (Allociné et Mubi CNC), un matching MUBI/TMDB manuel et un poller de demandes Metabase;
 7. côté exécution réelle, `dbt phase 1` et `scraping Allociné` sont finalisés;
 8. `airbyte sync` est activé par défaut dans Prefect et exige des noms de connexions explicites;
 9. `dbt phase 2` est activé par défaut après la phase 1, sans scraping intermédiaire.
@@ -252,7 +256,7 @@ Elle utilise:
 2. `prefect-worker`: exécution des flows.
 3. une database distante dédiée `prefect` sur le serveur PostgreSQL existant.
 4. `dbt` et le scraping Allociné directement dans `prefect-worker`.
-5. quatre deployments Prefect utilisateur sont publiés automatiquement au démarrage du worker.
+5. cinq deployments Prefect utilisateur sont publiés automatiquement au démarrage du worker.
 6. les services internes Prefect (scheduler/runner) sont activés pour permettre la création des runs planifiés.
 
 Services:
@@ -274,13 +278,14 @@ Important:
 4. si la base `prefect` a deja ete initialisee par une autre ligne de versions Prefect, le serveur peut echouer au demarrage avec `Can't locate revision identified by '...'`;
 5. dans ce cas, utiliser une base Prefect dediee neuve pour ce stack, ou realigner `PREFECT_VERSION` sur la version exacte qui a cree cette base.
 
-Au démarrage, `start_worker.sh` publie exactement quatre déploiements gérés :
+Au démarrage, `start_worker.sh` publie exactement cinq déploiements gérés :
 
 | Déploiement | Étapes | Déclenchement | Paramètre de volume |
 | --- | --- | --- | --- |
 | `lancer-ingestion-complete` | Airbyte → dbt phase 1 → dbt phase 2 | Manuel ou demande Metabase | Aucun scraping |
 | `lancer-scrapping-allocine` | Lot : Airbyte → scraping ; visa : Airbyte → scraping ciblé → dbt phase 2 | Manuel ou demande Metabase, aucun calendrier | `max_films=10` |
-| `lancer-scrapping-mubi` | Scraping Mubi piloté CNC | Manuel, aucun calendrier | `max_films=10` |
+| `lancer-scrapping-mubi` | Airbyte → lots palmarès puis éditions → dbt phase 2 | Manuel, aucun calendrier | `max_films=10`, lots de 10 films / 25 pages |
+| `rechercher-identifiants-manquants` | Recherche MUBI/TMDB → propositions dans `ops` | Manuel, aucun calendrier | `max_films=10` |
 | `traiter-les-demandes-ingestion` | Poll de `ops.ingestion_run_requests` | Toutes les 300 secondes par défaut | `max_requests_per_run=1` |
 
 Les scrapers sont désactivés automatiquement au sens **absence de calendrier et
@@ -291,9 +296,18 @@ Chaque déploiement de scraping a une concurrence limitée à 1. Cela ne sérial
 pas les déploiements entre eux ; éviter de lancer simultanément scraping et
 reconstruction dbt si une lecture cohérente des données est nécessaire.
 
+Le matching MUBI/TMDB est un flow séparé, sans Airbyte ni dbt. Il lit les
+sources déjà synchronisées et écrit uniquement les propositions dans `ops`.
+Voir le [guide matching](scraping/id_matching/README.md#exécuter-avec-prefect)
+pour créer les tables et lancer un petit lot.
+
 Mubi utilise `mubi_cnc`, pas le crawler global de festivals. La limite porte sur
 les films CNC sélectionnés en phase A. La phase B consulte leurs éditions de
-festivals associées et peut produire davantage de lignes que `max_films`.
+festivals associées et peut produire davantage de lignes que `max_films`. Les
+sous-flows sont séquentiels et reprenables : dix films ou 25 pages candidates
+par lot, avec un budget de collecte de 900 secondes et un garde-fou du processus.
+Le parcours parent peut être long ; dbt attend la fin de la collecte. Voir le
+[guide Mubi borné](scraping/mubi_cnc/README.md#déploiement-prefect).
 
 Le flow principal n’accepte plus de configuration Allociné et n’appelle aucun
 scraper. Airbyte est activé par défaut et utilise
@@ -304,7 +318,12 @@ La phase 1 exécute `dbt build --select tag:phase1` ; la phase 2 exécute
 cette dernière. Les flags CLI correspondants restent disponibles.
 Les lots Allociné sans visa attendent Airbyte avant le scraping, puis nécessitent
 une ingestion séparée pour publier leurs résultats dans les modèles finaux.
-Le scraper Mubi ne lance ni Airbyte ni dbt.
+Le flow Mubi synchronise Airbyte puis collecte les palmarès/éditions et publie dbt phase 2.
+Son CLI seul reste limité à la collecte. Il accepte `visa_number` et
+`force_rescrape` (ciblage obligatoire pour forcer). Une erreur technique ou un
+blocage empêche la publication ; les résultats déjà collectés sont conservés.
+Voir le [guide Mubi CNC](scraping/mubi_cnc/README.md#piloter-depuis-metabase)
+pour le dashboard, les actions Metabase et la reprise après interruption.
 Avec `visa_number`, le même déploiement Allociné attend les syncs Airbyte configurés,
 scrape uniquement ce visa (`max_films` est ramené à 1), puis exécute
 `dbt build --select +tag:phase2`. `force_rescrape=true` rejoue les traitements
@@ -329,7 +348,7 @@ une pause de 5 secondes entre les échecs. Si l’API reste indisponible, le scr
 Ce contrôle de santé ne valide pas les identifiants : les commandes Prefect
 suivantes utilisent l’authentification configurée et échouent si elle est invalide.
 
-Chaque reprise exécute la publication des quatre déploiements décrite ci-dessous.
+Chaque reprise exécute la publication des cinq déploiements décrite ci-dessous.
 Elle ne reprend pas automatiquement un flow interrompu en cours d’exécution.
 Après déploiement, vérifier les politiques avec `docker inspect`, puis contrôler
 la santé du serveur, la connexion du worker à `ingestion-pool` et le prochain run
@@ -346,9 +365,9 @@ cd ingestion
 docker compose up -d --no-deps --force-recreate prefect-worker
 ```
 
-Le démarrage supprime les anciens noms ainsi que les quatre déploiements gérés,
-puis les recrée avec leurs paramètres par défaut. Cela retire notamment les
-anciens calendriers de scraping. Vérifier les quatre noms dans Prefect avant
+Le démarrage réinitialise les quatre déploiements historiques avec leurs paramètres
+par défaut et met à jour le matching en place pour conserver ses runs planifiés. Cela retire notamment les
+anciens calendriers de scraping. Vérifier les cinq noms dans Prefect avant
 de lancer un run. L’ancien nom `lancer-ingestion-donnees` devient
 `lancer-ingestion-complete` ; le poller traduit automatiquement l’ancienne valeur
 connue de `INGESTION_REQUEST_MAIN_DEPLOYMENT_NAME` conservée dans les `.env`.
@@ -384,7 +403,11 @@ Le polling Metabase est maintenant porté directement par des flows Prefect:
 2. `request_id` est maintenant généré automatiquement par PostgreSQL via `gen_random_uuid()`;
 3. il claim au plus une ligne `pending` par run via `FOR UPDATE SKIP LOCKED` et la passe en `processing`;
 4. il route `request_type=ingestion` (valeur par défaut, historique conservé) vers `lancer-ingestion-complete`, et `request_type=allocine` vers `lancer-scrapping-allocine` avec `max_films`, `request_id` et, pour le deuxième bouton, `visa_number`, `force_rescrape` et les connexions Airbyte configurées;
-5. le flow concerné écrit l'état terminal `success` ou `failed` dans la même table ; le poller réconcilie aussi les annulations/crashes Prefect des demandes Allociné au passage suivant;
+   Le type `mubi` est routé vers `lancer-scrapping-mubi`, avec les connexions Airbyte,
+   la limite et le ciblage éventuel. La migration de file ajoute un verrou global
+   à toutes les demandes actives, partagé avec ingestion et Allociné.
+
+5. le flow concerné écrit l'état terminal `success` ou `failed` dans la même table ; le poller réconcilie aussi les annulations/crashes Prefect des demandes Allociné et Mubi au passage suivant;
 6. `Requeue les demandes d'ingestion stale` reste disponible en CLI/code comme maintenance explicite pour les lignes `processing` trop anciennes sans flow run associé; il n'est pas publié automatiquement comme deployment schedulé.
 
 Important:
@@ -405,13 +428,17 @@ Artefacts associés:
 1. Airbyte sync les Google Sheets vers `raw`.
 2. Pour la mise à jour de données, Airbyte exécute un sync séparé par onglet métier.
 3. `raw.id_matching` sert de table d'entrée canonique du scraping.
-4. Prefect expose quatre déploiements : ingestion, Allociné, Mubi CNC et poller.
+4. Prefect expose cinq déploiements : ingestion, Allociné, Mubi CNC, matching MUBI/TMDB et poller.
 5. Airbyte est activé par défaut : Prefect déclenche les syncs configurés par noms de connexions et attend leur fin.
 6. Dans ce flow, Prefect lance ensuite `dbt phase 1`.
 7. Les scrapers se lancent séparément, manuellement.
 8. Prefect exécute `dbt phase 2` directement après la phase 1, sauf désactivation explicite.
 
 ## Documentation détaillée
+
+- [Recherche des identifiants MUBI/TMDB manquants](scraping/id_matching/README.md) :
+  CLI de lecture de `raw.id_matching`, contrôle titre/réalisateur et historique
+  des propositions confirmées ou à examiner dans deux tables `ops`.
 
 1. [README Airbyte](airbyte/README.md): bootstrap versionné des sources Airbyte, secrets locaux hors git et commandes d'application.
 1. [README dbt](dbt/README.md): modèles préparés, tags d'exécution et sources brutes consommées par le projet dbt.

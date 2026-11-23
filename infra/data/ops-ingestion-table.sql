@@ -64,4 +64,24 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+
+-- Mubi partage la file et le verrou global avec ingestion et Allociné.
+ALTER TABLE ops.ingestion_run_requests DROP CONSTRAINT IF EXISTS ingestion_run_requests_request_type_check;
+ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT ingestion_run_requests_request_type_check
+  CHECK (request_type IN ('ingestion', 'allocine', 'mubi'));
+ALTER TABLE ops.ingestion_run_requests DROP CONSTRAINT IF EXISTS allocine_target_parameters;
+ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT allocine_target_parameters
+  CHECK ((visa_number IS NULL AND NOT force_rescrape) OR (
+    request_type IN ('allocine', 'mubi') AND visa_number IS NOT NULL
+    AND visa_number ~ '^[0-9]+$' AND visa_number ~ '[1-9]' AND max_films = 1));
+ALTER TABLE ops.ingestion_run_requests DROP CONSTRAINT IF EXISTS mubi_request_parameters;
+ALTER TABLE ops.ingestion_run_requests ADD CONSTRAINT mubi_request_parameters
+  CHECK (request_type <> 'mubi' OR (
+    max_films IS NOT NULL AND max_films > 0
+    AND length(btrim(requested_by_metabase_user)) > 0
+    AND request_reason IS NOT NULL AND length(btrim(request_reason)) > 0));
+-- Échoue sans modifier les données si plusieurs demandes sont déjà actives.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ingestion_run_requests_global_active
+  ON ops.ingestion_run_requests ((true)) WHERE request_status IN ('pending', 'processing');
+
 RESET ROLE;

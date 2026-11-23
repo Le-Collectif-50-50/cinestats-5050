@@ -1,15 +1,33 @@
-WITH french_financed AS (
+WITH film_genres AS (
+    SELECT
+        film_id,
+        STRING_AGG(DISTINCT genres.genre_name, ', ' ORDER BY genres.genre_name) AS genre
+    FROM {{ ref('fnl_film_genre') }} AS associations
+    LEFT JOIN {{ ref('fnl_genre') }} AS genres
+        ON associations.genre_id = genres.genre_id
+    GROUP BY film_id
+),
+
+max_allocation AS (
     SELECT
         film_id,
         country_name,
         budget_allocation,
+        MAX(budget_allocation) OVER (PARTITION BY film_id) AS max_budget_allocation
+    FROM {{ ref('fnl_film_country_budget_allocation') }}
+),
+
+french_financed AS (
+    SELECT
+        film_id,
         CASE
-            WHEN country_name = 'France' AND budget_allocation >= 50 THEN TRUE
+            WHEN budget_allocation = max_budget_allocation THEN TRUE
             ELSE FALSE
         END AS is_french_financed
-    FROM {{ ref('int_film_country_budget_allocation') }}
+    FROM max_allocation
     WHERE country_name = 'France'
 )
+
 SELECT
     films.film_id,
     films.cnc_visa,
@@ -23,6 +41,7 @@ SELECT
     allocine.duration_mn,
     films.budget,
     films.budget_category,
+    film_genres.genre,
     films.broadcasters,
     french_financed.is_french_financed,
     films.has_parity_bonus,
@@ -39,3 +58,5 @@ LEFT JOIN {{ ref('int_allocine_films') }} AS allocine
     ON films.film_id = allocine.film_id
 LEFT JOIN french_financed
     ON films.film_id = french_financed.film_id
+LEFT JOIN film_genres
+    ON films.film_id = film_genres.film_id

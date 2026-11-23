@@ -46,8 +46,9 @@ delete_deployment_if_exists "Traiter les demandes d'ingestion/traiter-les-demand
 delete_deployment_if_exists "Traiter les demandes d'ingestion/traiter-les-demandes-ingestion"
 delete_deployment_if_exists "Requeue les demandes d'ingestion stale/requeue-les-demandes-d-ingestion-stale"
 
-# Supprimer les anciens noms et tout calendrier conservé sur les trois runs manuels.
-# Les quatre déploiements gérés sont recréés avec leurs paramètres par défaut.
+# Réinitialiser les quatre déploiements historiques et leurs anciens calendriers.
+# Le matching est mis à jour en place : supprimer son déploiement détruirait
+# les runs Scheduled du rattrapage déjà enregistrés côté serveur.
 delete_deployment_if_exists "Lancer l'ingestion complete/lancer-ingestion-donnees"
 delete_deployment_if_exists "Lancer l'ingestion complete/lancer-ingestion-complete"
 delete_deployment_if_exists "Recuperer les donnees Allocine/lancer-scraping-allocine"
@@ -74,10 +75,19 @@ prefect --no-prompt deploy "${FLOWS_FILE}:run_allocine_scraping" \
 
 prefect --no-prompt deploy "${FLOWS_FILE}:run_mubi_cnc_scraping" \
 	--name "lancer-scrapping-mubi" \
-	--description "Scraping Mubi manuel, max_films=10 films CNC par defaut et editions associees, sans Airbyte ni dbt." \
+	--description "Mubi CNC manuel : Airbyte, lots palmares/editions bornes a 15 minutes, puis dbt. max_films=10, batch_size=10, festival_page_limit=25." \
 	--concurrency-limit 1 \
 	--pool "${POOL_NAME}" >/tmp/prefect-deploy-mubi.log 2>&1 || {
 	cat /tmp/prefect-deploy-mubi.log
+	exit 1
+}
+
+prefect --no-prompt deploy "${FLOWS_FILE}:run_missing_id_matching" \
+	--name "rechercher-identifiants-manquants" \
+	--description "Recherche manuelle des IDs MUBI/TMDB manquants ; resultats dans ops, sans publication vers id_matching. max_films=10." \
+	--concurrency-limit 1 \
+	--pool "${POOL_NAME}" >/tmp/prefect-deploy-id-matching.log 2>&1 || {
+	cat /tmp/prefect-deploy-id-matching.log
 	exit 1
 }
 
