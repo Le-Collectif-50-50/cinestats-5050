@@ -405,7 +405,7 @@ class ManualRecoverySQLTests(unittest.TestCase):
             (2024, "0", "0", "Moins de 2M€"),
         ]
         rows = [dict(VISA=str(i + 1), ANNEE_D_AGREMENT=year, DEVIS=raw,
-                     UPDATED_DATE="15/11/2026", UPDATED_BY="Test")
+                     UPDATED_DATE="15/11/2026", UPDATED_BY="Test", PAYANT="C+ C+", CLAIR="F2")
                 for i, (year, raw, _, _) in enumerate(cases)]
         staging = self.run_model("staging/stg_cnc_films.sql", {
             "source_films": fixture(cols, rows),
@@ -424,12 +424,27 @@ class ManualRecoverySQLTests(unittest.TestCase):
         ).module.gsheet_updated_timestamp
         stage_sql = env.from_string((MODELS / "staging/stg_cnc_films.sql").read_text()).render(
             source=lambda schema, name: "source_films", config=lambda **kwargs: "")
+        env.globals["ref"] = lambda name: name
+        env.globals["config"] = lambda **kwargs: ""
+        env.globals["cnc_broadcaster_tokens"] = env.from_string(
+            (MODELS.parent / "macros/cnc_broadcaster_tokens.sql").read_text()
+        ).module.cnc_broadcaster_tokens
+        broadcaster_sql = env.from_string(
+            (MODELS / "intermediate/int_cnc_broadcasters.sql").read_text()
+        ).render()
         categories = self.run_model("intermediate/int_cnc_films.sql", {
             "source_films": fixture(cols, rows),
             "stg_cnc_films": stage_sql,
+            "cnc_broadcaster_aliases": fixture(
+                dict(priority="integer", alias_pattern="text", broadcaster_name="text", is_excluded="boolean"),
+                [dict(priority=1, alias_pattern=r"C\+", broadcaster_name="Canal+", is_excluded=False),
+                 dict(priority=2, alias_pattern="F2", broadcaster_name="France2", is_excluded=False)],
+            ),
+            "int_cnc_broadcasters": broadcaster_sql,
             "stg_id_matching": fixture(dict(film_id="uuid", cnc_visa="integer"), []),
         })
         self.assertEqual(len(categories), len(cases))
+        self.assertEqual({r["broadcasters"] for r in categories}, {"Canal+, France2"})
         self.assertEqual([r["budget_category"] for r in sorted(categories, key=lambda r: r["cnc_visa"])],
                          [category for _, _, _, category in cases])
 
