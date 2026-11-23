@@ -2,7 +2,7 @@
 
 **Owner:** Nicolas Revel
 
-**Dernière révision:** 2026-11-17
+**Dernière révision:** 2026-11-23
 
 **Status:** brouillon
 
@@ -13,6 +13,7 @@
 | 1 | 2026-10-31 | Nicolas Revel | Proposition initiale : la stack data actuelle alimente aussi la base de l'environnement preview, pour vérifier les changements dans l'app `preview.cinestats5050.fr` avant de les publier en production. À valider par Joel Teixeira avant implémentation. |
 | 2 | 2026-11-01 | Nicolas Revel | Prérequis retenu : le backend lit les tables `fnl_*` au lieu des tables `ric_*` couvertes par la pipeline. Ajout de la stratégie d'identifiant film (URL publiques), du lien avec les tables restées en `ric_*` et des droits de `app_ro`. |
 | 3 | 2026-11-17 | Nicolas Revel | Alignement sur `main` : ingestion sans scraping (`lancer-ingestion-complete`), scrapers manuels Allociné et Mubi CNC, types de demandes Metabase (`ingestion`, `allocine`, par visa). Renvoi au [guide de finalisation dbt](../reference/ingestion-mapping-frontend-api-legacy-dbt.md) pour la bascule du backend ; ajout des films sans visa. |
+| 4 | 2026-11-23 | Nicolas Revel | Alignement sur `main` : demandes Mubi dans la file Metabase et verrou global d'une seule demande active. La limite de concurrence ne reste nécessaire que pour les runs lancés depuis Prefect. Déploiement `rechercher-identifiants-manquants` hors périmètre. |
 
 ## 1. Objectif
 
@@ -33,8 +34,8 @@ Principe : **une seule stack data** (le VPS `data` actuel), **deux bases cibles*
 | Base preview | Postgres conteneurisé (service `db`) sur la machine preview, **sans port publié**, rempli par Alembic et le seed (`RUN_SEED`). Pas de schémas `raw`/`staging`/`intermediate`/`fnl`/`ops`, pas de rôles d'ingestion, pas de TLS. | [docker-compose.preview.yaml](../../docker-compose.preview.yaml), [DEPLOYMENT.md](../DEPLOYMENT.md#preview) |
 | Réseau | WireGuard en étoile centré sur `db` : `app` et `data` ne voient que `db`. La machine preview n'en fait pas partie. | [infra/vps/10-wireguard.sh](../../infra/vps/10-wireguard.sh) |
 | Choix de la base dans les outils | dbt : une seule cible `default`. Scraper Allociné : placeholders `${POSTGRES_HOST}`… dans un fichier de config passé en paramètre (`config_path`). Airbyte : une destination par connexion, choisie par nom. | [profiles.yml](../../ingestion/dbt/profiles/profiles.yml), [config.json](../../ingestion/scraping/allocine/config.json), [flows.py](../../ingestion/prefect/flows.py) |
-| Déploiements Prefect | `lancer-ingestion-complete` (Airbyte puis dbt, sans scraping, sans limite de concurrence) ; `lancer-scrapping-allocine` et `lancer-scrapping-mubi`, manuels, limités à un run. | [start_worker.sh](../../ingestion/prefect/start_worker.sh) |
-| Déclenchement Metabase | Trois actions SQL écrivent dans `ops.ingestion_run_requests` (base de prod) : ingestion, scraping Allociné limité, scraping Allociné par visa (`request_type`, `max_films`, `visa_number`, `force_rescrape`). Le poller lance le déploiement correspondant. | [ops-ingestion-table.sql](../../infra/data/ops-ingestion-table.sql), [metabase-trigger-ingestion.sql](../../infra/data/metabase-trigger-ingestion.sql), [metabase-trigger-allocine.sql](../../infra/data/metabase-trigger-allocine.sql), [metabase-trigger-allocine-visa.sql](../../infra/data/metabase-trigger-allocine-visa.sql) |
+| Déploiements Prefect | `lancer-ingestion-complete` (Airbyte puis dbt, sans scraping, sans limite de concurrence) ; `lancer-scrapping-allocine` et `lancer-scrapping-mubi` (Mubi CNC : Airbyte, scraping, puis dbt), manuels, limités à un run ; `rechercher-identifiants-manquants`, limité à un run, qui écrit ses résultats dans `ops` sans publier. | [start_worker.sh](../../ingestion/prefect/start_worker.sh) |
+| Déclenchement Metabase | Cinq actions SQL écrivent dans `ops.ingestion_run_requests` (base de prod) : ingestion, scraping Allociné limité ou par visa, scraping Mubi limité ou par visa (`request_type` parmi `ingestion`, `allocine`, `mubi` ; `max_films`, `visa_number`, `force_rescrape`). Un index unique n'autorise **qu'une seule demande active** (`pending` ou `processing`) à la fois, tous types confondus. Le poller lance le déploiement correspondant. | [ops-ingestion-table.sql](../../infra/data/ops-ingestion-table.sql), [actions `metabase-trigger-*.sql`](../../infra/data/) |
 
 **Conséquence principale :** brancher la pipeline sur la base preview ne change pas l'app preview tant que le backend lit `ric_*`. Faire lire `fnl` au backend (§4.1) est un **prérequis**. C'est la phase 4 « Backend / Exposition » déjà prévue par la [spécification Airbyte/dbt](ingestion-specification-airbyte-dbt-mises-a-jour-donnees.md#114-phase-4---backend--exposition). La preview sert alors de répétition, comme pour les migrations Alembic : le nouveau backend est déployé en preview sur des données `fnl` produites par la pipeline, puis en production.
 
@@ -127,7 +128,9 @@ Un paramètre unique, `target: Literal["production", "preview"] = "production"`,
 
 Les variables `PREVIEW_*` s'ajoutent au `.env` du VPS `data` ([infra/data/.env.example](../../infra/data/.env.example)) sans valeur dans git. La file `ops.ingestion_run_requests` et Prefect restent en production : seules les données changent de base.
 
-Ajouter `--concurrency-limit 1` au deployment `lancer-ingestion-complete` dans [start_worker.sh](../../ingestion/prefect/start_worker.sh). Aujourd'hui, seuls le poller et les scrapers sont limités, et le poller n'attend pas la fin du run qu'il déclenche : une ingestion preview et une ingestion production pourraient s'exécuter en même temps.
+Les demandes Metabase sont déjà sérialisées par le verrou global de la file : une demande preview doit être terminée avant qu'une demande production puisse être enregistrée. Ajouter tout de même `--concurrency-limit 1` au deployment `lancer-ingestion-complete` dans [start_worker.sh](../../ingestion/prefect/start_worker.sh) : c'est le seul déploiement non limité, et deux runs lancés à la main depuis Prefect (un en preview, un en production) pourraient encore s'exécuter en même temps.
+
+`rechercher-identifiants-manquants` reste hors périmètre : il ne publie rien et n'a pas besoin de cible.
 
 ### 4.5 Metabase
 
@@ -139,12 +142,12 @@ Ajouter `--concurrency-limit 1` au deployment `lancer-ingestion-complete` dans [
      CHECK (target IN ('production', 'preview'));
    ```
 
-   La colonne vaut pour tous les `request_type` (ingestion et scraping Allociné).
+   La colonne vaut pour tous les `request_type` (`ingestion`, `allocine`, `mubi`).
 2. Pour l'ingestion, deux actions dans Metabase :
    - « Mettre à jour la preview » : `target = 'preview'`, avec une clé de déduplication propre à la preview (par exemple préfixée `metabase:preview:`) ;
    - « Publier en production » : l'action actuelle, avec `target = 'production'` explicite.
 
-   Pour les deux actions Allociné, ajouter un paramètre `target` plutôt que de les dupliquer.
+   Pour les quatre actions de scraping (Allociné et Mubi, limitées ou par visa), ajouter un paramètre `target` plutôt que de les dupliquer.
 3. Le poller lit `target` dans la ligne claimée et le passe au déploiement déclenché.
 
 ## 5. Parcours opérateur
@@ -152,7 +155,7 @@ Ajouter `--concurrency-limit 1` au deployment `lancer-ingestion-complete` dans [
 1. Mettre à jour le Google Sheet `Modification data`.
 2. Dans Metabase, cliquer sur **Mettre à jour la preview**. Le run synchronise le Sheet vers la base preview, puis construit dbt dans la base preview. L'app preview lit directement les nouvelles tables `fnl`.
 3. Vérifier les pages concernées sur `preview.cinestats5050.fr`.
-4. Si c'est conforme, cliquer sur **Publier en production**. Sinon, corriger le Sheet et revenir à l'étape 2.
+4. Si c'est conforme, cliquer sur **Publier en production**. La file refuse la demande tant que celle de la preview n'est pas terminée. Sinon, corriger le Sheet et revenir à l'étape 2.
 
 Comme les deux runs relisent le Sheet, une modification faite entre l'étape 2 et l'étape 4 serait publiée sans avoir été vérifiée. Consigne : ne pas modifier le Sheet entre les deux runs.
 
@@ -174,7 +177,7 @@ Une PR par lot. Les lots 1 à 3 ne changent rien en production.
 
 1. **Chaque run de production modifie directement le site.** Une fois le backend sur `fnl`, un run dbt en erreur ou des données fausses sont visibles tout de suite. Mesures : le passage par la preview (objet de ce document), des tests dbt bloquants sur `fnl` et, en cas de problème, le retour à `DATA_SOURCE=ric` (§4.1, point 7), les tables `ric_*` restant intactes.
 2. **La preview peut repartir de zéro.** Un `docker compose down -v` efface rôles, schémas et données d'ingestion : il faut alors rejouer le lot 2. À documenter dans [DEPLOYMENT.md](../DEPLOYMENT.md#rollback).
-3. **Ressources du VPS `data`.** Les runs preview s'ajoutent aux runs de production sur un VPS déjà serré (Airbyte, Chrome). La limite de concurrence les sérialise ; à surveiller.
+3. **Ressources du VPS `data`.** Les runs preview s'ajoutent aux runs de production sur un VPS déjà serré (Airbyte, Chrome). Le verrou de la file et la limite de concurrence les sérialisent ; à surveiller.
 4. **Scraping en double.** Chaque base a son propre `raw.allocine_data` : un nouveau film est scrapé deux fois, une fois par base. Le volume est faible si l'on fait la copie initiale du §4.3.
 5. **Écart de code.** Les deux cibles utilisent le code déployé sur le VPS `data`. Pour tester un modèle dbt modifié avant son déploiement, voir la question ouverte n° 4.
 6. **Secrets supplémentaires.** Mots de passe des rôles preview et clé WireGuard : hors git, dans l'environment GitHub `preview` et le `.env` du VPS `data`.
