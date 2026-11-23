@@ -32,7 +32,7 @@
 
 | 15 | 2026-11-16 | Joel Teixeira | Vue ops de couverture Mubi et dashboard de suivi CNC (#83). |
 | 16 | 2026-11-18 | Joel Teixeira | Préservation des associations et libellés de genres manuels dans la colonne agrégée (#86), priorité des noms corrigés et prise en charge des personnes manuelles dans full_name (#90). |
-| 17 | 2026-11-23 | Joel Teixeira | Mapping des alias diffuseurs CNC, préservation des noms composés, déduplication et signalement des inconnus (#45). |
+| 17 | 2026-11-23 | Joel Teixeira | Mapping des alias diffuseurs CNC, préservation des noms composés, déduplication et signalement des inconnus, validation des populations filtrées et explication des écarts legacy (#45). |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -83,6 +83,36 @@ La publication exige de charger le nouveau seed puis de reconstruire le staging,
 les modèles intermédiaires et les tables finales dépendantes. La sélection
 habituelle `dbt build --select +tag:phase2` inclut ces dépendances. Ne pas lancer
 uniquement `fnl_films` sans reconstruire ses parents. Aucun re-scraping requis.
+
+### Validation du 23 novembre 2026
+
+Le mapping a été déployé puis exécuté en production : 120 tests réussis,
+7 avertissements et aucune erreur. La table finale conserve 6 139 films distincts.
+Deux valeurs source `CLAIR = 0` (visas 155365 et 154116) restent inconnues et
+signalées pour revue ; aucune signification métier ne leur est attribuée.
+
+La [requête reproductible de validation](analyses/cnc_broadcasters_issue_45_validation.sql)
+compare les ensembles de diffuseurs par visa avec `ops.v_statistics_legacy_films`.
+Sur les 4 909 films dont les dates de sortie des **deux** sources sont comprises
+entre le 01/01/2004 et le 31/12/2024, sans autre filtre, les populations sélectionnées
+sont identiques : Canal+ 2 602, Ciné+ 2 087, France2 686, M6 190 et W9 111.
+Il n'y a aucun changement de membre pour ces cinq filtres.
+
+Sur le périmètre historique où **au moins une** des deux dates est dans cette
+période, 4 918 visas sont rapprochés et 16 ensembles diffèrent :
+
+| Écart avec le legacy | Films | Explication vérifiée dans la source CNC |
+| --- | ---: | --- |
+| AmazonPrime ajouté | 6 | `Prime Video` était perdu par le découpage legacy sur les espaces. |
+| RMC Story au lieu de RMC + STORY | 4 | Le nom composé est désormais conservé. |
+| France4 sans FranceTV supplémentaire | 5 | `FRANCE 4` produisait deux diffuseurs dans le legacy. |
+| France O sans FranceTV parasite | 1 | `France O` était découpé ; l'exclusion de FranceÔ laissait le faux libellé FranceTV. |
+
+Ces 16 écarts sont aussi présents dans la cohorte commune de 4 909 films.
+Ils ne constituent pas une perte de diffuseurs CNC par le nouveau mapping.
+Le rapprochement initial du 13 novembre portait sur 4 914 visas : les instantanés
+source ont évolué ; son décompte de différences textuelles n'est pas un comparatif
+avant/après à population constante.
 
 ## Exécution
 

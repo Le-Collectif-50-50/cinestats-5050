@@ -16,7 +16,8 @@ WITH cases (id, paid, free, expected, unknown_tokens) AS (
         (13, 'C+' || CHR(160) || 'Ciné+', 'France' || CHR(8239) || '4', 'Canal+, Ciné+, France4', ''),
         (14, 'Amazon Prime Vidéo Netflix Netlfix', 'ARTE', 'AmazonPrime, Arte, Netflix', ''),
         (15, 'TV5 Monde5 Universcine Paramount', '0', '0, Paramount+, TV5, UniversCiné', '0'),
-        (16, 'OCS, Ciné+;C+', 'TF1/TFX TMC', 'Canal+, Ciné+, OCS, TF1, TFX, TMC', '')
+        (16, 'OCS, Ciné+;C+', 'TF1/TFX TMC', 'Canal+, Ciné+, OCS, TF1, TFX, TMC', ''),
+        (17, 'C+ F2', 'CANAL+ France 2', 'Canal+, France2', '')
 ),
 tokenized AS (
     SELECT cases.id, tokens.*
