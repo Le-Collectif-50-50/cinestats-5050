@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-18
+**Dernière révision:** 2026-11-23
 
 **Status:** actif
 
@@ -32,6 +32,7 @@
 
 | 15 | 2026-11-16 | Joel Teixeira | Vue ops de couverture Mubi et dashboard de suivi CNC (#83). |
 | 16 | 2026-11-18 | Joel Teixeira | Préservation des associations et libellés de genres manuels dans la colonne agrégée (#86), priorité des noms corrigés et prise en charge des personnes manuelles dans full_name (#90). |
+| 17 | 2026-11-23 | Joel Teixeira | Mapping des alias diffuseurs CNC, préservation des noms composés, déduplication et signalement des inconnus (#45). |
 
 Projet dbt Core exécuté depuis `prefect-worker`.
 
@@ -46,6 +47,42 @@ Projet dbt Core exécuté depuis `prefect-worker`.
 `stg_allocine_films.poster_url` expose l’URL distante nullable de l’affiche. Appliquer la [migration ingestion](../../infra/data/2026-10-15-allocine-poster-url.sql) avant de reconstruire ce modèle sur une base existante. Le [guide Allociné](../scraping/allocine/README.md#affiches--migration-et-reprise-explicite) décrit le backfill explicite et les droits requis. Aucun fichier image n’est stocké par dbt. Les projections aval restent inchangées.
 
 Le staging `stg_cnc_films` retire les espaces classiques, insécables (U+00A0) et fines insécables (U+202F) de `DEVIS`, puis remplace la virgule décimale par un point avant conversion numérique. Le contrat d’entrée est désormais **DEVIS en euros exacts pour toutes les années** : conversion PostgreSQL `NUMERIC`, sans multiplication selon l’année ; les chaînes vides deviennent nulles, les valeurs non numériques provoquent une erreur. La source Airbyte doit afficher les euros sans arrondi. **Ne pas déployer ce changement seul sur une source encore exprimée en millions.** Suivre la [bascule coordonnée et les contrôles #43](../../docs/runbooks/ingestion-budget-euros.md).
+
+## Normaliser les diffuseurs CNC (#45)
+
+Le staging conserve les textes `PAYANT` et `CLAIR`, y compris leurs séparateurs.
+Le seed [cnc_broadcaster_aliases](seeds/cnc_broadcaster_aliases.csv) centralise
+les expressions régulières PostgreSQL des alias et leurs libellés normalisés.
+La priorité croissante protège les noms composés (`France TV`, `Orange TV`,
+`Prime Video`, `TV5 Monde`, `Canal J`, `13ème Rue`, `RMC Story`) avant les alias
+courts. Les espaces insécables sont traités comme des espaces ordinaires ; casse,
+accents et variantes sont explicités dans les expressions du seed.
+
+`int_cnc_broadcasters` découpe chaque valeur distincte en conservant sa provenance
+payante/gratuite. Les espaces et les séparateurs `/`, `,`, `;` séparent les éléments,
+sauf dans les noms composés reconnus. `int_cnc_films.broadcasters` réassemble les
+libellés distincts et triés avec `, `, sans multiplier les lignes de films.
+Ainsi `C+ Ciné+` + `F2 F3` donne `Canal+, Ciné+, France2, France3`.
+
+France2, France3 et France4 restent distincts de FranceTV : sélectionner FranceTV
+seul ne sélectionne pas toutes les chaînes du groupe. La règle déjà appliquée
+France5 → FranceTV et l'exclusion de FranceÔ sont conservées, désormais par élément.
+Aucun autre changement de groupe ni de marque historique n'est implicite.
+
+Les mots inconnus conservent leur graphie source dans le champ final. La vue
+`ops.cnc_broadcasters_unrecognized` expose visa, titre, provenance, valeur source et
+token ; le test associé émet un avertissement. Un nom composé inconnu peut être
+séparé en plusieurs mots : ajouter son expression au seed après revue. La valeur
+source intégrale reste disponible ; `0` reste inconnu plutôt que supprimé.
+
+Pour ajouter un alias, vérifier qu'il ne chevauche aucune autre expression et
+placer les formes composées avant leurs préfixes. Les tests vérifient le découpage,
+les chevauchements, les valeurs inconnues, les exclusions et la déduplication.
+
+La publication exige de charger le nouveau seed puis de reconstruire le staging,
+les modèles intermédiaires et les tables finales dépendantes. La sélection
+habituelle `dbt build --select +tag:phase2` inclut ces dépendances. Ne pas lancer
+uniquement `fnl_films` sans reconstruire ses parents. Aucun re-scraping requis.
 
 ## Exécution
 

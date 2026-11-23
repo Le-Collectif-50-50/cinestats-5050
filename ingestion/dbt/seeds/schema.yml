@@ -21,3 +21,15 @@ seeds:
         tests: [not_null]
       - name: evidence_record_hash
         tests: [not_null]
+
+  - name: cnc_broadcaster_aliases
+    description: "Expressions régulières ordonnées des alias CNC ; noms composés avant alias courts. France5 reste rattachée à FranceTV et FranceÔ exclue, selon la règle existante."
+    columns:
+      - name: priority
+        tests: [not_null, unique]
+      - name: alias_pattern
+        tests: [not_null, unique]
+      - name: broadcaster_name
+        tests: [not_null]
+      - name: is_excluded
+        tests: [not_null]

@@ -23,7 +23,7 @@ models:
       - name: producer
         description: "Liste des producteurs du film."
       - name: broadcasters
-        description: "Chaîne texte des diffuseurs payants et gratuits, séparés par une virgule, avec normalisation des noms (France5 → FranceTV, suppression de FranceÔ)."
+        description: "Diffuseurs payants et gratuits normalisés via cnc_broadcaster_aliases, dédupliqués et triés ; France5 → FranceTV, FranceÔ exclue. Les inconnus sont conservés et signalés dans ops."
       - name: has_eof
         description: "Indique si le film bénéficie du dispositif EOF."
       - name: has_parity_bonus
@@ -277,3 +277,18 @@ models:
           - unique
       - name: name
         description: "Nom du genre cinématographique."
+
+  - name: int_cnc_broadcasters
+    description: "Découpage et mapping des valeurs CNC distinctes, avec provenance payante/gratuite et conservation des tokens inconnus."
+    columns:
+      - name: broadcaster_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['paid', 'free']
+      - name: source_value
+        tests: [not_null]
+      - name: token
+        tests: [not_null]
+      - name: broadcaster_name
+        tests: [not_null]
