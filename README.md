@@ -70,3 +70,5 @@ Les PR ciblent `main`. Pour déployer, suivre le [runbook de promotion](docs/run
 | 2 | 2026-10-09 | Joel Teixeira | Ajout du guide de promotion preview vers production |
 | 3 | 2026-10-10 | Joel Teixeira | Vue d'ensemble condensée, parcours local et liens ciblés vers les guides de travail et d'exploitation. |
 | 4 | 2026-11-17 | Nicolas Revel | Lien vers le document de sécurité. |
+| 5 | 2026-11-18 | Joel Teixeira | Référence du suivi automatique des statuts des issues GitHub. |
+| 6 | 2026-11-24 | Joel Teixeira | Navigation vers les deux Projects et procédure de suivi transverse. |
