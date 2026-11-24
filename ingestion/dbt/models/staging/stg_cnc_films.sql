@@ -21,8 +21,8 @@ SELECT
     STRING_TO_ARRAY(REPLACE("REALISATEUR", ' ', ''), ' / ') AS director,
     CAST(REPLACE("RANG", ' ', '') AS TEXT) AS director_rank,
     STRING_TO_ARRAY(REPLACE("PRODUCTEURS", ' ', ''), ' / ') AS producer,
-    CAST(REPLACE("PAYANT", ' ', '') AS TEXT) AS paid_broadcaster,
-    CAST(REPLACE("CLAIR", ' ', '') AS TEXT) AS free_broadcaster,
+    CAST("PAYANT" AS TEXT) AS paid_broadcaster,
+    CAST("CLAIR" AS TEXT) AS free_broadcaster,
     ARRAY(
         SELECT JSONB_BUILD_OBJECT(
             'country', INITCAP(UNACCENT(TRIM(REGEXP_REPLACE(elem, '[^a-zA-ZÀ-ÿ ]', '', 'g')))),

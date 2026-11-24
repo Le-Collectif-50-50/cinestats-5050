@@ -27,17 +27,15 @@ SELECT
         ORDER BY position
     ))[1] AS filmography_rank, -- TODO : revoir pour récupérer le rang de tous les réalisateurs
     films.producer,
-    ARRAY_TO_STRING(ARRAY(
-        SELECT
-            CASE str_broadcaster
-                WHEN 'France5' THEN 'FranceTV'
-                ELSE str_broadcaster
-            END
-        FROM UNNEST(ARRAY[films.paid_broadcaster, films.free_broadcaster]) AS str_broadcaster
-        WHERE str_broadcaster IS NOT NULL
-            AND str_broadcaster != ''
-            AND str_broadcaster != 'FranceÔ'
-    ), ', ') AS broadcasters,
+    COALESCE((
+        SELECT STRING_AGG(DISTINCT b.broadcaster_name, ', ' ORDER BY b.broadcaster_name)
+        FROM {{ ref('int_cnc_broadcasters') }} AS b
+        WHERE NOT b.is_excluded
+            AND (
+                (b.broadcaster_type = 'paid' AND b.source_value = films.paid_broadcaster)
+                OR (b.broadcaster_type = 'free' AND b.source_value = films.free_broadcaster)
+            )
+    ), '') AS broadcasters,
     films.country_funder,
     films.has_eof,
     films.has_parity_bonus,

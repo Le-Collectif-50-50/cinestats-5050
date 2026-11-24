@@ -4,7 +4,7 @@
 
 **Owner:** Joel Teixeira
 
-**Dernière révision:** 2026-11-15
+**Dernière révision:** 2026-11-23
 
 **Status:** actif
 
@@ -30,6 +30,10 @@
 | 13 | 2026-11-15 | Joel Teixeira | Invalidation traçable des associations source Allociné rejetées (#67), avant sélection du dernier succès ; historique des résultats et crédits rejetés. |
 | 14 | 2026-11-15 | Joel Teixeira | Contrat DEVIS en euros exacts, conversion NUMERIC et procédure de bascule coordonnée source/dbt (#43). |
 
+| 15 | 2026-11-16 | Joel Teixeira | Vue ops de couverture Mubi et dashboard de suivi CNC (#83). |
+| 16 | 2026-11-18 | Joel Teixeira | Préservation des associations et libellés de genres manuels dans la colonne agrégée (#86), priorité des noms corrigés et prise en charge des personnes manuelles dans full_name (#90). |
+| 17 | 2026-11-23 | Joel Teixeira | Mapping des alias diffuseurs CNC, préservation des noms composés, déduplication et signalement des inconnus, validation des populations filtrées et explication des écarts legacy (#45). |
+
 Projet dbt Core exécuté depuis `prefect-worker`.
 
 ## Rôle
@@ -43,6 +47,72 @@ Projet dbt Core exécuté depuis `prefect-worker`.
 `stg_allocine_films.poster_url` expose l’URL distante nullable de l’affiche. Appliquer la [migration ingestion](../../infra/data/2026-10-15-allocine-poster-url.sql) avant de reconstruire ce modèle sur une base existante. Le [guide Allociné](../scraping/allocine/README.md#affiches--migration-et-reprise-explicite) décrit le backfill explicite et les droits requis. Aucun fichier image n’est stocké par dbt. Les projections aval restent inchangées.
 
 Le staging `stg_cnc_films` retire les espaces classiques, insécables (U+00A0) et fines insécables (U+202F) de `DEVIS`, puis remplace la virgule décimale par un point avant conversion numérique. Le contrat d’entrée est désormais **DEVIS en euros exacts pour toutes les années** : conversion PostgreSQL `NUMERIC`, sans multiplication selon l’année ; les chaînes vides deviennent nulles, les valeurs non numériques provoquent une erreur. La source Airbyte doit afficher les euros sans arrondi. **Ne pas déployer ce changement seul sur une source encore exprimée en millions.** Suivre la [bascule coordonnée et les contrôles #43](../../docs/runbooks/ingestion-budget-euros.md).
+
+## Normaliser les diffuseurs CNC (#45)
+
+Le staging conserve les textes `PAYANT` et `CLAIR`, y compris leurs séparateurs.
+Le seed [cnc_broadcaster_aliases](seeds/cnc_broadcaster_aliases.csv) centralise
+les expressions régulières PostgreSQL des alias et leurs libellés normalisés.
+La priorité croissante protège les noms composés (`France TV`, `Orange TV`,
+`Prime Video`, `TV5 Monde`, `Canal J`, `13ème Rue`, `RMC Story`) avant les alias
+courts. Les espaces insécables sont traités comme des espaces ordinaires ; casse,
+accents et variantes sont explicités dans les expressions du seed.
+
+`int_cnc_broadcasters` découpe chaque valeur distincte en conservant sa provenance
+payante/gratuite. Les espaces et les séparateurs `/`, `,`, `;` séparent les éléments,
+sauf dans les noms composés reconnus. `int_cnc_films.broadcasters` réassemble les
+libellés distincts et triés avec `, `, sans multiplier les lignes de films.
+Ainsi `C+ Ciné+` + `F2 F3` donne `Canal+, Ciné+, France2, France3`.
+
+France2, France3 et France4 restent distincts de FranceTV : sélectionner FranceTV
+seul ne sélectionne pas toutes les chaînes du groupe. La règle déjà appliquée
+France5 → FranceTV et l'exclusion de FranceÔ sont conservées, désormais par élément.
+Aucun autre changement de groupe ni de marque historique n'est implicite.
+
+Les mots inconnus conservent leur graphie source dans le champ final. La vue
+`ops.cnc_broadcasters_unrecognized` expose visa, titre, provenance, valeur source et
+token ; le test associé émet un avertissement. Un nom composé inconnu peut être
+séparé en plusieurs mots : ajouter son expression au seed après revue. La valeur
+source intégrale reste disponible ; `0` reste inconnu plutôt que supprimé.
+
+Pour ajouter un alias, vérifier qu'il ne chevauche aucune autre expression et
+placer les formes composées avant leurs préfixes. Les tests vérifient le découpage,
+les chevauchements, les valeurs inconnues, les exclusions et la déduplication.
+
+La publication exige de charger le nouveau seed puis de reconstruire le staging,
+les modèles intermédiaires et les tables finales dépendantes. La sélection
+habituelle `dbt build --select +tag:phase2` inclut ces dépendances. Ne pas lancer
+uniquement `fnl_films` sans reconstruire ses parents. Aucun re-scraping requis.
+
+### Validation du 23 novembre 2026
+
+Le mapping a été déployé puis exécuté en production : 120 tests réussis,
+7 avertissements et aucune erreur. La table finale conserve 6 139 films distincts.
+Deux valeurs source `CLAIR = 0` (visas 155365 et 154116) restent inconnues et
+signalées pour revue ; aucune signification métier ne leur est attribuée.
+
+La [requête reproductible de validation](analyses/cnc_broadcasters_issue_45_validation.sql)
+compare les ensembles de diffuseurs par visa avec `ops.v_statistics_legacy_films`.
+Sur les 4 909 films dont les dates de sortie des **deux** sources sont comprises
+entre le 01/01/2004 et le 31/12/2024, sans autre filtre, les populations sélectionnées
+sont identiques : Canal+ 2 602, Ciné+ 2 087, France2 686, M6 190 et W9 111.
+Il n'y a aucun changement de membre pour ces cinq filtres.
+
+Sur le périmètre historique où **au moins une** des deux dates est dans cette
+période, 4 918 visas sont rapprochés et 16 ensembles diffèrent :
+
+| Écart avec le legacy | Films | Explication vérifiée dans la source CNC |
+| --- | ---: | --- |
+| AmazonPrime ajouté | 6 | `Prime Video` était perdu par le découpage legacy sur les espaces. |
+| RMC Story au lieu de RMC + STORY | 4 | Le nom composé est désormais conservé. |
+| France4 sans FranceTV supplémentaire | 5 | `FRANCE 4` produisait deux diffuseurs dans le legacy. |
+| France O sans FranceTV parasite | 1 | `France O` était découpé ; l'exclusion de FranceÔ laissait le faux libellé FranceTV. |
+
+Ces 16 écarts sont aussi présents dans la cohorte commune de 4 909 films.
+Ils ne constituent pas une perte de diffuseurs CNC par le nouveau mapping.
+Le rapprochement initial du 13 novembre portait sur 4 914 visas : les instantanés
+source ont évolué ; son décompte de différences textuelles n'est pas un comparatif
+avant/après à population constante.
 
 ## Exécution
 
@@ -189,36 +259,47 @@ et repli CNC. Comme les autres tests SQL de ce module, il nécessite
 
 ## Classification des genres
 
-Le `CASE` de `int_film_genres` classe `Judiciaire` dans `Aventure/Policier/Thriller` et accepte `Epouvante-horreur` avec ou sans accent initial pour `Fantastique/Horreur/SF`. `Péplum` rejoint `Biopic/Guerre/Histoire`. `Divers`, `Erotique` et `Évènement Sportif` conservent chacun une catégorie explicite. Ce mapping couvre les 29 genres distincts observés dans `staging.stg_allocine_films` le 11 novembre 2026. Les nouveaux genres sans correspondance restent nuls et font échouer les tests de présence des tables finales : ajouter leur classement explicitement, sans catégorie de repli « Autre ».
+Le `CASE` de `int_film_genres` classe `Judiciaire` dans `Aventure/Policier/Thriller` et accepte `Epouvante-horreur` avec ou sans accent initial pour `Fantastique/Horreur/SF`. `Péplum` rejoint `Biopic/Guerre/Histoire`. `Divers`, `Erotique` et `Évènement Sportif` conservent chacun une catégorie explicite. Les nouveaux genres sans correspondance restent nuls et font échouer les tests du référentiel final : ajouter leur classement explicitement, sans catégorie de repli « Autre ».
 
-### Associations film-genre manuelles (#57)
+### Corrections manuelles et colonne agrégée (#57, #86)
 
 `fnl_film_genre` réunit `int_film_genres` et `int_fix_film_genres` avec une
 association unique par `(film_id, genre_id)`. Une correction ajoute un genre,
-y compris si le scraping n’en fournit aucun. Elle ne remplace ni ne supprime
-les autres genres du film. Un doublon présent dans les deux sources reste une
-seule association finale.
+y compris sans scraping, sans remplacer les associations existantes.
+`fnl_genre` applique les libellés corrigés de `int_fix_genres` et conserve les
+genres définis uniquement à la main.
 
-Dans l’onglet GSheet `film_genres`, renseigner `FILM ID`, `GENRE ID`,
+`fnl_films.genre` agrège ces associations et leurs libellés corrigés, triés et
+dédupliqués, avec le séparateur `, `. L'agrégation précède la jointure aux films :
+plusieurs genres ne multiplient pas les lignes de `fnl_films`. Un film sans
+genre conserve une valeur nulle. Les tables d'associations et de référence
+restent disponibles pour compatibilité et pour contrôler les corrections.
+
+Dans l'onglet GSheet `film_genres`, renseigner `FILM ID`, `GENRE ID`,
 `UPDATED DATE` et `UPDATED BY`. Utiliser les UUID existants de `fnl_films`
 et `fnl_genre`, puis synchroniser Airbyte et exécuter la phase 2 dbt. Aucun
-nouveau scraping n’est nécessaire. Les règles d’admission du staging restent
-inchangées, notamment son exclusion actuelle des lignes signées Hugo Laurens.
-Les tests bloquants vérifient les deux références, l’unicité des associations
-et la conservation des corrections admises. Une référence invalide n’est pas
-filtrée silencieusement ; le test signale l’erreur.
+nouveau scraping n'est nécessaire. Les règles d'admission du staging restent
+inchangées, notamment son exclusion des lignes signées Hugo Laurens.
+Les tests bloquants vérifient les références, l'unicité des associations et
+la conservation des corrections admises. Une référence invalide déclenche
+une erreur ; elle n'est pas validée par sa seule absence de la colonne agrégée.
 
-Le test PostgreSQL
-`test_manual_film_genres_added_without_replacing_scraped_associations` couvre
-l’ajout sans scraping, l’ajout d’un second genre, les doublons, l’absence de
-correction et les sources vides. Il utilise les mêmes prérequis read-only que
-les autres tests de `tests/ingestion/test_dbt_manual_recovery.py`.
+Le module `tests/ingestion/test_dbt_manual_recovery.py` vérifie l'ajout sans
+scraping, les doublons, les libellés corrigés, les genres uniquement manuels et
+la conservation d'une ligne par film. Il utilise PostgreSQL en transaction
+read-only avec `DBT_TEST_SSH` et `DBT_TEST_DATABASE`.
 
-Après déploiement, reconstruire le modèle et ses dépendances avec
-`dbt build --profile ric --project-dir /app/ingestion/dbt --select +fnl_film_genre`.
-Le build de phase 2 habituel inclut aussi cette sélection. Pour revenir en
-arrière, restaurer le SQL précédent puis reconstruire le modèle : les ajouts
-manuels resteront dans la source, mais ne seront plus publiés.
+Après déploiement, reconstruire les modèles avec le build de phase 2 habituel,
+ou `dbt build --profile ric --project-dir /app/ingestion/dbt --select +fnl_films`.
+Dans les questions Metabase de budgets moyens, supprimer les jointures vers
+`fnl_film_genre` et `fnl_genre`, puis filtrer directement `fnl_films.genre`
+avec « contient ». Changer uniquement le filtre ne supprime pas les occurrences
+créées par une jointure encore présente. Pour plusieurs genres, conserver la
+logique OU/ET métier attendue. Comparer les résultats sans genre, avec un genre
+et avec plusieurs genres au même grain, aux mêmes périodes et populations.
+Ne pas employer `AVG(DISTINCT budget)` : deux films peuvent partager un budget.
+La publication et la vérification Metabase constituent une étape distincte du
+correctif dbt ; elles ne sont pas effectuées par le build.
 
 ## Correctif temporaire des noms (#41)
 
@@ -241,6 +322,34 @@ en arrière, rétablir le SQL précédent puis reconstruire les mêmes modèles.
 Le test SQL `test_last_name_preserves_remaining_words_in_all_credit_categories`
 couvre les sept catégories, les particules, espaces, mononymes et la stabilité
 des identifiants avec les prérequis PostgreSQL décrits ci-dessous.
+
+## Noms complets finaux (#90)
+
+`fnl_credit_holders.full_name` privilégie les corrections de `first_name` et
+`last_name` non vides du GSheet. Une correction partielle conserve l'autre
+composante source. Les personnes ajoutées uniquement à la main utilisent leurs
+composantes disponibles, sans espaces de bord ni séparateur superflu.
+
+Sans correction de nom, le nom complet source est conservé, même si les champs
+séparés sont incomplets. Une correction de genre ou de date de naissance ne
+recompose donc pas le nom. Un nom complet source absent ou vide se replie sur
+les composantes source disponibles. Sans aucune composante, le résultat est nul.
+Les sociétés conservent `legal_name` ; leur `full_name` reste nul.
+Les identifiants et les associations de crédits ne sont pas recalculés.
+
+Les champs historiques `first_name` et `last_name` restent exposés. Aucun champ
+GSheet supplémentaire n'est requis. Cette priorité permet la compatibilité avec
+les corrections existantes ; elle ne constitue pas une migration du backend
+historique `ric_*` vers les modèles dbt.
+
+Le test `test_full_name_preserves_corrections_and_manual_people` couvre les
+corrections complètes et partielles, les personnes uniquement manuelles, les
+mononymes, particules, accents, apostrophes, traits d'union, espaces insécables,
+valeurs vides, corrections sans nom et sociétés. Après déploiement, reconstruire
+`fnl_credit_holders` via le build de phase 2 ou `dbt build --select +fnl_credit_holders`.
+Aucun scraping supplémentaire n'est nécessaire. Pour revenir au comportement
+précédent, restaurer le SQL puis reconstruire ce modèle ; les sources restent
+inchangées.
 
 ## Qualité des identifiants
 
@@ -745,3 +854,17 @@ rester uniques. Seules les descriptions, questions et dispositions Metabase sont
 modifiées ; la consultation ne déclenche aucune ingestion. L'accès dépend des
 permissions de la collection Operations, sans partage public créé par ce script.
 Les droits de sa sous-collection Trigger se contrôlent séparément.
+
+## Suivre Mubi CNC
+
+`ops.v_mubi_pipeline_status` expose une ligne du référentiel par visa, avec ID Mubi,
+état d’éligibilité, dernier essai et dernier succès. Les vues de suivi n’attribuent
+aucun prix aux parties d’un programme partagé. Le dashboard déduplique les compteurs
+de films par ID Mubi ; les lignes sans ID restent comptées par visa.
+Le graphique déduplique les tentatives par run/ID/horodatage.
+
+Le [guide Mubi CNC](../scraping/mubi_cnc/README.md#piloter-depuis-metabase) décrit
+la publication idempotente, les filtres, les deux boutons et le verrou global.
+Le flow reconstruit `+tag:phase2` après une collecte sans erreur technique.
+Les données Mubi restent dans les modèles staging/intermediate existants ;
+aucune nouvelle intégration dans les tables finales métier n’est présumée.

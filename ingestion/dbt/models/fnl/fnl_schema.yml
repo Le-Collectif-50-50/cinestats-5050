@@ -37,12 +37,14 @@ models:
         description: "Budget du film en euros."
       - name: budget_category
         description: "Tranche de budget du film (ex: petit, moyen, grand budget)."
+      - name: genre
+        description: "Genres scrapés et ajoutés manuellement, avec les libellés corrigés, concaténés par virgule et dédupliqués."
       - name: genre_category
         description: "Genre cinématographique du film."
       - name: broadcasters
         description: "Chaîne texte des diffuseurs TV associés au film, séparés par une virgule."
       - name: is_french_financed
-        description: "Vrai si la France finance au moins 50% du budget du film."
+        description: "Vrai si la part de financement de la France est égale à la part la plus élevée parmi les pays contributeurs, y compris à égalité."
       - name: has_parity_bonus
         description: "Vrai si le film a bénéficié du bonus parité CNC, récompensant les productions respectant l'égalité femmes-hommes."
       - name: has_eof
@@ -96,6 +98,8 @@ models:
           - unique
       - name: type
         description: "Type de crédit (personne physique, société, etc.)."
+      - name: full_name
+        description: "Nom complet de la personne : corrections prénom/nom prioritaires, puis nom complet source. Inclut les personnes manuelles ; nul pour les sociétés, qui utilisent legal_name."
       - name: first_name
         description: "Prénom de la personne créditée."
       - name: last_name
@@ -139,6 +143,26 @@ models:
                 to: ref('fnl_credit_holders')
                 field: credit_holder_id
 
+  - name: fnl_role
+    description: >
+      Table finale référençant les rôles occupés sur les productions cinématographiques,
+      avec leur libellé inclusif et leur statut de rôle clé, utilisés pour l'analyse
+      des inégalités de représentation par métier.
+    columns:
+      - name: role_id
+        description: "Identifiant unique du rôle."
+        tests:
+          - not_null
+          - unique
+      - name: role_name
+        description: "Nom du rôle tel qu'issu de la source d'origine (Allociné/CNC)."
+        tests:
+          - not_null
+      - name: role_inclusive_name
+        description: "Libellé inclusif (écriture épicène) du rôle, dérivé du nom d'origine."
+      - name: is_key_role
+        description: "Indique si le rôle est considéré comme un rôle clé (ex: réalisateur·rice, scénariste, directeur·rice de la photographie) pour l'analyse des inégalités."
+
   - name: fnl_film_genre
     description: "Table finale associant chaque film à ses genres cinématographiques, incluant les ajouts manuels sans remplacer les associations scrapées."
     columns:
@@ -171,23 +195,3 @@ models:
         description: "Nom du genre cinématographique, corrigé si applicable."
         tests:
           - not_null
-
-  - name: fnl_role
-    description: >
-      Table finale référençant les rôles occupés sur les productions cinématographiques,
-      avec leur libellé inclusif et leur statut de rôle clé, utilisés pour l'analyse
-      des inégalités de représentation par métier.
-    columns:
-      - name: role_id
-        description: "Identifiant unique du rôle."
-        tests:
-          - not_null
-          - unique
-      - name: role_name
-        description: "Nom du rôle tel qu'issu de la source d'origine (Allociné/CNC)."
-        tests:
-          - not_null
-      - name: role_inclusive_name
-        description: "Libellé inclusif (écriture épicène) du rôle, dérivé du nom d'origine."
-      - name: is_key_role
-        description: "Indique si le rôle est considéré comme un rôle clé (ex: réalisateur·rice, scénariste, directeur·rice de la photographie) pour l'analyse des inégalités."

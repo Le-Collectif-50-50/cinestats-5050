@@ -49,3 +49,9 @@ seeds:
         evidence_run_id: text
         evidence_record_hash: text
         reviewed_at: date
+    cnc_broadcaster_aliases:
+      +column_types:
+        priority: integer
+        alias_pattern: text
+        broadcaster_name: text
+        is_excluded: boolean

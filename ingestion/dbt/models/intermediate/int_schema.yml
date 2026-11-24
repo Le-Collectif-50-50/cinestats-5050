@@ -23,7 +23,7 @@ models:
       - name: producer
         description: "Liste des producteurs du film."
       - name: broadcasters
-        description: "Chaîne texte des diffuseurs payants et gratuits, séparés par une virgule, avec normalisation des noms (France5 → FranceTV, suppression de FranceÔ)."
+        description: "Diffuseurs payants et gratuits normalisés via cnc_broadcaster_aliases, dédupliqués et triés ; France5 → FranceTV, FranceÔ exclue. Les inconnus sont conservés et signalés dans ops."
       - name: has_eof
         description: "Indique si le film bénéficie du dispositif EOF."
       - name: has_parity_bonus
@@ -240,6 +240,21 @@ models:
         tests:
           - not_null
 
+  - name: int_fix_roles
+    description: "Table intermédiaire issue de stg_fix_roles. Expose les corrections manuelles sur les rôles, sans les métadonnées techniques. En cas de corrections multiples sur un même id, seule la plus récente (order by updated_date DESC) est conservée."
+    columns:
+      - name: id
+        description: "Identifiant unique du rôle."
+        tests:
+          - not_null
+          - unique
+      - name: name
+        description: "Nom du rôle."
+      - name: is_key_role
+        description: "Indique si le rôle est considéré comme un rôle clé dans une production."
+      - name: inclusive_name
+        description: "Nom inclusif du rôle pour harmonisation des données."
+
   - name: int_fix_film_genres
     description: "Table intermédiaire issue de stg_fix_film_genres. Expose les corrections manuelles sur les associations film-genre, sans les métadonnées techniques. En cas de corrections multiples sur une même association (film_id, genre_id), seule la plus récente (order by updated_date DESC) est conservée."
     columns:
@@ -263,17 +278,17 @@ models:
       - name: name
         description: "Nom du genre cinématographique."
 
-  - name: int_fix_roles
-    description: "Table intermédiaire issue de stg_fix_roles. Expose les corrections manuelles sur les rôles, sans les métadonnées techniques. En cas de corrections multiples sur un même id, seule la plus récente (order by updated_date DESC) est conservée."
+  - name: int_cnc_broadcasters
+    description: "Découpage et mapping des valeurs CNC distinctes, avec provenance payante/gratuite et conservation des tokens inconnus."
     columns:
-      - name: id
-        description: "Identifiant unique du rôle."
+      - name: broadcaster_type
         tests:
-          - not_null
-          - unique
-      - name: name
-        description: "Nom du rôle."
-      - name: is_key_role
-        description: "Indique si le rôle est considéré comme un rôle clé dans une production."
-      - name: inclusive_name
-        description: "Nom inclusif du rôle pour harmonisation des données."
+          - accepted_values:
+              arguments:
+                values: ['paid', 'free']
+      - name: source_value
+        tests: [not_null]
+      - name: token
+        tests: [not_null]
+      - name: broadcaster_name
+        tests: [not_null]

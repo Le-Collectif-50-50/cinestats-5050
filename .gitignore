@@ -191,3 +191,5 @@ mubi_festivals_debug.csv
 
 # Exports SQL et logs des backfills locaux
 ingestion/scraping/allocine/local-runs/
+
+ingestion/scraping/mubi_cnc/local-runs/

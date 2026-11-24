@@ -15,6 +15,7 @@
 | 3 | 2026-10-11 | Joel Teixeira | Restauration de SELECT pour scraper_user et persistance de la lecture après recréation des tables Airbyte. Configuration requise pour Airbyte activé par défaut et migration du fichier .env existant. |
 | 4 | 2026-11-13 | Joel Teixeira | Dépendance libatomic1 persistante dans l'image Prefect et contrôle du démarrage du pilote Playwright au build. Déploiement Allociné manuel et retrait des indications de scraping Mubi planifié. Quatre déploiements au démarrage, ingestion sans scraping et limites manuelles des scrapers. Diagnostic des timeouts casting Allociné (issue 50), isolation du navigateur et procédure de reprise. |
 | 5 | 2026-11-16 | Joel Teixeira | Reprise automatique de Prefect après reboot de sécurité, attente de l'API et procédure de contrôle après redémarrage (issue 71). |
+| 6 | 2026-11-16 | Joel Teixeira | Cinquième déploiement manuel de matching MUBI/TMDB et préparation de ses tables ops. |
 
 Déploiement de la stack d'ingestion (Prefect, dbt, scrapers, Airbyte) sur le VPS `data` (Canada, 4 vCPU / 8 Go). Le [runbook de setup ingestion](ingestion-runbook-infra-setup-dbt-core-airbyte-remote-postgres.md) décrit le parcours général ; celui-ci consigne les adaptations du VPS. Pour une livraison des changements fusionnés, utiliser explicitement `origin/main` comme indiqué ci-dessous.
 
@@ -95,6 +96,7 @@ Au démarrage, `ingestion/prefect/start_worker.sh` publie :
 - `lancer-ingestion-complete` : Airbyte puis les deux phases dbt, sans scraping ;
 - `lancer-scrapping-allocine` : manuel, aucun calendrier, `max_films=10`, concurrence 1 ;
 - `lancer-scrapping-mubi` : Mubi CNC manuel, aucun calendrier, `max_films=10` films source et leurs éditions associées, concurrence 1 ;
+- `rechercher-identifiants-manquants` : matching MUBI/TMDB manuel, propositions dans `ops`, `max_films=10`, concurrence 1 ;
 - `traiter-les-demandes-ingestion` : poller toutes les 5 minutes par défaut, qui peut déclencher l’ingestion complète selon les demandes en base.
 
 Aucun scraping Mubi n’est planifié par ce script. Pour publier les changements, attendre la fin des runs actifs, puis recréer le worker. Le [guide ingestion](../../ingestion/README.md#publier-et-lancer-le-scraping-seul) donne les commandes de contrôle et de lancement Allociné. Utiliser `sudo docker` sur le VPS.
@@ -134,7 +136,7 @@ sudo docker compose ps
 ```
 
 Vérifier `restart=unless-stopped`, serveur sain et worker connecté à
-`ingestion-pool`. Contrôler les quatre déploiements : seul le poller a un
+`ingestion-pool`. Contrôler les cinq déploiements : seul le poller a un
 calendrier actif. Ne pas utiliser `docker compose down` comme test de reprise :
 cette commande supprime les conteneurs. Un arrêt explicite avec `docker stop`
 les laisse aussi arrêtés après reboot avec `unless-stopped`.
@@ -145,7 +147,7 @@ reconnexion SSH, contrôler sans lancer de commande `compose up` :
 
 - nouveau boot système, Docker et conteneurs démarrés automatiquement ;
 - API saine et worker connecté à `ingestion-pool` ;
-- quatre déploiements et calendrier du poller conservés ;
+- cinq déploiements et calendrier du poller conservés ;
 - premier run **planifié** du poller terminé en `Completed` après le boot ;
 - Airbyte et Authentik revenus à leur état sain.
 
@@ -223,14 +225,22 @@ Sans noms de connexions ou credentials valides, la phase Airbyte échoue avant d
 
 ### Migration des déploiements ingestion et scraping
 
-Le worker recrée ses quatre déploiements gérés à chaque démarrage et supprime les
-anciens noms. Attendre la fin des runs avant sa recréation. Seul le poller garde
+Le worker recrée les quatre déploiements historiques et supprime les anciens noms.
+Le matching est mis à jour en place pour conserver les runs ponctuels planifiés. Attendre la fin des runs avant sa recréation. Seul le poller garde
 un calendrier ; les deux scrapers restent manuels et acceptent `max_films`, entier
 strictement positif (10 par défaut). Le poller traduit automatiquement l’ancienne
 valeur `Lancer l'ingestion complete/lancer-ingestion-donnees` du `.env` vers
 `Lancer l'ingestion complete/lancer-ingestion-complete`. Les configs Allociné ne
 sont plus transmises au flow d’ingestion. Le serveur Prefect et Browserless n’ont
 pas besoin d’être recréés pour ce changement de code.
+
+Le cinquième déploiement, `rechercher-identifiants-manquants`, recherche MUBI et
+TMDB depuis les sources `raw` déjà synchronisées. Il reste manuel, avec une
+concurrence limitée à un run ; il ne déclenche ni Airbyte, ni dbt, ni publication
+dans le Google Sheet. Avant le premier run, appliquer le schéma SQL et vérifier
+les droits décrits dans le [guide matching](../../ingestion/scraping/id_matching/README.md#exécuter-avec-prefect).
+Commencer par trois films avec `dry_run=true`, puis enregistrer les propositions
+dans `ops.id_matching_confirmed` et `ops.id_matching_review`.
 
 
 ### Incident 50 — timeouts casting Allociné
