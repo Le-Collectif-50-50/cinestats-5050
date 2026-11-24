@@ -1,0 +1,14 @@
+{
+  "owner": "Le-Collectif-50-50",
+  "repositories": ["cinestats-5050", "cinestats-infra"],
+  "projects": [
+    {
+      "title": "Nouveau module ingestion",
+      "label": "projet: ingestion"
+    },
+    {
+      "title": "Migration vers l’infrastructure Collectif 50/50",
+      "label": "projet: infrastructure"
+    }
+  ]
+}

@@ -1,10 +1,12 @@
 # Suivre les statuts des issues GitHub
 
 **Owner:** Joel Teixeira
-**Dernière révision:** 2026-11-18
+**Dernière révision:** 2026-11-24
 **Status:** actif
 
 Le workflow [Issue status](../../.github/workflows/issue-status.yml) synchronise les labels d’avancement des issues avec leurs PR liées. Les labels de domaine (`dbt`, `bug`, etc.) et les responsables restent inchangés. Les quatre labels `statut: à faire`, `statut: en cours`, `statut: à valider` et `statut: bloqué` doivent exister dans le dépôt.
+
+Les [deux Projects transverses](github-projects.md) utilisent ces labels comme source du champ **Status**. Leur synchronisation dédiée ne modifie pas les labels ni les liens PR–issues.
 
 ## Lier une PR à une issue
 
@@ -57,3 +59,4 @@ Références : [liens PR–issues](https://docs.github.com/en/issues/tracking-yo
 | # | Date | Auteur | Observations |
 | --- | --- | --- | --- |
 | 1 | 2026-11-18 | Joel Teixeira | Synchronisation des statuts par liens natifs PR–issues et procédure de relance. |
+| 2 | 2026-11-24 | Joel Teixeira | Référence de la synchronisation des Projects à partir des labels existants. |
